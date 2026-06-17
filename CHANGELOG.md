@@ -14,6 +14,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Add short `pb` and `pb-web` console-script aliases for `promptbase-export`
+  and `promptbase-export-web`. The long names are unchanged, so existing
+  scripts and the GitHub Action keep working; the aliases just make the tool
+  pleasant to install and run with `uv tool install .` (then `pb @acb`).
 - Add a `/download` link for each generated file in the web UI. The endpoint
   only serves files inside the server's working directory whose names match the
   exporter's own pattern, so it cannot read arbitrary paths or unrelated
@@ -35,6 +39,14 @@ All notable changes to this project will be documented in this file.
 - Drop the PyPI publish workflow. The tool is used by cloning the repository or
   pinning the GitHub Action to a release tag, so it no longer ships a failing
   publish job; see `RELEASE.md` for how to re-add PyPI distribution later.
+
+### Fixed
+
+- Build the wheel reliably when a generated `exports/` directory is present.
+  setuptools' flat-layout auto-discovery treated `exports/` as a second
+  top-level package and aborted with `Multiple top-level packages discovered`,
+  breaking `pip install .` / `uv tool install .` from a working tree that had
+  already produced exports. The package list is now declared explicitly.
 
 ### Internal
 

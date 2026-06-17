@@ -76,16 +76,39 @@ From the project folder you can run the tool as a module straight away:
 python -m promptbase_exporter --help
 ```
 
-Optionally, install it so the `promptbase-export` and `promptbase-export-web`
-commands are available anywhere:
+### Install a command (recommended)
+
+Installing the package puts named commands on your `PATH` so you can drop the
+`python -m promptbase_exporter` prefix. Each install method exposes the same
+commands: `promptbase-export` / `pb` (the exporter) and
+`promptbase-export-web` / `pb-web` (the web UI).
+
+Using [uv](https://docs.astral.sh/uv/) — install it once, run it anywhere:
+
+```bash
+uv tool install .        # from the cloned project folder
+pb --help                # short alias, available in any directory
+pb https://promptbase.com/profile/acb
+```
+
+Or with pip:
 
 ```bash
 python -m pip install -e .
-promptbase-export --help
+pb --help                # or: promptbase-export --help
 ```
 
-> Throughout this README, `python -m promptbase_exporter ...` and
-> `promptbase-export ...` are interchangeable.
+Working inside the project without installing globally? `uv run` uses the
+project's environment:
+
+```bash
+uv run pb @acb --dry-run
+uv run pb-web            # the local web UI
+```
+
+> Throughout this README, `python -m promptbase_exporter ...`,
+> `promptbase-export ...`, and `pb ...` are interchangeable. Likewise
+> `python -m promptbase_exporter.web`, `promptbase-export-web`, and `pb-web`.
 
 ## Quick start
 
