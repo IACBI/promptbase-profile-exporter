@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -147,7 +148,17 @@ def _open_json_with_retry(request: urllib.request.Request) -> list[dict[str, Any
             last_error = exc
             if exc.code not in TRANSIENT_HTTP_STATUS_CODES or attempt == MAX_RETRIES:
                 break
-        except (TimeoutError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        # urlopen only wraps errors from sending the request in URLError; a
+        # dropped connection while awaiting or reading the response surfaces
+        # raw (e.g. RemoteDisconnected, IncompleteRead), so retry those too.
+        except (
+            TimeoutError,
+            ConnectionError,
+            http.client.IncompleteRead,
+            http.client.BadStatusLine,
+            urllib.error.URLError,
+            json.JSONDecodeError,
+        ) as exc:
             last_error = exc
             if attempt == MAX_RETRIES:
                 break

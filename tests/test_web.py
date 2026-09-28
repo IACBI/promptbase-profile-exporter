@@ -5,10 +5,11 @@ from contextlib import redirect_stderr
 from email.message import Message
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from promptbase_exporter.models import Profile, PromptRecord
 from promptbase_exporter.web import (
+    MAX_FORM_BYTES,
     ExportRequest,
     PromptBaseWebHandler,
     WebInputError,
@@ -98,6 +99,15 @@ class WebTests(unittest.TestCase):
         absolute = "C:\\Windows\\Temp" if Path("C:\\").exists() else "/etc"
         with self.assertRaises(WebInputError):
             build_request_config({"profile": "acb", "output_dir": absolute})
+
+    def test_build_request_config_rejects_unc_output_dir(self):
+        with self.assertRaises(WebInputError):
+            build_request_config({"profile": "acb", "output_dir": "//attacker.example/share"})
+
+    def test_build_request_config_rejects_null_byte_output_dir(self):
+        # Would otherwise pass validation and fail later in mkdir as a 500.
+        with self.assertRaises(WebInputError):
+            build_request_config({"profile": "acb", "output_dir": "exports\0x"})
 
     def test_build_request_config_rejects_invalid_prices(self):
         with self.assertRaises(WebInputError):
@@ -247,6 +257,28 @@ class RequestGuardTests(unittest.TestCase):
         self.assertIsNone(handler._reject_unsafe_request())
 
 
+class ReadFormTests(unittest.TestCase):
+    def test_rejects_invalid_content_length(self):
+        # A negative length would make rfile.read() block until EOF.
+        for value in ("-1", "abc"):
+            handler = _make_handler({"Content-Length": value})
+            handler.rfile = io.BytesIO(b"profile=acb")
+            with self.subTest(value=value), self.assertRaises(WebInputError):
+                handler._read_form()
+
+    def test_rejects_oversized_form(self):
+        handler = _make_handler({"Content-Length": str(MAX_FORM_BYTES + 1)})
+        handler.rfile = io.BytesIO(b"")
+        with self.assertRaises(WebInputError):
+            handler._read_form()
+
+    def test_reads_form_body(self):
+        body = b"profile=acb&mode=text"
+        handler = _make_handler({"Content-Length": str(len(body))})
+        handler.rfile = io.BytesIO(body)
+        self.assertEqual(handler._read_form(), {"profile": ["acb"], "mode": ["text"]})
+
+
 class DownloadTests(unittest.TestCase):
     def _handler(self, path, headers=None):
         handler = _make_handler(headers or {"Host": "127.0.0.1:8765"})
@@ -308,6 +340,26 @@ class DownloadTests(unittest.TestCase):
 
             handler._send_download.assert_not_called()
             self.assertEqual(self._status(handler._send_text), 404)
+
+    def test_rejects_unc_path_without_resolving_it(self):
+        # On Windows, resolving //host/share/... opens an SMB connection to
+        # that host, so an escaping path must be refused before resolve().
+        real_resolve = Path.resolve
+        resolved = []
+
+        def tracking_resolve(path, strict=False):
+            resolved.append(str(path))
+            return real_resolve(path, strict)
+
+        handler = self._handler(
+            "/download?file=//attacker.example/share/acb_all_prompts.txt"
+        )
+        with patch.object(Path, "resolve", tracking_resolve):
+            handler._handle_download()
+
+        handler._send_download.assert_not_called()
+        self.assertEqual(self._status(handler._send_text), 404)
+        self.assertFalse(any("attacker.example" in path for path in resolved))
 
     def test_serves_timestamped_export_file(self):
         with TemporaryDirectory() as directory:

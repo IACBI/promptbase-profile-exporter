@@ -11,6 +11,20 @@ All notable changes to this project will be documented in this file.
   "Profile not found" even though the profile and its prompts are public. The
   owner uid is now recovered from any prompt/app/bundle the profile owns when
   the profile document itself lacks the username.
+- Web UI: check that `/download` and output-directory paths stay inside the
+  working directory before resolving them. On Windows, resolving a UNC path
+  such as `//host/share/...` connects to that host over SMB, so any web page
+  could make the local server send the user's NTLM credentials to a server of
+  its choosing through a `/download` link.
+- Web UI: reject a negative or non-numeric `Content-Length` on `POST /export`
+  with a 400. A negative value previously bypassed the form-size cap and made
+  the request thread block until the client disconnected, and a non-numeric
+  one produced a 500. An output directory containing a NUL byte is now also
+  rejected with a 400 instead of failing later as a 500.
+- Retry PromptBase queries when the connection drops while waiting for or
+  reading the response (`RemoteDisconnected`, `IncompleteRead`,
+  `ConnectionResetError`). These previously escaped the retry loop and crashed
+  the CLI with a traceback instead of retrying or reporting a clean error.
 
 ### Added
 
