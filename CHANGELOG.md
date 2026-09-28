@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.8.0 - 2026-09-28
+
 ### Fixed
 
 - Resolve profiles whose PromptBase profile document has no `username` field
