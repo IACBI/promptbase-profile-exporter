@@ -1,521 +1,264 @@
+<a id="top"></a>
 # PromptBase Profile Exporter
 
+Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, or CSV catalogs.
+
 [![tests](https://github.com/IACBI/promptbase-profile-exporter/actions/workflows/tests.yml/badge.svg)](https://github.com/IACBI/promptbase-profile-exporter/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/IACBI/promptbase-profile-exporter)](https://github.com/IACBI/promptbase-profile-exporter/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Export the public prompts on any PromptBase profile into clean catalog files —
-TXT, Markdown, JSON, or CSV.
+**Read this in:** [English](#english) · [Türkçe](#turkce)
 
-Give it a profile URL (or just a username) and it finds that profile's public
-prompts, pulls each prompt's title and description, and writes tidy exports.
-It uses only the Python standard library, needs no login or API key, and reads
-only the same public data the PromptBase website serves.
+---
 
-**Who it's for:** prompt creators who want to back up, audit, share, or publish
-a clear catalog of their PromptBase listings.
+<a id="english"></a>
+## English
 
-```bash
-# No dependencies to install — clone the repo, then run:
-python -m promptbase_exporter https://promptbase.com/profile/acb
-# -> writes exports/acb_all_prompts.txt, acb_text_prompts.txt, acb_image_prompts.txt
-```
+### Overview
 
-## Contents
+Give it a PromptBase profile URL or username, and it collects every approved
+prompt on that profile with its title, description, and listing metadata, and
+writes a tidy catalog. It is useful for backing up your own listings, auditing
+them, or publishing a readable catalog somewhere else.
 
-- [Features](#features)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Usage](#usage)
-- [Filtering and sorting](#filtering-and-sorting)
-- [Output formats](#output-formats)
-- [Prompt groups](#prompt-groups)
-- [Compare and update catalogs](#compare-and-update-catalogs)
-- [Local web UI](#local-web-ui)
-- [GitHub Action](#github-action)
-- [Options reference](#options-reference)
-- [Exit codes](#exit-codes)
-- [Validation](#validation)
-- [How it works](#how-it-works)
-- [Responsible use](#responsible-use)
-- [Development](#development)
-- [Repository structure](#repository-structure)
-- [License](#license)
+It reads the same public data the PromptBase website serves: no login, no API
+key, no browser automation. It is written against the Python standard library
+alone, so there is nothing to install beyond Python itself.
 
-## Features
+The same core ships three ways: a command-line tool, a local web UI, and a
+GitHub Action for scheduled exports.
 
-- Accepts a full profile URL, profile path, username, or `@username`.
-- Resolves the profile automatically through public PromptBase data.
-- Exports the title and description of every approved prompt.
-- Splits output into `all`, `text`, and `image` views (`text-only` and
-  `image-only` aliases included).
-- Writes `txt`, `markdown`, `json`, or `csv`.
-- Filters by domain, model/type, free/paid status, price range, date, or count.
-- Sorts by newest, oldest, title, price, views, sales, downloads, favorites,
-  or rating.
-- Includes richer JSON/CSV metadata (views, sales, downloads, favorites,
-  rating, reviews, and more).
-- Compares current exports against a previous catalog, or refreshes one in place.
-- Ships a local, no-framework web UI and a reusable GitHub Action.
-- Paginates large profiles and retries transient network failures with backoff.
-- Validates output before writing, and uses only the Python standard library.
+### Features
 
-## Installation
+- Accepts a profile URL, a `profile/<name>` path, a username, or `@username`.
+- Writes `txt`, `markdown`, `json`, or `csv`, split into `all`, `text`, and
+  `image` catalogs or as a single file.
+- Filters by domain, prompt type, free/paid, price range, creation date, and
+  count; sorts by date, title, price, views, sales, downloads, favorites, or
+  rating.
+- Compares a fresh export against a previous catalog, rewrites it in place,
+  and can fail a CI job when the catalog drifts.
+- Checks every written file against the expected record count, and stops with
+  a clear error if PromptBase changes its public data model instead of
+  writing a misleading catalog.
 
-You need **Python 3.10 or newer**. There are no third-party dependencies.
+### Requirements
+
+- Python 3.10 or newer
+- Network access to `firestore.googleapis.com`
+
+### Installation
 
 ```bash
-python --version   # confirm 3.10+
 git clone https://github.com/IACBI/promptbase-profile-exporter.git
 cd promptbase-profile-exporter
+uv tool install .            # or: python -m pip install -e .
 ```
 
-From the project folder you can run the tool as a module straight away:
+This puts two commands on your `PATH`: `pb` for exports and `pb-web` for the
+web UI (long forms: `promptbase-export` and `promptbase-export-web`). Without
+installing, run `python -m promptbase_exporter` from the project folder
+instead of `pb`.
+
+### Usage
 
 ```bash
-python -m promptbase_exporter --help
+pb https://promptbase.com/profile/acb     # all, text, and image catalogs as TXT in exports/
+pb @acb --dry-run                         # show what would be written, write nothing
+pb @acb --mode all --format json          # one JSON catalog with full metadata
+pb @acb --type claude --paid-only --sort views --limit 25
+pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a catalog in place
 ```
 
-### Install a command (recommended)
-
-Installing the package puts named commands on your `PATH` so you can drop the
-`python -m promptbase_exporter` prefix. Each install method exposes the same
-commands: `promptbase-export` / `pb` (the exporter) and
-`promptbase-export-web` / `pb-web` (the web UI).
-
-Using [uv](https://docs.astral.sh/uv/) — install it once, run it anywhere:
-
-```bash
-uv tool install .        # from the cloned project folder
-pb --help                # short alias, available in any directory
-pb https://promptbase.com/profile/acb
-```
-
-Or with pip:
-
-```bash
-python -m pip install -e .
-pb --help                # or: promptbase-export --help
-```
-
-Working inside the project without installing globally? `uv run` uses the
-project's environment:
-
-```bash
-uv run pb @acb --dry-run
-uv run pb-web            # the local web UI
-```
-
-> Throughout this README, `python -m promptbase_exporter ...`,
-> `promptbase-export ...`, and `pb ...` are interchangeable. Likewise
-> `python -m promptbase_exporter.web`, `promptbase-export-web`, and `pb-web`.
-
-## Quick start
-
-Export a profile with default settings:
-
-```bash
-python -m promptbase_exporter https://promptbase.com/profile/acb
-```
-
-This creates an `exports/` folder containing three TXT files (the default
-`--mode split`):
+The default run creates three files:
 
 ```text
-exports/acb_all_prompts.txt     # every approved prompt
-exports/acb_text_prompts.txt    # text-domain prompts only
-exports/acb_image_prompts.txt   # image-domain prompts only
+exports/acb_all_prompts.txt
+exports/acb_text_prompts.txt
+exports/acb_image_prompts.txt
 ```
 
-Preview what would be exported without writing anything:
+Prefer a browser? `pb-web` starts a local UI at <http://127.0.0.1:8765/> with
+the export options as a form and a download link for each file.
 
-```bash
-python -m promptbase_exporter @acb --dry-run
-```
-
-## Usage
-
-The only required argument is the profile, given as a URL, path, username, or
-`@username`. Everything else has a sensible default — see the
-[Options reference](#options-reference) for the full list.
-
-Choose which files to write with `--mode`:
-
-```bash
-python -m promptbase_exporter @acb --mode all      # one combined file
-python -m promptbase_exporter @acb --mode text     # text prompts only
-python -m promptbase_exporter @acb --mode image    # image prompts only
-python -m promptbase_exporter @acb --mode split    # all + text + image (default)
-```
-
-`text-only` and `image-only` are accepted aliases for `text` and `image`.
-
-Pick an output format and directory:
-
-```bash
-python -m promptbase_exporter @acb --format markdown          # GitHub-readable catalog
-python -m promptbase_exporter @acb --mode all --format json   # for another tool
-python -m promptbase_exporter @acb --mode text --format csv   # for spreadsheets
-python -m promptbase_exporter @acb --mode all --output-dir my_exports
-```
-
-Control the console output:
-
-```bash
-python -m promptbase_exporter @acb --verbose   # print extra filtering details
-python -m promptbase_exporter @acb --quiet      # suppress normal output
-```
-
-Inspect a profile without writing files:
-
-```bash
-python -m promptbase_exporter @acb --list-domains   # domain counts, then exit
-python -m promptbase_exporter @acb --list-types     # type counts, then exit
-```
-
-Create repeatable, timestamped backups:
-
-```bash
-python -m promptbase_exporter @acb --timestamp-filenames
-# -> exports/acb_all_prompts_20260101_120000.txt, ...
-```
-
-## Filtering and sorting
-
-Filters run **before** `--mode` splits the output, so they narrow the prompt set
-first; sorting is applied afterward, just before writing.
-
-```bash
-python -m promptbase_exporter @acb --type claude --mode text       # only Claude text prompts
-python -m promptbase_exporter @acb --paid-only --min-price 2 --max-price 6
-python -m promptbase_exporter @acb --since 2026-01-01 --until 2026-12-31
-python -m promptbase_exporter @acb --sort views --limit 25         # 25 most-viewed
-```
-
-Available filters: `--domain`, `--type`, `--free-only`, `--paid-only`,
-`--min-price`, `--max-price`, `--since`, `--until`, `--limit`.
-`--since`/`--until` accept a date (`YYYY-MM-DD`) or an ISO datetime; a bare date
-is treated as UTC.
-
-Sort options for `--sort`: `newest` (default), `oldest`, `title`, `price`,
-`views`, `sales`, `downloads`, `favorites`, `rating`.
-
-A combined example — paid GPT prompts as JSON, newest first:
-
-```bash
-python -m promptbase_exporter @acb --mode all --format json --type gpt --paid-only
-```
-
-## Output formats
-
-The default `.txt` format uses a simple numbered layout:
-
-```text
-1.
-Title: Example Prompt Title
-Description:
-The public PromptBase description appears here.
-
-2.
-Title: Another Prompt
-Description:
-Another public description appears here.
-```
-
-Markdown output is designed for GitHub-readable catalogs. JSON and CSV output
-include the full metadata set, in this field order:
-
-```text
-title, description, slug, url, type, domain, created, created_iso, price,
-discount, views, sales, downloads, favorites, rating, reviews
-```
-
-## Prompt groups
-
-`--mode` groups prompts by their PromptBase `domain`:
-
-- `text` — prompts where `domain` is `text`.
-- `image` — prompts where `domain` is `image`.
-- `all` — every approved prompt for the profile, including text, image, video,
-  or any other domain present.
-
-Each group is sorted newest-to-oldest by creation time by default.
-
-## Compare and update catalogs
-
-Compare the current profile against a previously exported catalog to see what
-changed. The comparison report lists added, removed, and changed prompts.
-
-```bash
-# Print a diff against an existing export:
-python -m promptbase_exporter @acb --mode all --format json \
-  --compare exports/acb_all_prompts.json
-
-# Also write the report to a file:
-python -m promptbase_exporter @acb --mode all \
-  --compare exports/acb_all_prompts.json --diff-output exports/catalog-diff.md
-```
-
-Refresh an existing catalog in place — this compares against the current file,
-then rewrites it with the latest prompts:
-
-```bash
-python -m promptbase_exporter @acb --mode all --update-file exports/acb_all_prompts.json
-```
-
-Write a single export to an exact path (instead of the generated filename).
-Existing files are protected unless you pass `--overwrite`:
-
-```bash
-python -m promptbase_exporter @acb --mode text \
-  --output-file exports/text-prompts.csv --format csv
-```
-
-For CI, make catalog changes fail the command with [exit code `2`](#exit-codes):
-
-```bash
-python -m promptbase_exporter @acb --mode all \
-  --compare exports/acb_all_prompts.json --fail-on-diff
-```
-
-> `--compare`, `--update-file`, and `--output-file` require an explicit
-> single-output `--mode` (`all`, `text`, or `image`), not `split`. When an
-> `--update-file` run cannot write its requested `--diff-output` report, it
-> aborts with exit code `1` and leaves the existing catalog **unchanged**.
-
-## Local web UI
-
-A small built-in web UI lets you run exports from the browser:
-
-```bash
-python -m promptbase_exporter.web      # or: promptbase-export-web
-```
-
-Then open <http://127.0.0.1:8765/>. Change the bind address or port with
-`--host` and `--port`:
-
-```bash
-promptbase-export-web --host 127.0.0.1 --port 9000
-```
-
-After an export, each generated file gets a **Download** link so you can save it
-straight from the browser without hunting for it on disk.
-
-### Web UI security model
-
-The web UI is intended for **local, single-user** use:
-
-- It binds to `127.0.0.1` (loopback) by default and is unauthenticated. The
-  `/export` endpoint fetches remote data and writes files, so do not expose it
-  to untrusted networks. Passing `--host 0.0.0.0` prints a warning because it
-  makes that endpoint reachable by other hosts.
-- Requests to `/export` are checked for a matching `Host` header and a
-  same-origin `Origin`/`Sec-Fetch-Site`, mitigating CSRF and DNS-rebinding from
-  pages opened in your browser.
-- Exports are confined to the directory the server was started in. Absolute
-  paths and `..` traversal in the "Output directory" field are rejected. (The
-  CLI, which you run yourself, still accepts arbitrary paths.) Paths are checked
-  before they touch the filesystem, so a network path such as `//host/share` is
-  refused without the server ever contacting that host.
-- The `/download` endpoint only serves files inside that same directory whose
-  names match the exporter's own pattern
-  (`<username>_<mode>_prompts[...].{txt,md,json,csv}`). It cannot read arbitrary
-  files — not even an unrelated `secrets.json` in the working directory — even
-  though it is unauthenticated.
-
-## GitHub Action
-
-This repository is also a composite GitHub Action for scheduled or on-demand
-catalog exports:
+To export on a schedule, use the GitHub Action:
 
 ```yaml
 - uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: https://promptbase.com/profile/acb
-    mode: split
     format: markdown
-    output-dir: exports
 ```
 
-See [docs/github-action.md](docs/github-action.md) for the full input reference,
-scheduled exports, artifact uploads, and workflows that commit updated catalogs
-back to a repository.
+Further reading:
 
-## Options reference
+- [Command-line reference](docs/cli.md): every option, output formats,
+  catalog comparison, exit codes
+- [Web UI](docs/web-ui.md): running the local UI and its security model
+- [GitHub Action](docs/github-action.md): inputs, scheduled exports,
+  committing catalogs back to a repository
+- [Changelog](CHANGELOG.md)
 
-Run `python -m promptbase_exporter --help` for the authoritative list. The
-positional `profile` argument is required; every option below is optional.
+### Configuration
 
-| Option | Default | Description |
+Everything is set per run with command-line options; there is no config file.
+The ones you will reach for most:
+
+| Option | Default | Purpose |
 | --- | --- | --- |
-| `profile` (positional) | — | PromptBase profile URL, path, username, or `@username`. **Required.** |
-| `-m`, `--mode` | `split` | Which files to write: `split` (all + text + image), `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
-| `-o`, `--output-dir` | `exports` | Directory where generated files are written. |
-| `-f`, `--format` | `txt` | Output format: `txt`, `markdown`, `json`, or `csv`. Inferred from the extension when `--output-file`/`--update-file` is used. |
-| `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |
-| `--domain` | — | Comma-separated domain filter, e.g. `text,image,video`. |
-| `--type` | — | Comma-separated PromptBase type filter, e.g. `gpt,claude`. |
-| `--free-only` | — | Keep only free prompts. Mutually exclusive with `--paid-only`. |
-| `--paid-only` | — | Keep only paid prompts. Mutually exclusive with `--free-only`. |
-| `--min-price` | — | Keep prompts priced at or above this amount. |
-| `--max-price` | — | Keep prompts priced at or below this amount. |
-| `--since` | — | Keep prompts created on or after this date or ISO datetime. |
-| `--until` | — | Keep prompts created on or before this date or ISO datetime. |
-| `--limit` | — | Keep only the first N prompts after filtering and sorting. |
-| `--allow-missing-descriptions` | off | Write files even if some prompt descriptions are missing. |
-| `--timestamp-filenames` | off | Append `YYYYMMDD_HHMMSS` to generated filenames. |
-| `--output-file` | — | Write a single export to this exact path. Requires `--mode all`, `text`, or `image`. |
-| `--overwrite` | off | Allow `--output-file` to replace an existing file. |
-| `--compare` | — | Compare against an existing JSON/CSV/TXT/Markdown export. |
-| `--diff-output` | — | Write the comparison report to this path. Requires `--compare` or `--update-file`. |
-| `--fail-on-diff` | off | Exit with code `2` when the comparison finds added, removed, or changed records. |
-| `--update-file` | — | Compare against an existing export and rewrite it in place. Requires `--mode all`, `text`, or `image`. |
-| `--dry-run` | off | Fetch, filter, and validate without writing files. |
-| `--list-domains` | off | Print domain counts after filters, then exit. |
-| `--list-types` | off | Print PromptBase type counts after filters, then exit. |
-| `--quiet` | off | Suppress normal command output. Mutually exclusive with `--verbose`. |
-| `--verbose` | off | Print extra filtering details. Mutually exclusive with `--quiet`. |
-| `--version` | — | Print the version and exit. |
-| `--help` | — | Print help and exit. |
+| `--mode` | `split` | `split` (all + text + image), `all`, `text`, or `image` |
+| `--format` | `txt` | `txt`, `markdown`, `json`, or `csv` |
+| `--output-dir` | `exports` | Where generated files go |
+| `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, `rating` |
+| `--domain`, `--type` | none | Comma-separated filters, e.g. `--type gpt,claude` |
+| `--since`, `--until` | none | Creation-date range, `YYYY-MM-DD` or ISO datetime (UTC) |
 
-The web UI command, `promptbase-export-web`, accepts `--host` (default
-`127.0.0.1`), `--port` (default `8765`), and `--version`.
+The command exits with `0` on success, `1` on any error, and `2` when
+`--fail-on-diff` finds catalog changes. The
+[command-line reference](docs/cli.md) documents every option.
 
-## Exit codes
+### Contributing
 
-The `promptbase-export` command uses these exit codes so it can be scripted in CI:
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers the development setup, the checks CI runs, and the pull-request
+checklist. Please report security issues privately as described in
+[SECURITY.md](SECURITY.md).
 
-| Code | Meaning |
-| ---- | ------- |
-| `0` | Success (including a clean `--compare` with no differences). |
-| `1` | Error: invalid arguments, profile not found, no matching prompts, missing descriptions without `--allow-missing-descriptions`, or a write/validation failure (including a diff report that could not be written). |
-| `2` | `--fail-on-diff` was set and `--compare`/`--update-file` found added, removed, or changed records. |
+Only export profiles and data you are allowed to use, and respect PromptBase's
+terms.
 
-Use code `2` to gate a pipeline on catalog drift; the GitHub Action exposes this
-through its `fail-on-diff` input. Code `1` and code `2` stay distinct — an
-operational failure never masquerades as drift, and a failed diff write never
-overwrites an `--update-file` catalog.
+### License
 
-## Validation
+[MIT](LICENSE) © 𝓐.𝓒.𝓑
 
-Before writing files, the tool checks that:
+[⬆ Back to top](#top)
 
-- the profile exists,
-- approved prompts were found,
-- prompt details were matched by slug when available,
-- output records are sorted newest to oldest, and
-- written files contain the expected number of records.
+---
 
-If descriptions are missing for any prompt, the command exits non-zero unless
-`--allow-missing-descriptions` is used.
+<a id="turkce"></a>
+## Türkçe
 
-The exporter also checks for expected public data fields. If PromptBase changes
-its public data model, the command reports a schema-change error instead of
-silently producing a misleading catalog.
+### Genel Bakış
 
-## How it works
+Bir PromptBase profilinin adresini ya da kullanıcı adını verirsiniz; araç o
+profildeki onaylı tüm prompt'ları başlık, açıklama ve ilan bilgileriyle
+toplayıp düzenli bir katalog dosyasına yazar. Kendi ilanlarınızı yedeklemek,
+gözden geçirmek ya da okunaklı bir katalog olarak başka bir yerde yayımlamak
+için kullanışlıdır.
 
-PromptBase is a dynamic site backed by public Firebase/Firestore data. This tool
-reads the same public data used by the profile and prompt pages:
+PromptBase sitesinin herkese açık olarak sunduğu veriyi okur; giriş yapmanız,
+API anahtarı almanız ya da tarayıcı otomasyonu kurmanız gerekmez. Yalnızca
+Python standart kütüphanesiyle yazıldığı için Python dışında bir şey kurmanız
+da gerekmez.
 
-1. Extract the username from the profile input.
-2. Resolve the profile document and user id.
-3. Fetch approved prompt items for that user id.
-4. Fetch matching prompt detail documents.
-5. Merge title, slug, type, domain, creation time, and description.
-6. Apply user-selected filters and sorting.
-7. Write clean exports in the requested format.
+Aynı çekirdek üç şekilde gelir: komut satırı aracı, yerel bir web arayüzü ve
+zamanlanmış dışa aktarımlar için bir GitHub Action.
 
-No login, API key, browser automation, or paid account is required.
+### Özellikler
 
-## Responsible use
+- Profil adresi, `profile/<ad>` yolu, kullanıcı adı ya da `@kullanıcıadı`
+  kabul eder.
+- `txt`, `markdown`, `json` veya `csv` yazar; çıktıyı `all`, `text` ve `image`
+  kataloglarına ayırabilir ya da tek dosya üretebilir.
+- Alan (domain), prompt türü, ücretsiz/ücretli, fiyat aralığı, oluşturulma
+  tarihi ve adet ile filtreler; tarih, başlık, fiyat, görüntülenme, satış,
+  indirme, favori veya puana göre sıralar.
+- Yeni dışa aktarımı önceki bir katalogla karşılaştırır, dosyayı yerinde
+  günceller ve katalog değiştiğinde CI işini başarısız sayabilir.
+- Yazılan her dosyadaki kayıt sayısını doğrular. PromptBase herkese açık veri
+  yapısını değiştirirse yanıltıcı bir katalog yazmak yerine açık bir hatayla
+  durur.
 
-Only export profiles and data you are allowed to use. This project is intended
-for public PromptBase listing metadata and personal backup/catalog workflows.
-PromptBase can change its public data model at any time, which may require
-updates to this tool. See [SECURITY.md](SECURITY.md) for the security policy and
-how to report issues.
+### Gereksinimler
 
-## Development
+- Python 3.10 veya üzeri
+- `firestore.googleapis.com` adresine ağ erişimi
 
-Install the dev tools, then run the lint, type, and test checks:
+### Kurulum
 
 ```bash
-python -m pip install -e ".[dev]"
-python -m ruff check .
-python -m mypy
-python -m coverage run -m unittest discover -s tests
-python -m coverage report
+git clone https://github.com/IACBI/promptbase-profile-exporter.git
+cd promptbase-profile-exporter
+uv tool install .            # or: python -m pip install -e .
 ```
 
-Build the package:
+Bu, `PATH`'inize iki komut ekler: dışa aktarım için `pb`, web arayüzü için
+`pb-web` (uzun adları: `promptbase-export` ve `promptbase-export-web`).
+Kurulum yapmadan kullanmak isterseniz proje klasöründe `pb` yerine
+`python -m promptbase_exporter` çalıştırın.
+
+### Kullanım
 
 ```bash
-python -m build
-python -m twine check dist/*
+pb https://promptbase.com/profile/acb     # all, text, and image catalogs as TXT in exports/
+pb @acb --dry-run                         # show what would be written, write nothing
+pb @acb --mode all --format json          # one JSON catalog with full metadata
+pb @acb --type claude --paid-only --sort views --limit 25
+pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a catalog in place
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull-request checklist and
-[RELEASE.md](RELEASE.md) for the release process.
-
-### Host your own copy
-
-To publish your own copy of this project to a new GitHub repository:
-
-```bash
-git init
-git add .
-git commit -m "Initial PromptBase profile exporter"
-git branch -M main
-git remote add origin https://github.com/your-username/promptbase-profile-exporter.git
-git push -u origin main
-```
-
-Replace `your-username` with your GitHub username and create the empty
-repository on GitHub before pushing.
-
-## Repository structure
+Varsayılan çalıştırma üç dosya oluşturur:
 
 ```text
-.claude/                      # Claude Code project config (settings, skills, agents, hooks)
-.github/
-  ISSUE_TEMPLATE/             # bug report and feature request templates
-  dependabot.yml              # weekly GitHub Actions update checks
-  pull_request_template.md
-  workflows/
-    tests.yml                 # lint, type, test, and packaging checks
-promptbase_exporter/
-  __init__.py
-  __main__.py                 # `python -m promptbase_exporter` entry point
-  cli.py                      # command-line interface and argument parsing
-  client.py                   # public PromptBase/Firestore data access
-  dates.py                    # shared date/datetime parsing
-  diffing.py                  # catalog comparison and diff reports
-  formatting.py               # filtering, sorting, and output writers
-  models.py                   # Profile and PromptRecord data types
-  py.typed                    # PEP 561 marker exposing type hints
-  web.py                      # local web UI
-tests/
-  test_cli.py
-  test_client.py
-  test_dates.py
-  test_diffing.py
-  test_formatting.py
-  test_profile_input.py
-  test_web.py
-docs/
-  github-action.md            # GitHub Action usage guide
-action.yml                    # composite GitHub Action definition
-CLAUDE.md                     # repo guide for Claude Code
-pyproject.toml
-requirements.txt
-CHANGELOG.md
-CONTRIBUTING.md
-RELEASE.md
-SECURITY.md
-LICENSE
+exports/acb_all_prompts.txt
+exports/acb_text_prompts.txt
+exports/acb_image_prompts.txt
 ```
 
-## License
+Tarayıcıyı mı tercih edersiniz? `pb-web`, <http://127.0.0.1:8765/> adresinde
+dışa aktarım seçeneklerini bir form olarak sunan ve her dosya için indirme
+bağlantısı veren yerel bir arayüz başlatır.
 
-MIT License. See [LICENSE](LICENSE).
+Dışa aktarımı belirli aralıklarla çalıştırmak için GitHub Action'ı
+kullanabilirsiniz:
+
+```yaml
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
+  with:
+    profile-url: https://promptbase.com/profile/acb
+    format: markdown
+```
+
+Ayrıntılı dokümanlar (İngilizce):
+
+- [Komut satırı referansı](docs/cli.md): tüm seçenekler, çıktı biçimleri,
+  katalog karşılaştırma, çıkış kodları
+- [Web arayüzü](docs/web-ui.md): yerel arayüzü çalıştırma ve güvenlik modeli
+- [GitHub Action](docs/github-action.md): girdiler, zamanlanmış dışa
+  aktarımlar, katalogları repoya geri commit etme
+- [Değişiklik günlüğü](CHANGELOG.md)
+
+### Yapılandırma
+
+Her şey çalıştırma sırasında komut satırı seçenekleriyle ayarlanır; ayrı bir
+yapılandırma dosyası yoktur. En sık kullanacaklarınız:
+
+| Seçenek | Varsayılan | Amaç |
+| --- | --- | --- |
+| `--mode` | `split` | `split` (all + text + image), `all`, `text` veya `image` |
+| `--format` | `txt` | `txt`, `markdown`, `json` veya `csv` |
+| `--output-dir` | `exports` | Üretilen dosyaların yazılacağı klasör |
+| `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, `rating` |
+| `--domain`, `--type` | yok | Virgülle ayrılmış filtreler, ör. `--type gpt,claude` |
+| `--since`, `--until` | yok | Oluşturulma tarihi aralığı, `YYYY-MM-DD` ya da ISO tarih-saat (UTC) |
+
+Komut başarılı olduğunda `0`, herhangi bir hatada `1`, `--fail-on-diff`
+katalogda değişiklik bulduğunda ise `2` koduyla çıkar. Tüm seçenekler
+[komut satırı referansında](docs/cli.md) anlatılıyor.
+
+### Katkı
+
+Hata bildirimleri ve pull request'ler memnuniyetle karşılanır. Geliştirme
+ortamı, CI'ın çalıştırdığı kontroller ve pull request kontrol listesi
+[CONTRIBUTING.md](CONTRIBUTING.md) dosyasında. Güvenlik açıklarını lütfen
+[SECURITY.md](SECURITY.md) dosyasında anlatıldığı gibi gizli olarak bildirin.
+
+Yalnızca kullanma hakkınız olan profilleri ve verileri dışa aktarın ve
+PromptBase'in kullanım koşullarına uyun.
+
+### Lisans
+
+[MIT](LICENSE) © 𝓐.𝓒.𝓑
+
+[⬆ Başa Dön](#top)

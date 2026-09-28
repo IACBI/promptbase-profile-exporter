@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-  { name = "𝓐.𝓒.𝓑" }
+  { name = "A.C.B" }
 ]
 keywords = ["promptbase", "prompts", "export", "cli", "catalog"]
 classifiers = [
@@ -23,12 +23,15 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
   "Topic :: Utilities"
 ]
 
 [project.urls]
 Homepage = "https://github.com/IACBI/promptbase-profile-exporter"
+Documentation = "https://github.com/IACBI/promptbase-profile-exporter/tree/main/docs"
 Issues = "https://github.com/IACBI/promptbase-profile-exporter/issues"
+Changelog = "https://github.com/IACBI/promptbase-profile-exporter/blob/main/CHANGELOG.md"
 
 [project.scripts]
 promptbase-export = "promptbase_exporter.cli:main"

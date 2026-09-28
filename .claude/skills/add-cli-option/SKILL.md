@@ -46,8 +46,10 @@ checklist; skipping a step leaves the CLI, web UI, Action, and docs out of sync.
 
 ## 5. Docs (same change)
 
-- `README.md` — add a row to the Options reference table; add a usage example if
-  it is notable. Update the Filtering/Usage prose if relevant.
+- `docs/cli.md` — add a row to the Options table; add a usage example if it is
+  notable. Update the relevant section prose (filtering, comparing, ...).
+- `README.md` — only if the option belongs in the short Configuration table or
+  Usage examples; if so, update the English and Türkçe sections together.
 - `docs/github-action.md` — add a row to the Inputs table.
 - `CHANGELOG.md` — add a bullet under `## Unreleased` (`### Added`/`### Changed`).
 
