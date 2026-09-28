@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Reorganize the documentation. The README is now a concise English and
+  Türkçe guide; the full command-line reference, the web UI guide with its
+  security model, and the GitHub Action guide live in `docs/`. The Action
+  examples pin `@v0.8.0` and `actions/checkout@v7` instead of `@main` and
+  `@v4`.
+- Refresh `CONTRIBUTING.md`, `SECURITY.md` (supported versions and the private
+  vulnerability-reporting link), `RELEASE.md` (the protected-branch flow), and
+  the issue and pull request templates.
+- Use the ASCII author name `A.C.B` in `pyproject.toml` and `LICENSE`, and add
+  documentation, changelog, and `Typing :: Typed` metadata to the package.
+
 ## 0.8.0 - 2026-09-28
 
 ### Fixed

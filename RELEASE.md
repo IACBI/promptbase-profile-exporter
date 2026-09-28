@@ -1,59 +1,71 @@
-# Release Checklist
+# Release checklist
 
-Use this checklist when publishing a new version.
+How a maintainer publishes a new version. There is no PyPI package: a release
+is a version bump, an annotated git tag, and a GitHub Release. Users pin the
+GitHub Action to the tag (`@vX.Y.Z`).
 
-## 1. Update Versioned Files
+Choose the version from the `## Unreleased` section of `CHANGELOG.md`: a patch
+release for fixes only, a minor release when it adds features.
 
-- `promptbase_exporter/__init__.py`
-- `pyproject.toml`
-- `CHANGELOG.md` (promote the `Unreleased` section to the new version)
-- `@vX.Y.Z` pin examples in `README.md` and `docs/github-action.md`
-
-## 2. Run Local Validation
+## 1. Prepare the release branch
 
 ```bash
-python -m unittest discover -s tests
-python -m ruff check .
-python -m promptbase_exporter --version
-python -m promptbase_exporter.web --version
-python -m promptbase_exporter https://promptbase.com/profile/acb --dry-run
-python -m promptbase_exporter https://promptbase.com/profile/acb --list-domains
+git checkout main && git pull
+git checkout -b release-X.Y.Z
 ```
 
-## 3. Build Package
+Then update:
+
+- `promptbase_exporter/__init__.py`: `__version__ = "X.Y.Z"`
+- `pyproject.toml`: `version = "X.Y.Z"`
+- `CHANGELOG.md`: rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` (UTC) and
+  add a fresh, empty `## Unreleased` above it
+- every `@vX.Y.Z` Action pin in `README.md` (both languages) and
+  `docs/github-action.md`
+
+## 2. Validate
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m ruff check .
+python -m mypy
+python -m coverage run -m unittest discover -s tests
+python -m coverage report
 python -m build
 python -m twine check dist/*
+python -m promptbase_exporter --version
+python -m promptbase_exporter @acb --dry-run
 ```
 
-## 4. Commit And Push
+Remove `build/`, `dist/`, and `*.egg-info` afterwards.
+
+## 3. Merge through a pull request
+
+`main` is protected, so open a pull request titled `chore: release vX.Y.Z` and
+merge it once CI is green.
+
+## 4. Tag and publish
 
 ```bash
-git add .
-git commit -m "Release vX.Y.Z"
-git push
-```
-
-## 5. Create GitHub Release
-
-```bash
-git tag vX.Y.Z
+git checkout main && git pull
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Then create a GitHub Release from the tag and copy the relevant `CHANGELOG.md` section into the release notes.
+Create the GitHub Release from that tag, using the version's `CHANGELOG.md`
+section as the notes:
 
-The tag is what users pin the GitHub Action to (`@vX.Y.Z`), so publishing the release completes the process.
+```bash
+awk '/^## X.Y.Z/{f=1;next} /^## [0-9]/{f=0} f' CHANGELOG.md > notes.md
+gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file notes.md
+rm notes.md
+```
 
-## Optional: PyPI Publishing
+The `@vX.Y.Z` examples in the docs resolve once the release exists.
 
-This project is not published to PyPI; users install it by cloning the
-repository or by pinning the GitHub Action to a release tag, neither of which
-needs PyPI.
+## Publishing to PyPI (not set up)
 
-To add PyPI distribution later, configure [trusted publishing](https://docs.pypi.org/trusted-publishers/)
-for the repository, add a `pypi` GitHub environment, and restore a publish
-workflow that runs `python -m build` and `pypa/gh-action-pypi-publish` on
-`release: published`.
+Users install by cloning the repository or by pinning the Action, and neither
+needs PyPI. To add PyPI distribution later, configure
+[trusted publishing](https://docs.pypi.org/trusted-publishers/), add a `pypi`
+GitHub environment, and add a workflow that runs `python -m build` and
+`pypa/gh-action-pypi-publish` on `release: published`.

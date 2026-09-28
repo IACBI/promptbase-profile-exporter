@@ -1,0 +1,62 @@
+# Web UI
+
+A small built-in web interface for running exports from the browser. Its form
+covers the export options of the [command line](cli.md): mode, format, sort,
+filters, limit, timestamped filenames, and partial exports. It adds a download
+link for each file it writes. Catalog comparison and in-place updates
+(`--compare`, `--update-file`) and the preview options (`--dry-run`,
+`--list-domains`, `--list-types`) are command-line only. Like the rest of the
+tool, it needs nothing beyond the Python standard library.
+
+## Starting it
+
+```bash
+pb-web                                  # or: promptbase-export-web
+python -m promptbase_exporter.web       # without installing the package
+```
+
+Then open <http://127.0.0.1:8765/>. Stop the server with `Ctrl+C`.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--host` | `127.0.0.1` | Address to bind. Keep the loopback default unless you have a reason not to. |
+| `--port` | `8765` | Port to listen on. |
+| `--version` | | Print the version and exit. |
+
+Files are written relative to the directory you start the server in; the
+"Output directory" field defaults to `exports`.
+
+## Security model
+
+The web UI is built for **one person on their own machine**. It has no login,
+so its protections focus on stopping other websites and other machines from
+using it:
+
+- **Loopback by default.** The server listens on `127.0.0.1` only. Binding to
+  another address, such as `--host 0.0.0.0`, prints a warning, because the
+  export endpoint fetches remote data and writes files for anyone who can
+  reach it. Only do that on a network you trust.
+- **Cross-site requests are rejected.** `POST /export` checks the `Host`
+  header and the browser's `Origin`/`Sec-Fetch-Site` headers, so a web page
+  you visit cannot submit exports in the background (CSRF), and a hostile
+  domain re-pointed at your machine is refused (DNS rebinding).
+- **Writes stay in the working directory.** The output directory must be
+  inside the folder the server was started in; absolute paths and `..`
+  traversal are rejected. Paths are checked before they touch the
+  filesystem, so a network path such as `//host/share` is refused without the
+  server ever contacting that host.
+- **Downloads serve exports only.** `GET /download` returns a file only if it
+  sits inside the working directory *and* its name matches the exporter's own
+  pattern, `<username>_<mode>_prompts[_timestamp].{txt,md,json,csv}`. It
+  cannot be used to read other files, not even a stray `secrets.json` next to
+  your exports.
+- **Hardened responses.** Pages are served with a strict Content Security
+  Policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
+  `Referrer-Policy: no-referrer`. Oversized or malformed form submissions are
+  rejected.
+
+The command line is not subject to these limits: it runs as you and writes
+wherever you point it.
+
+Found a way around one of these protections? Please report it privately as
+described in [SECURITY.md](../SECURITY.md).

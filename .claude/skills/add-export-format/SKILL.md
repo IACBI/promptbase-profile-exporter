@@ -44,8 +44,10 @@ existing four formats (`txt`, `markdown`, `json`, `csv`) as the template.
 
 ## 5. Docs (same change)
 
-- `README.md` — Output formats section, the `-f/--format` row, and the intro/
-  Features lines that enumerate formats.
+- `docs/cli.md` — Output formats section (with a sample) and the `-f/--format`
+  row in the Options table.
+- `README.md` — the tagline, Features, and Configuration lines that enumerate
+  formats, in both the English and Türkçe sections.
 - `docs/github-action.md` — the `format` input row.
 - `CHANGELOG.md` — a bullet under `## Unreleased`.
 

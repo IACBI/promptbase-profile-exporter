@@ -31,8 +31,8 @@ and add a fresh empty `## Unreleased` heading above it.
 ## 4. Sync the pinned Action examples
 
 Update the `@vX.Y.Z` pins so they reference the new version:
-- `README.md` (GitHub Action section)
-- `docs/github-action.md` ("pin to a published release tag" example)
+- `README.md` (the Action example in both the English and Türkçe sections)
+- `docs/github-action.md` (every example)
 
 ## 5. Validate locally (all must pass)
 

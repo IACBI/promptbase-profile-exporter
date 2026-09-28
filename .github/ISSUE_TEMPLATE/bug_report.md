@@ -13,7 +13,7 @@ Describe the problem clearly.
 ## Command
 
 ```bash
-promptbase-export
+pb @username --mode all
 ```
 
 ## Expected behavior
@@ -27,8 +27,9 @@ What happened instead?
 ## Environment
 
 - OS:
+- Surface (CLI, web UI, or GitHub Action):
 - Python version:
-- Exporter version:
+- Exporter version (`pb --version`):
 
 ## Additional context
 

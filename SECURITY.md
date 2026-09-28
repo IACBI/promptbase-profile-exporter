@@ -1,26 +1,40 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-The latest version on the `main` branch receives fixes.
+Security fixes land on `main` and ship in the next release. Only the latest
+release is supported; please upgrade before reporting.
 
-## Reporting a Vulnerability
+| Version | Supported |
+| --- | --- |
+| 0.8.x | Yes |
+| < 0.8 | No |
 
-Please do not open a public issue for sensitive security reports.
+## Reporting a vulnerability
 
-Use GitHub's private vulnerability reporting if it is enabled for the repository, or contact the maintainer directly through the GitHub profile associated with this repository.
+Please do not open a public issue for security problems. Report them privately
+through
+[GitHub's private vulnerability reporting](https://github.com/IACBI/promptbase-profile-exporter/security/advisories/new).
+
+Include what you found, how to reproduce it, and the impact you expect. You
+will get an acknowledgement, and a fix or a decision will follow as quickly as
+the issue allows. Credit is given in the advisory unless you prefer otherwise.
 
 ## Scope
 
-This project reads public PromptBase profile and prompt metadata. It does not require PromptBase credentials, API keys, or browser cookies.
+The exporter reads only public PromptBase data and never asks for credentials,
+API keys, or cookies. Reports are most useful when they involve:
 
-Please report:
+- the local web UI: bypassing its CSRF or DNS-rebinding checks, writing
+  outside the working directory, or reading files through `/download` (see the
+  [security model](docs/web-ui.md#security-model));
+- file writes outside the requested output location, or path traversal;
+- command execution, including through the GitHub Action's inputs;
+- packaging or supply-chain issues that affect users.
 
-- accidental credential or token handling
-- unsafe file writes outside the requested output directory
-- command execution or path traversal issues
-- dependency or packaging issues that affect users
+Behavior of PromptBase itself is out of scope; report that to PromptBase.
 
-## Responsible Use
+## Responsible use
 
-Only export public profiles and data you are allowed to use. Respect PromptBase's terms and any applicable content rights.
+Only export profiles and data you are allowed to use, and respect PromptBase's
+terms and the rights of prompt authors.

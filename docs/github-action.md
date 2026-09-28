@@ -1,10 +1,12 @@
-# GitHub Action Usage
+# GitHub Action
 
-This repository includes a composite GitHub Action that runs the exporter in a workflow, writes catalog files, and can upload the generated files as a workflow artifact.
+This repository is also a composite GitHub Action. It runs the exporter in a
+workflow, writes catalog files, and can upload them as a workflow artifact.
+The action installs the exporter from its own checkout, so there is nothing
+else to install or publish. Every input maps to a [command-line
+option](cli.md#options).
 
-The action installs `promptbase-profile-exporter` from the action checkout itself, so users do not need to publish or install the package separately.
-
-## Basic Workflow
+## Basic workflow
 
 Create `.github/workflows/promptbase-export.yml` in your own repository:
 
@@ -28,9 +30,9 @@ jobs:
   export:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: IACBI/promptbase-profile-exporter@main
+      - uses: IACBI/promptbase-profile-exporter@v0.8.0
         with:
           profile-url: ${{ github.event.inputs.profile_url || 'https://promptbase.com/profile/acb' }}
           mode: split
@@ -42,14 +44,17 @@ jobs:
 
 The workflow runs manually from the Actions tab and every Monday at 05:00 UTC. The generated `exports/` directory is uploaded as the `promptbase-catalog` artifact.
 
-For stable production workflows, pin the action to a published release tag
-instead of `main`:
+The examples pin the action to a published release tag, which is the
+recommended way to use it: a workflow keeps behaving the same until you choose
+to upgrade. `@main` also works and always tracks the latest code, but it can
+change under you. For the strongest guarantee, pin the full commit SHA of a
+release, as GitHub recommends for third-party actions:
 
 ```yaml
 - uses: IACBI/promptbase-profile-exporter@v0.8.0
 ```
 
-## Commit Exports Back To The Repository
+## Commit exports back to the repository
 
 Use this when you want the generated catalog to be versioned in your repository:
 
@@ -68,9 +73,9 @@ jobs:
   export:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: IACBI/promptbase-profile-exporter@main
+      - uses: IACBI/promptbase-profile-exporter@v0.8.0
         with:
           profile-url: https://promptbase.com/profile/acb
           mode: split
@@ -125,7 +130,7 @@ Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 
 ```yaml
 - id: export
-  uses: IACBI/promptbase-profile-exporter@main
+  uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: https://promptbase.com/profile/acb
 - run: ls -R "${{ steps.export.outputs.output-dir }}"
@@ -136,7 +141,7 @@ Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 Export only text prompts to CSV:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@main
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: "@acb"
     mode: text
@@ -146,7 +151,7 @@ Export only text prompts to CSV:
 Export only paid image prompts, sorted by views:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@main
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: image
@@ -158,7 +163,7 @@ Export only paid image prompts, sorted by views:
 Create timestamped backups:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@main
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: split
@@ -169,7 +174,7 @@ Create timestamped backups:
 Fail a workflow when the catalog changed:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@main
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: all
@@ -182,7 +187,7 @@ Fail a workflow when the catalog changed:
 Use the local checkout of this repository while developing the action:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
 - uses: ./
   with:
     profile-url: https://promptbase.com/profile/acb

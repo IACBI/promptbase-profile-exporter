@@ -67,8 +67,12 @@ silently if ruff is not installed.
 - **Tests are required** for behavior changes (`unittest`, no pytest). Mirror
   the existing test style; keep coverage >= 70%.
 - **Update docs in the same change:** add a `## Unreleased` entry to
-  `CHANGELOG.md`, and update the README options table / `docs/github-action.md`
-  when user-facing flags change.
+  `CHANGELOG.md`, and update `docs/cli.md` (options table) /
+  `docs/github-action.md` when user-facing flags change. `docs/web-ui.md`
+  documents the web security model below; keep it in step with `web.py`.
+- **README is bilingual** (English, then Türkçe, per the section layout already
+  in place). Keep both sections in sync; long material lives in `docs/`,
+  English only.
 - **Pin GitHub Actions to commit SHAs** with a trailing `# vX.Y.Z` comment.
   Dependabot updates these weekly.
 - **No PyPI.** Distribution is via clone or the pinned Action tag. See
