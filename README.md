@@ -329,7 +329,7 @@ This repository is also a composite GitHub Action for scheduled or on-demand
 catalog exports:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.7.0
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: split

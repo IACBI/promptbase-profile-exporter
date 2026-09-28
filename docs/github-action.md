@@ -46,7 +46,7 @@ For stable production workflows, pin the action to a published release tag
 instead of `main`:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.7.0
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
 ```
 
 ## Commit Exports Back To The Repository
