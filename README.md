@@ -314,7 +314,9 @@ The web UI is intended for **local, single-user** use:
   pages opened in your browser.
 - Exports are confined to the directory the server was started in. Absolute
   paths and `..` traversal in the "Output directory" field are rejected. (The
-  CLI, which you run yourself, still accepts arbitrary paths.)
+  CLI, which you run yourself, still accepts arbitrary paths.) Paths are checked
+  before they touch the filesystem, so a network path such as `//host/share` is
+  refused without the server ever contacting that host.
 - The `/download` endpoint only serves files inside that same directory whose
   names match the exporter's own pattern
   (`<username>_<mode>_prompts[...].{txt,md,json,csv}`). It cannot read arbitrary

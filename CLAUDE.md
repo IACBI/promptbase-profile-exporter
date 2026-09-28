@@ -90,7 +90,9 @@ These touch several files; the `.claude/skills/` skills encode the full steps:
 - `POST /export` rejects cross-origin (CSRF) and rebound-DNS requests via the
   `Host` header and `Origin`/`Sec-Fetch-Site`.
 - Output directories are confined to the server's working directory (no
-  absolute paths, no `..`).
+  absolute paths, no `..`). Route user-supplied paths through
+  `_confine_to_cwd`, which checks containment lexically *before* `resolve()`:
+  on Windows, resolving a UNC path (`//host/share`) contacts that host over SMB.
 - `GET /download` only serves files inside that directory whose names match the
   exporter's own pattern (`_EXPORT_FILENAME_RE`) — it must not become an
   arbitrary file read.

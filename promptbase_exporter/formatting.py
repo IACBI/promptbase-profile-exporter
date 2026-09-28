@@ -197,10 +197,13 @@ def format_records(records: list[PromptRecord], export_format: str) -> str:
     raise ValueError(f"Unsupported export format: {export_format}")
 
 
+def _safe_username(username: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", username).strip("_")
+
+
 def expected_filename(username: str, mode: str, export_format: str = "txt") -> str:
-    safe_username = re.sub(r"[^A-Za-z0-9_.-]+", "_", username).strip("_")
     extension = FORMAT_EXTENSIONS[export_format]
-    return f"{safe_username}_{mode}_prompts.{extension}"
+    return f"{_safe_username(username)}_{mode}_prompts.{extension}"
 
 
 def expected_timestamped_filename(
@@ -211,9 +214,8 @@ def expected_timestamped_filename(
 ) -> str:
     if not timestamp:
         return expected_filename(username, mode, export_format)
-    safe_username = re.sub(r"[^A-Za-z0-9_.-]+", "_", username).strip("_")
     extension = FORMAT_EXTENSIONS[export_format]
-    return f"{safe_username}_{mode}_prompts_{timestamp}.{extension}"
+    return f"{_safe_username(username)}_{mode}_prompts_{timestamp}.{extension}"
 
 
 def write_export(
