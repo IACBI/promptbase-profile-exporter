@@ -1,3 +1,4 @@
+import http.client
 import io
 import json
 import unittest
@@ -306,6 +307,30 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result, [{"document": 3}])
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(sleep.call_count, 1)
+
+    def test_dropped_connection_then_success_is_retried(self):
+        # urlopen does not wrap errors raised while awaiting or reading the
+        # response, so these arrive raw rather than as URLError.
+        truncated = self._response(b"")
+        truncated.__enter__.return_value = MagicMock(
+            read=MagicMock(side_effect=http.client.IncompleteRead(b"[{"))
+        )
+        with patch(
+            "promptbase_exporter.client.urllib.request.urlopen"
+        ) as urlopen, patch(
+            "promptbase_exporter.client.time.sleep"
+        ) as sleep:
+            urlopen.side_effect = [
+                http.client.RemoteDisconnected("Remote end closed connection"),
+                truncated,
+                self._response(b'[{"document": 4}]'),
+            ]
+
+            result = _open_json_with_retry(MagicMock())
+
+        self.assertEqual(result, [{"document": 4}])
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_persistent_json_decode_error_exhausts_retries(self):
         with patch(

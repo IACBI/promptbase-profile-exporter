@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import os
 import re
 import sys
 import urllib.parse
@@ -38,7 +39,6 @@ MAX_FORM_BYTES = 20_000
 DOWNLOAD_CONTENT_TYPES = {
     ".txt": "text/plain; charset=utf-8",
     ".md": "text/markdown; charset=utf-8",
-    ".markdown": "text/markdown; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".csv": "text/csv; charset=utf-8",
 }
@@ -587,9 +587,8 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             self._send_text("missing file parameter\n", status=400)
             return
 
-        base = Path.cwd().resolve()
-        candidate = (base / Path(requested)).resolve()
-        if not candidate.is_relative_to(base) or not candidate.is_file():
+        candidate = _confine_to_cwd(requested)
+        if candidate is None or not candidate.is_file():
             self._send_text("not found\n", status=404)
             return
         # Only serve files this tool actually exports, not any supported-
@@ -673,7 +672,14 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         return None
 
     def _read_form(self) -> Mapping[str, list[str]]:
-        content_length = int(self.headers.get("Content-Length") or "0")
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except ValueError as exc:
+            raise WebInputError("Invalid Content-Length header.") from exc
+        # A negative length would make rfile.read() block until the client
+        # closes the connection, bypassing the size cap below.
+        if content_length < 0:
+            raise WebInputError("Invalid Content-Length header.")
         if content_length > MAX_FORM_BYTES:
             raise WebInputError("Submitted form is too large.")
         body = self.rfile.read(content_length).decode("utf-8", errors="replace")
@@ -779,14 +785,30 @@ def _resolve_output_dir(raw: str) -> Path:
     form is reachable by any page the user's browser visits, so absolute paths
     and ``..`` traversal that would escape the working directory are rejected.
     """
-    base = Path.cwd().resolve()
-    candidate = Path(raw).expanduser()
-    resolved = (base / candidate).resolve()
-    if not resolved.is_relative_to(base):
+    resolved = _confine_to_cwd(Path(raw).expanduser())
+    if resolved is None:
         raise WebInputError(
             "Output directory must stay within the server's working directory."
         )
     return resolved
+
+
+def _confine_to_cwd(raw: str | Path) -> Path | None:
+    """Resolve ``raw`` inside the working directory, or ``None`` if it escapes.
+
+    Containment is checked lexically before ``resolve()`` touches the
+    filesystem: on Windows, resolving a UNC path such as ``//host/share/x``
+    connects to that host over SMB, which would hand the user's NTLM
+    credentials to any server a web page chose to name.
+    """
+    if "\0" in str(raw):
+        return None
+    base = Path.cwd().resolve()
+    joined = base / raw
+    if not Path(os.path.abspath(joined)).is_relative_to(base):
+        return None
+    resolved = joined.resolve()
+    return resolved if resolved.is_relative_to(base) else None
 
 
 def _single_value(
