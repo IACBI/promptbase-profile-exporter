@@ -370,13 +370,31 @@ def format_records_as_csv(
         rows = [
             {key: csv_escape_formula(value) for key, value in row.items()} for row in rows
         ]
-    output = io.StringIO()
-    if safe:
-        output.write(UTF8_BOM)
-    writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows)
-    return output.getvalue()
+    text = _csv_lines(columns, rows)
+    return UTF8_BOM + text if safe else text
+
+
+def _csv_lines(columns: Sequence[str], rows: Sequence[dict[str, object]]) -> str:
+    """Rows as CSV text with ``\\n`` between them.
+
+    The writer quotes a cell only if it holds a character of its line terminator, and
+    some Python versions (3.10, 3.11, 3.13) do not otherwise quote a bare ``\\r``, which a
+    reader then takes as the end of the row. So each row is written with ``\\r\\n``, which
+    quotes both, and the terminator is swapped for ``\\n`` afterwards; a line break inside
+    a quoted cell is left alone.
+    """
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, lineterminator="\r\n")
+    lines: list[str] = []
+    for row in (None, *rows):
+        buffer.seek(0)
+        buffer.truncate()
+        if row is None:
+            writer.writeheader()
+        else:
+            writer.writerow(row)
+        lines.append(buffer.getvalue().removesuffix("\r\n"))
+    return "\n".join(lines) + "\n"
 
 
 def _csv_row(row: dict[str, object]) -> dict[str, object]:

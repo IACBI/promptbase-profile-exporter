@@ -378,6 +378,38 @@ class MetadataThresholdFilterTests(unittest.TestCase):
         self.assertEqual(self._slugs(min_sales=1, min_rating=4.5), ["high"])
 
 
+class CsvLineBreakTests(unittest.TestCase):
+    """A cell's own line breaks are quoted on every Python version, not only the newest."""
+
+    def _text(self, description, **options):
+        return format_records_as_csv(
+            [record("First", "text", 2), PromptRecord(
+                title="Breaks", description=description, slug="breaks", prompt_type="gpt",
+                domain="text", created=1, price=0.0,
+            )],
+            **options,
+        )
+
+    def test_a_bare_carriage_return_is_quoted(self):
+        cr, lf, separator = chr(13), chr(10), chr(0x2028)
+        for description in (f"a{cr}b", f"a{cr}{lf}b", f"a{lf}b", f"a{separator}b"):
+            for safe in (False, True):
+                with self.subTest(description=description, safe=safe):
+                    text = self._text(description, safe=safe)
+                    if description[1] in (chr(13), chr(10)):
+                        self.assertIn(chr(34) + description + chr(34), text)
+                    rows = list(csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM),
+                                                           newline="")))
+                    self.assertEqual([row["title"] for row in rows], ["First", "Breaks"])
+                    self.assertEqual(rows[1]["description"], description)
+
+    def test_output_ends_each_row_with_a_plain_line_feed(self):
+        text = self._text("plain")
+        self.assertNotIn("\r", text)
+        self.assertTrue(text.endswith("\n"))
+        self.assertEqual(text.count("\n"), 3)  # header and two rows
+
+
 class CsvSafeTests(unittest.TestCase):
     def test_formula_like_text_cells_are_prefixed(self):
         text = format_records_as_csv(

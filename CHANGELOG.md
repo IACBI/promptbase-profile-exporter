@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.
   `--update-file`, `pb-diff`, and `pb-convert` could see a change that never
   happened. None of the profiles checked live (`@acb`, `@emanema`) has such a
   value today; it was found by the new round-trip fuzz test.
+- A CSV export now quotes a cell that contains a lone carriage return on every
+  supported Python. Python 3.10, 3.11, and 3.13 left it unquoted, so a reader took
+  it as the end of the row; the same fuzz test failed there in CI. Output is
+  otherwise byte for byte what it was.
 
 ### Changed
 
