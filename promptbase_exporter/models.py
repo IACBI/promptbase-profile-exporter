@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+# The kinds of PromptBase listing the exporter can read, and how each is
+# written in filenames and headings. The kind is also the URL path:
+# promptbase.com/prompt/<slug>, /bundle/<slug>, and /app/<slug>.
+ITEM_TYPES = ("prompt", "bundle", "app")
+ITEM_TYPE_PLURALS = {"prompt": "prompts", "bundle": "bundles", "app": "apps"}
+
 # Optional record fields, written only when requested (--extra-fields). The
 # order here is the order of the columns in the output.
 EXTRA_FIELDS = (
@@ -47,10 +53,11 @@ class PromptRecord:
     updated: int | None = None
     last_sale: int | None = None
     unique_sales: int = 0
+    item_type: str = "prompt"
 
     @property
     def url(self) -> str:
-        return f"https://promptbase.com/prompt/{self.slug}"
+        return f"https://promptbase.com/{self.item_type}/{self.slug}"
 
     @property
     def created_iso(self) -> str:

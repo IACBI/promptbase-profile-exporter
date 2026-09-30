@@ -33,7 +33,7 @@ from .formatting import (
     write_export,
     write_export_to_path,
 )
-from .models import EXTRA_FIELDS, PromptRecord
+from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
 
 MODE_ALIASES = {
     "text-only": "text",
@@ -85,6 +85,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--format",
         choices=EXPORT_FORMATS,
         help="Output file format. Defaults to txt, or inferred from --output-file/--update-file.",
+    )
+    parser.add_argument(
+        "--item-type",
+        choices=ITEM_TYPES,
+        default="prompt",
+        help=(
+            "Which kind of listing to export: prompts (default), bundles, or apps. "
+            "Filenames say which (for example acb_all_bundles.json)."
+        ),
     )
     parser.add_argument(
         "--sort",
@@ -292,17 +301,20 @@ def export_profile(
 ) -> int:
     """Fetch, filter, and write the exports for one profile; return its exit code."""
     try:
-        profile, records = fetch_prompts(profile_input, extra_fields=options["extra_fields"])
+        profile, records = fetch_prompts(
+            profile_input, extra_fields=options["extra_fields"], item_type=args.item_type
+        )
     except PromptBaseError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
+    kind = ITEM_TYPE_PLURALS[args.item_type]
     if not records:
-        print(f"error: no approved prompts found for @{profile.username}", file=sys.stderr)
+        print(f"error: no approved {kind} found for @{profile.username}", file=sys.stderr)
         return EXIT_ERROR
 
     if not sorted_newest_to_oldest(records):
-        print("error: prompt records are not sorted newest to oldest", file=sys.stderr)
+        print(f"error: {args.item_type} records are not sorted newest to oldest", file=sys.stderr)
         return EXIT_ERROR
 
     selected_records = filter_records_by_metadata(
@@ -319,7 +331,7 @@ def export_profile(
         min_rating=args.min_rating,
     )
     if not selected_records:
-        print("error: no prompts matched the selected filters", file=sys.stderr)
+        print(f"error: no {kind} matched the selected filters", file=sys.stderr)
         return EXIT_ERROR
     selected_records = sort_records(selected_records, args.sort)
     if args.limit is not None:
@@ -329,7 +341,7 @@ def export_profile(
     if missing_descriptions and not args.allow_missing_descriptions:
         print(
             "error: missing descriptions for "
-            f"{len(missing_descriptions)} prompt(s). "
+            f"{len(missing_descriptions)} {args.item_type}(s). "
             "Use --allow-missing-descriptions to write partial exports.",
             file=sys.stderr,
         )
@@ -342,9 +354,11 @@ def export_profile(
 
     if not args.quiet:
         print(f"Profile: @{profile.username}")
-        print(f"Approved prompts found: {len(records)}")
+        print(f"Approved {kind} found: {len(records)}")
         print(f"Selected after filters: {len(selected_records)}")
         if args.verbose:
+            if args.item_type != "prompt":
+                print(f"Item type: {args.item_type}")
             print(f"Format: {options['export_format']}")
             print(f"Sort: {args.sort}")
             print(f"Output directory: {output_dir}")
@@ -416,6 +430,7 @@ def export_profile(
                 overwrite=options["overwrite_output"],
                 csv_safe=args.csv_safe,
                 extra_fields=options["extra_fields"],
+                item_type=args.item_type,
             )
         except FileExistsError as exc:
             print(f"error: {exc}. Use --overwrite to replace it.", file=sys.stderr)
@@ -430,7 +445,7 @@ def export_profile(
         if written_count is None:
             return EXIT_ERROR
         if not args.quiet:
-            print(f"Wrote {mode:>5}: {written_count:>4} prompts -> {output_path}")
+            print(f"Wrote {mode:>5}: {written_count:>4} {kind} -> {output_path}")
             print_summary(selected_records, all_count=len(records))
         return diff_exit_code
 
@@ -446,6 +461,7 @@ def export_profile(
                 timestamp=timestamp,
                 csv_safe=args.csv_safe,
                 extra_fields=options["extra_fields"],
+                item_type=args.item_type,
             )
         except OSError as exc:
             print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
@@ -454,7 +470,7 @@ def export_profile(
         if written_count is None:
             return EXIT_ERROR
         if not args.quiet:
-            print(f"Wrote {mode:>5}: {written_count:>4} prompts -> {output_path}")
+            print(f"Wrote {mode:>5}: {written_count:>4} {kind} -> {output_path}")
 
     if not args.quiet:
         print_summary(selected_records, all_count=len(records))

@@ -34,6 +34,7 @@ GitHub Action for scheduled exports.
 - Accepts a profile URL (with or without `https://`), a `profile/<name>` path, a
   username, or `@username`,
   and exports several profiles in one run.
+- Exports a profile's prompts, bundles, or apps (`--item-type`).
 - Writes `txt`, `markdown`, `json`, `csv`, or a self-contained `html` page you
   can search in the browser, split into `all`, `text`, and `image` catalogs or
   as a single file. `--csv-safe` keeps CSV cells from running as spreadsheet
@@ -170,6 +171,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 
 - Profil adresi (`https://` ile ya da onsuz), `profile/<ad>` yolu, kullanıcı adı
   ya da `@kullanıcıadı` kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
+- Bir profilin prompt'larını, bundle'larını ya da app'lerini dışa aktarır
+  (`--item-type`).
 - `txt`, `markdown`, `json`, `csv` ya da tarayıcıda arama yapılabilen, tek
   dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
   kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV

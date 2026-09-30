@@ -1,7 +1,8 @@
 # Web UI
 
 A small built-in web interface for running exports from the browser. Its form
-covers the export options of the [command line](cli.md): mode, format
+covers the export options of the [command line](cli.md): kind (prompts,
+bundles, or apps), mode, format
 (including the searchable HTML catalog), sort, filters (among them minimum
 sales and rating), limit, extra fields, timestamped filenames, partial
 exports, and CSV formula protection. It adds a download link for each file it writes.
@@ -63,7 +64,7 @@ using it:
   just the diff report (titles, slugs, and changed values).
 - **Downloads serve exports only.** `GET /download` returns a file only if it
   sits inside the working directory *and* its name matches the exporter's own
-  pattern, `<username>_<mode>_prompts[_timestamp].{txt,md,json,csv,html}`. It
+  pattern, `<username>_<mode>_<prompts|bundles|apps>[_timestamp].{txt,md,json,csv,html}`. It
   cannot be used to read other files, not even a stray `secrets.json` next to
   your exports. Downloads are always sent as attachments with
   `Content-Security-Policy: sandbox`, so an HTML export can never run script

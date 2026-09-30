@@ -97,6 +97,7 @@ jobs:
 | Input | Default | Description |
 | --- | --- | --- |
 | `profile-url` | Required | PromptBase profile URL, path, username, or `@username`. Separate several profiles with commas, spaces, or new lines. |
+| `item-type` | `prompt` | Kind of listing to export: `prompt`, `bundle`, or `app`. |
 | `mode` | `split` | `split`, `all`, `text`, `image`, `text-only`, or `image-only`. |
 | `format` | Empty | `txt`, `markdown`, `json`, `csv`, or `html`. Empty means `txt`, or the format inferred from `output-file` / `update-file`. With `update-file`, it must match that file's extension. |
 | `output-dir` | `exports` | Directory where files are written. |

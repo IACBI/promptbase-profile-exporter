@@ -9,8 +9,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from promptbase_exporter.formatting import write_export
-from promptbase_exporter.models import EXTRA_FIELDS, Profile, PromptRecord
+from promptbase_exporter.models import EXTRA_FIELDS, ITEM_TYPES, Profile, PromptRecord
 from promptbase_exporter.web import (
+    _EXPORT_FILENAME_RE,
     _EXPORT_LOCK,
     MAX_FORM_BYTES,
     ExportRequest,
@@ -154,7 +155,7 @@ class WebTests(unittest.TestCase):
             record("Image One", "image", "chatgpt-image", created=2),
         ]
 
-        def fetcher(profile_input, extra_fields=()):
+        def fetcher(profile_input, extra_fields=(), item_type="prompt"):
             self.assertEqual(profile_input, "@acb")
             return Profile(username="acb", uid="uid-1"), records
 
@@ -183,7 +184,7 @@ class WebTests(unittest.TestCase):
             record("Image", "image", "chatgpt-image", created=1, price=4.0),
         ]
 
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             return Profile(username="acb", uid="uid-1"), records
 
         with TemporaryDirectory() as directory:
@@ -206,7 +207,7 @@ class WebTests(unittest.TestCase):
             self.assertIn("Expensive", result.files[0].path.read_text(encoding="utf-8"))
 
     def test_run_export_requires_descriptions_by_default(self):
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             return Profile(username="acb", uid="uid-1"), [
                 record("Missing", "text", "gpt", description="")
             ]
@@ -566,7 +567,7 @@ class CompareFileTests(unittest.TestCase):
     def test_run_export_compares_before_overwriting_the_same_file(self):
         records = [record("Fresh", "text", "gpt", created=2, price=2.0)]
 
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             return Profile(username="acb", uid="uid-1"), records
 
         with _in_directory() as root:
@@ -599,7 +600,7 @@ class CompareFileTests(unittest.TestCase):
     def test_comparison_catalog_decoding_is_independent_of_output_protection(self):
         records = [record("=Formula", "text", "gpt", created=2, price=2.0)]
 
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             return Profile(username="acb", uid="uid-1"), records
 
         with _in_directory() as root:
@@ -641,7 +642,7 @@ class CompareFileTests(unittest.TestCase):
                     build_request_config({"profile": "acb", "mode": "all", **form})
 
     def test_unreadable_compare_catalog_is_a_400_error(self):
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
 
         with _in_directory() as root:
@@ -659,13 +660,13 @@ class ExportLockTests(unittest.TestCase):
         observed = []
 
         def writer(output_dir, username, mode, records, export_format, timestamp=None,
-                   overwrite=True, *, csv_safe=False, extra_fields=()):
+                   overwrite=True, *, csv_safe=False, extra_fields=(), item_type="prompt"):
             observed.append((_EXPORT_LOCK.locked(), csv_safe))
             path = output_dir / f"{username}_{mode}_prompts.txt"
             path.write_text("", encoding="utf-8")
             return path
 
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             self.assertFalse(_EXPORT_LOCK.locked())
             return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
 
@@ -679,7 +680,7 @@ class ExportLockTests(unittest.TestCase):
         self.assertFalse(_EXPORT_LOCK.locked())
 
     def test_lock_is_released_when_validation_fails(self):
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
 
         with TemporaryDirectory() as directory:
@@ -716,12 +717,12 @@ class ExtraFieldsWebTests(unittest.TestCase):
     def test_run_export_passes_the_fields_to_the_fetcher_and_writer(self):
         seen = {}
 
-        def fetcher(_profile_input, extra_fields=()):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             seen["fetch"] = tuple(extra_fields)
             return Profile("acb", "u"), [record("A", "text", "gpt")]
 
         def writer(output_dir, username, mode, records, export_format, timestamp=None,
-                   overwrite=True, *, csv_safe=False, extra_fields=()):
+                   overwrite=True, *, csv_safe=False, extra_fields=(), item_type="prompt"):
             seen["write"] = tuple(extra_fields)
             path = output_dir / f"{username}_{mode}_prompts.json"
             path.write_text("[{}]", encoding="utf-8")
@@ -734,6 +735,53 @@ class ExtraFieldsWebTests(unittest.TestCase):
             )
             run_export(request, fetcher=fetcher, writer=writer, counter=lambda _p, _f: 1)
         self.assertEqual(seen, {"fetch": ("tags",), "write": ("tags",)})
+
+
+class ItemTypeWebTests(unittest.TestCase):
+    def test_item_type_defaults_to_prompt_and_is_validated(self):
+        self.assertEqual(build_request_config({"profile": "acb"}).item_type, "prompt")
+        request = build_request_config({"profile": "acb", "item_type": "bundle"})
+        self.assertEqual(request.item_type, "bundle")
+        with self.assertRaisesRegex(WebInputError, "Unsupported item type: skill"):
+            build_request_config({"profile": "acb", "item_type": "skill"})
+
+    def test_form_offers_every_kind_and_keeps_the_selection(self):
+        html = render_form(ExportRequest(profile_input="acb", item_type="app"))
+        for kind in ITEM_TYPES:
+            self.assertIn(f'<option value="{kind}"', html)
+        self.assertIn('<option value="app" selected>app</option>', html)
+
+    def test_run_export_fetches_and_writes_the_chosen_kind(self):
+        seen = {}
+
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
+            seen["fetch"] = item_type
+            bundle = PromptRecord("Kit", "d", "kit", "gpt", "text", 1, 4.0, item_type=item_type)
+            return Profile("acb", "u"), [bundle]
+
+        with TemporaryDirectory() as directory:
+            request = ExportRequest(
+                profile_input="acb", mode="all", output_dir=Path(directory),
+                export_format="json", item_type="bundle",
+            )
+            result = run_export(request, fetcher=fetcher)
+            names = [item.path.name for item in result.files]
+        self.assertEqual(seen["fetch"], "bundle")
+        self.assertEqual(names, ["acb_all_bundles.json"])
+        self.assertEqual(result.files[0].count, 1)
+
+    def test_empty_result_names_the_kind(self):
+        request = ExportRequest(profile_input="acb", item_type="app")
+        with self.assertRaisesRegex(WebInputError, "No approved apps found"):
+            run_export(request, fetcher=lambda *_a, **_k: (Profile("acb", "u"), []))
+
+    def test_download_allowlist_covers_all_kinds_and_nothing_else(self):
+        for kind in ("prompts", "bundles", "apps"):
+            for name in (f"acb_all_{kind}.json", f"acb_text_{kind}_20260101_120000.csv"):
+                self.assertTrue(_EXPORT_FILENAME_RE.match(name), name)
+        for name in ("acb_all_skills.json", "acb_all_prompt.json", "secrets.json",
+                     "acb_all_apps.exe", "acb_other_apps.json"):
+            self.assertFalse(_EXPORT_FILENAME_RE.match(name), name)
 
 
 if __name__ == "__main__":

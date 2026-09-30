@@ -12,6 +12,10 @@ inputs:
       PromptBase profile URL, path, username, or @username. Separate several
       profiles with commas, spaces, or new lines to export each of them.
     required: true
+  item-type:
+    description: Kind of listing to export. Use prompt, bundle, or app.
+    required: false
+    default: prompt
   mode:
     description: Export mode. Use split, all, text, image, text-only, or image-only.
     required: false
@@ -249,6 +253,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         PROFILE_URL: ${{ inputs.profile-url }}
+        ITEM_TYPE: ${{ inputs.item-type }}
         MODE: ${{ inputs.mode }}
         FORMAT: ${{ inputs.format }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
@@ -315,6 +320,10 @@ runs:
           "--output-dir" "$OUTPUT_DIR"
           "--sort" "$SORT"
         )
+
+        if [[ -n "$ITEM_TYPE" ]]; then
+          args+=("--item-type" "$ITEM_TYPE")
+        fi
 
         if [[ -n "$FORMAT" ]]; then
           args+=("--format" "$FORMAT")

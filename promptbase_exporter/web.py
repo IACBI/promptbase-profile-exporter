@@ -38,7 +38,7 @@ from .formatting import (
     sorted_newest_to_oldest,
     write_export,
 )
-from .models import EXTRA_FIELDS, Profile, PromptRecord
+from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, Profile, PromptRecord
 
 WEB_MODES = ("split", "all", "text", "image")
 PRICE_FILTERS = ("all", "free", "paid")
@@ -57,12 +57,12 @@ DOWNLOAD_CONTENT_TYPES = {
 }
 
 # Names that write_export actually produces:
-# "<username>_<mode>_prompts[_YYYYMMDD_HHMMSS].<ext>". The /download endpoint
+# "<username>_<mode>_<prompts|bundles|apps>[_YYYYMMDD_HHMMSS].<ext>". The /download endpoint
 # only serves files matching this, so it cannot disclose unrelated
 # supported-extension files (e.g. a stray secrets.json) in the working
 # directory, even when the server is exposed with --host 0.0.0.0.
 _EXPORT_FILENAME_RE = re.compile(
-    r"^[A-Za-z0-9_.-]+_(?:all|text|image)_prompts(?:_\d{8}_\d{6})?"
+    r"^[A-Za-z0-9_.-]+_(?:all|text|image)_(?:prompts|bundles|apps)(?:_\d{8}_\d{6})?"
     r"\.(?:txt|md|json|csv|html)$"
 )
 
@@ -103,6 +103,7 @@ class ExportRequest:
     compare_file: str = ""
     compare_path: Path | None = None
     extra_fields: tuple[str, ...] = ()
+    item_type: str = "prompt"
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ class FetchPrompts(Protocol):
         self,
         profile_input: str,
         extra_fields: Sequence[str] = (),
+        item_type: str = "prompt",
     ) -> tuple[Profile, list[PromptRecord]]: ...
 
 
@@ -145,6 +147,7 @@ class WriteExport(Protocol):
         *,
         csv_safe: bool = False,
         extra_fields: Sequence[str] = (),
+        item_type: str = "prompt",
     ) -> Path: ...
 
 
@@ -170,6 +173,10 @@ def build_request_config(
     export_format = _single_value(form_data, "format", "txt")
     if export_format not in EXPORT_FORMATS:
         raise WebInputError(f"Unsupported format: {export_format}.")
+
+    item_type = _single_value(form_data, "item_type", "prompt")
+    if item_type not in ITEM_TYPES:
+        raise WebInputError(f"Unsupported item type: {item_type}.")
 
     sort = _single_value(form_data, "sort", "newest")
     if sort not in SORT_OPTIONS:
@@ -249,6 +256,7 @@ def build_request_config(
         compare_file=compare_file,
         compare_path=compare_path,
         extra_fields=extra_fields,
+        item_type=item_type,
     )
 
 
@@ -260,11 +268,16 @@ def run_export(
     counter: CountWrittenRecords = count_written_records,
 ) -> WebExportResult:
     """Fetch, filter, sort, write, and validate exports for one web request."""
-    profile, records = fetcher(request.profile_input, extra_fields=request.extra_fields)
+    profile, records = fetcher(
+        request.profile_input,
+        extra_fields=request.extra_fields,
+        item_type=request.item_type,
+    )
+    kind = ITEM_TYPE_PLURALS[request.item_type]
     if not records:
-        raise WebInputError(f"No approved prompts found for @{profile.username}.")
+        raise WebInputError(f"No approved {kind} found for @{profile.username}.")
     if not sorted_newest_to_oldest(records):
-        raise WebInputError("Prompt records are not sorted newest to oldest.")
+        raise WebInputError(f"The {request.item_type} records are not sorted newest to oldest.")
 
     free_only = request.price_filter == "free"
     paid_only = request.price_filter == "paid"
@@ -290,7 +303,7 @@ def run_export(
         min_rating=request.min_rating,
     )
     if not selected_records:
-        raise WebInputError("No prompts matched the selected filters.")
+        raise WebInputError(f"No {kind} matched the selected filters.")
 
     selected_records = sort_records(selected_records, request.sort)
     if request.limit is not None:
@@ -299,7 +312,7 @@ def run_export(
     if missing_descriptions and not request.allow_missing_descriptions:
         raise WebInputError(
             "Missing descriptions for "
-            f"{len(missing_descriptions)} prompt(s). "
+            f"{len(missing_descriptions)} {request.item_type}(s). "
             "Enable partial exports to write these records."
         )
 
@@ -334,6 +347,7 @@ def run_export(
                 timestamp,
                 csv_safe=request.csv_safe,
                 extra_fields=request.extra_fields,
+                item_type=request.item_type,
             )
             try:
                 written_count = counter(output_path, request.export_format)
@@ -591,6 +605,10 @@ def render_form(
           <label for="profile">PromptBase profile</label>
           <input id="profile" name="profile" value="{_h(request.profile_input)}"
             placeholder="https://promptbase.com/profile/acb" required>
+        </div>
+        <div>
+          <label for="item_type">Kind</label>
+          {render_select("item_type", ITEM_TYPES, request.item_type)}
         </div>
         <div>
           <label for="mode">Mode</label>

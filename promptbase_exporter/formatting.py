@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
-from .models import EXTRA_FIELDS, PromptRecord, ms_to_iso_or_none
+from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, PromptRecord, ms_to_iso_or_none
 
 EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html")
 SORT_OPTIONS = (
@@ -186,8 +186,9 @@ def format_records_as_text(records: list[PromptRecord]) -> str:
 def format_records_as_markdown(
     records: list[PromptRecord],
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> str:
-    parts = ["# PromptBase Prompt Export", ""]
+    parts = [f"# PromptBase {item_type.capitalize()} Export", ""]
     for index, record in enumerate(records, 1):
         description = record.description.replace("\r\n", "\n").replace("\r", "\n")
         parts.extend(
@@ -282,6 +283,10 @@ def record_to_dict(
         },
         "unique_sales": {"unique_sales": record.unique_sales},
     }
+    if record.item_type != "prompt":
+        # A prompt catalog keeps its original columns; the other kinds say
+        # what they are, since their slugs are only unique within a kind.
+        data["item_type"] = record.item_type
     for name in EXTRA_FIELDS:  # canonical order, whatever order was requested
         if name in extra_fields:
             data.update(extra_values[name])
@@ -301,8 +306,9 @@ def format_records_as_csv(
     *,
     safe: bool = False,
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> str:
-    columns = RECORD_FIELDS + tuple(
+    columns = RECORD_FIELDS + (() if item_type == "prompt" else ("item_type",)) + tuple(
         column
         for name in EXTRA_FIELDS
         if name in extra_fields
@@ -392,7 +398,8 @@ _HTML_SCRIPT = """
       item.hidden = !hit;
       if (hit) { shown += 1; }
     });
-    summary.textContent = needle ? shown + " of " + total + " prompts" : total + " prompts";
+    var noun = summary.getAttribute("data-noun");
+    summary.textContent = needle ? shown + " of " + total + " " + noun : total + " " + noun;
   });
 })();
 """
@@ -401,6 +408,7 @@ _HTML_SCRIPT = """
 def format_records_as_html(
     records: list[PromptRecord],
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> str:
     """Render a self-contained, searchable HTML catalog.
 
@@ -433,16 +441,17 @@ def format_records_as_html(
         [record_to_dict(record, extra_fields) for record in records], ensure_ascii=False
     ).replace("<", "\\u003c")
     count = len(records)
+    noun = ITEM_TYPE_PLURALS[item_type]
     return (
         "<!doctype html>\n"
         '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        "<title>PromptBase Prompt Export</title>\n"
+        f"<title>PromptBase {item_type.capitalize()} Export</title>\n"
         f"<style>{_HTML_STYLE}</style>\n</head>\n<body>\n<main>\n"
-        "<h1>PromptBase Prompt Export</h1>\n"
-        f'<p class="summary" id="summary">{count} prompts</p>\n'
-        '<input type="search" id="filter" placeholder="Filter prompts" '
-        'aria-label="Filter prompts" hidden>\n'
+        f"<h1>PromptBase {item_type.capitalize()} Export</h1>\n"
+        f'<p class="summary" id="summary" data-noun="{noun}">{count} {noun}</p>\n'
+        f'<input type="search" id="filter" placeholder="Filter {noun}" '
+        f'aria-label="Filter {noun}" hidden>\n'
         '<ol id="prompts">\n' + "\n".join(items) + "\n</ol>\n</main>\n"
         f'<script type="application/json" id="{HTML_DATA_ELEMENT_ID}">{data}</script>\n'
         f"<script>{_HTML_SCRIPT}</script>\n</body>\n</html>\n"
@@ -492,6 +501,7 @@ def format_records(
     *,
     csv_safe: bool = False,
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> str:
     if export_format == "txt":
         if extra_fields:
@@ -500,13 +510,15 @@ def format_records(
             raise ValueError("The txt format cannot hold extra fields.")
         return format_records_as_text(records)
     if export_format == "markdown":
-        return format_records_as_markdown(records, extra_fields)
+        return format_records_as_markdown(records, extra_fields, item_type)
     if export_format == "json":
         return format_records_as_json(records, extra_fields)
     if export_format == "csv":
-        return format_records_as_csv(records, safe=csv_safe, extra_fields=extra_fields)
+        return format_records_as_csv(
+            records, safe=csv_safe, extra_fields=extra_fields, item_type=item_type
+        )
     if export_format == "html":
-        return format_records_as_html(records, extra_fields)
+        return format_records_as_html(records, extra_fields, item_type)
     raise ValueError(f"Unsupported export format: {export_format}")
 
 
@@ -514,9 +526,15 @@ def _safe_username(username: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", username).strip("_")
 
 
-def expected_filename(username: str, mode: str, export_format: str = "txt") -> str:
+def expected_filename(
+    username: str,
+    mode: str,
+    export_format: str = "txt",
+    item_type: str = "prompt",
+) -> str:
     extension = FORMAT_EXTENSIONS[export_format]
-    return f"{_safe_username(username)}_{mode}_prompts.{extension}"
+    kind = ITEM_TYPE_PLURALS[item_type]
+    return f"{_safe_username(username)}_{mode}_{kind}.{extension}"
 
 
 def expected_timestamped_filename(
@@ -524,11 +542,13 @@ def expected_timestamped_filename(
     mode: str,
     export_format: str,
     timestamp: str | None,
+    item_type: str = "prompt",
 ) -> str:
     if not timestamp:
-        return expected_filename(username, mode, export_format)
+        return expected_filename(username, mode, export_format, item_type)
     extension = FORMAT_EXTENSIONS[export_format]
-    return f"{_safe_username(username)}_{mode}_prompts_{timestamp}.{extension}"
+    kind = ITEM_TYPE_PLURALS[item_type]
+    return f"{_safe_username(username)}_{mode}_{kind}_{timestamp}.{extension}"
 
 
 def write_export(
@@ -542,6 +562,7 @@ def write_export(
     *,
     csv_safe: bool = False,
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / expected_timestamped_filename(
@@ -549,6 +570,7 @@ def write_export(
         mode,
         export_format,
         timestamp,
+        item_type,
     )
     write_export_to_path(
         output_path,
@@ -557,6 +579,7 @@ def write_export(
         overwrite=overwrite,
         csv_safe=csv_safe,
         extra_fields=extra_fields,
+        item_type=item_type,
     )
     return output_path
 
@@ -569,9 +592,14 @@ def write_export_to_path(
     overwrite: bool,
     csv_safe: bool = False,
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> Path:
     content = format_records(
-        records, export_format, csv_safe=csv_safe, extra_fields=extra_fields
+        records,
+        export_format,
+        csv_safe=csv_safe,
+        extra_fields=extra_fields,
+        item_type=item_type,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if not overwrite:

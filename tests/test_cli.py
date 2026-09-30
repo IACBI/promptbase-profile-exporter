@@ -598,7 +598,7 @@ class MultiProfileTests(unittest.TestCase):
         "@bob": (Profile(username="bob", uid="u2"), [record("B image", "image", "midjourney")]),
     }
 
-    def _fetch(self, profile_input, extra_fields=()):
+    def _fetch(self, profile_input, extra_fields=(), item_type="prompt"):
         if profile_input not in self.PROFILES:
             raise PromptBaseError(f"Profile not found: {profile_input}")
         return self.PROFILES[profile_input]
@@ -917,6 +917,78 @@ class ExtraFieldsCliTests(unittest.TestCase):
             exit_code, _, _ = _quiet_main(["@acb", "--mode", "all", "-o", directory])
         self.assertEqual(exit_code, 0)
         self.assertEqual(fetch.call_args.kwargs["extra_fields"], ())
+
+
+class ItemTypeCliTests(unittest.TestCase):
+    _run_expecting_failure = ArgumentValidationTests._run_expecting_failure
+
+    def _bundle(self):
+        return PromptRecord("Kit", "d", "kit", "gpt", "text", 1, 4.0, item_type="bundle")
+
+    def test_unknown_kind_is_rejected_by_the_parser(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["@acb", "--item-type", "skill"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice: 'skill'", stderr.getvalue())
+
+    def test_bundles_are_fetched_and_written_under_their_own_name(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [self._bundle()]),
+        ) as fetch:
+            exit_code, stdout, _ = _quiet_main(
+                ["@acb", "--item-type", "bundle", "--format", "json", "-o", directory]
+            )
+            written = sorted(path.name for path in Path(directory).iterdir())
+            data = json.loads((Path(directory) / "acb_all_bundles.json").read_text("utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(fetch.call_args.kwargs["item_type"], "bundle")
+        self.assertEqual(
+            written,
+            ["acb_all_bundles.json", "acb_image_bundles.json", "acb_text_bundles.json"],
+        )
+        self.assertEqual(data[0]["item_type"], "bundle")
+        self.assertEqual(data[0]["url"], "https://promptbase.com/bundle/kit")
+        self.assertIn("Approved bundles found: 1", stdout)
+        self.assertIn("1 bundles ->", stdout)
+
+    def test_default_run_asks_for_prompts(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [record("A", "text", "gpt")]),
+        ) as fetch:
+            exit_code, stdout, _ = _quiet_main(["@acb", "--mode", "all", "-o", directory])
+            written = sorted(path.name for path in Path(directory).iterdir())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(fetch.call_args.kwargs["item_type"], "prompt")
+        self.assertEqual(written, ["acb_all_prompts.txt"])
+        self.assertIn("Approved prompts found: 1", stdout)
+
+    def test_no_listings_of_the_kind_is_reported_by_name(self):
+        with patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), []),
+        ):
+            exit_code, _, stderr = _quiet_main(["@acb", "--item-type", "app", "--dry-run"])
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("no approved apps found for @acb", stderr)
+
+    def test_update_file_rewrites_a_bundle_catalog_in_place(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [self._bundle()]),
+        ):
+            catalog = Path(directory) / "acb_all_bundles.md"
+            first, _, _ = _quiet_main(
+                ["@acb", "--item-type", "bundle", "--mode", "all", "--output-file", str(catalog)]
+            )
+            second, stdout, _ = _quiet_main(
+                ["@acb", "--item-type", "bundle", "--mode", "all", "--fail-on-diff",
+                 "--update-file", str(catalog)]
+            )
+        self.assertEqual((first, second), (0, 0))
+        self.assertIn("Unchanged: 1", stdout)
 
 
 if __name__ == "__main__":

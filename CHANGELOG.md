@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `--item-type` (Action input `item-type`, a "Kind" list in the web UI) exports
+  a profile's `bundle`s or `app`s as well as its `prompt`s (the default).
+  Bundles and apps take their descriptions from PromptBase's public `Bundles`
+  and `AppDetails` records, are written to `<user>_<mode>_bundles.<ext>` and
+  `..._apps.<ext>` so they never overwrite a prompt catalog, link to
+  `promptbase.com/bundle/<slug>` and `/app/<slug>`, and carry an `item_type`
+  column; a prompt catalog keeps its original columns. Apps mirror the
+  profile's prompts, are free, and have no `type`. Skills are not supported.
+  The HTML catalog's markup gained a `data-noun` attribute so its heading and
+  search count name the right kind.
 - `--extra-fields` (Action input `extra-fields`, a checkbox group in the web
   UI) adds `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, and
   `unique_sales` to the markdown, JSON, CSV, and HTML exports. Only the fields

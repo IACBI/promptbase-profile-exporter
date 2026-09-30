@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from promptbase_exporter import __version__
 from promptbase_exporter.client import (
+    DETAIL_COLLECTIONS,
     EXTRA_FIELD_SOURCES,
     MAX_RETRIES,
     PROMPT_DETAIL_FIELDS,
@@ -21,12 +22,13 @@ from promptbase_exporter.client import (
     _raise_if_schema_changed,
     _run_query,
     _run_query_all,
+    fetch_prompt_details,
     fetch_prompt_items,
     fetch_prompts,
     field_filter,
     resolve_profile,
 )
-from promptbase_exporter.models import EXTRA_FIELDS, Profile
+from promptbase_exporter.models import EXTRA_FIELDS, ITEM_TYPES, Profile
 
 
 class PaginationTests(unittest.TestCase):
@@ -559,6 +561,77 @@ class ExtraFieldsFetchTests(unittest.TestCase):
                 patch("promptbase_exporter.client.fetch_prompt_details", return_value={}):
             with self.assertRaisesRegex(PromptBaseError, "numeric PromptBase field 'updated'"):
                 fetch_prompts("@acb", extra_fields=("updated",))
+
+
+class ItemTypeFetchTests(unittest.TestCase):
+    _profile = Profile(username="acb", uid="uid-1")
+
+    def test_every_kind_has_a_detail_collection(self):
+        self.assertEqual(tuple(DETAIL_COLLECTIONS), ITEM_TYPES)
+
+    def test_items_are_filtered_by_the_requested_kind(self):
+        for item_type in ITEM_TYPES:
+            with patch(
+                "promptbase_exporter.client._run_query_all", return_value=[]
+            ) as run_query_all:
+                fetch_prompt_items(self._profile, (), item_type)
+            filters = run_query_all.call_args.args[1]
+            self.assertIn(
+                field_filter("itemType", "EQUAL", {"stringValue": item_type}), filters
+            )
+
+    def test_details_come_from_the_kinds_own_collection(self):
+        expected = {"prompt": "PromptDetails", "bundle": "Bundles", "app": "AppDetails"}
+        for item_type, collection in expected.items():
+            with patch(
+                "promptbase_exporter.client._run_query_all", return_value=[]
+            ) as run_query_all:
+                fetch_prompt_details(self._profile, item_type)
+            self.assertEqual(run_query_all.call_args.args[0], collection)
+
+    def test_default_kind_is_prompts(self):
+        with patch("promptbase_exporter.client._run_query_all", return_value=[]) as query:
+            fetch_prompt_items(self._profile)
+            fetch_prompt_details(self._profile)
+        self.assertEqual([call.args[0] for call in query.call_args_list],
+                         ["Items", "PromptDetails"])
+
+    def test_unknown_kind_fails_before_any_request(self):
+        with patch("promptbase_exporter.client.resolve_profile") as resolve:
+            with self.assertRaisesRegex(ValueError, "Unknown item type: skill"):
+                fetch_prompts("@acb", item_type="skill")
+        resolve.assert_not_called()
+
+    def test_records_carry_the_kind_and_join_the_right_details(self):
+        item = {"slug": "kit", "title": "Kit", "type": "gpt", "domain": "text", "created": 5}
+        with patch("promptbase_exporter.client.resolve_profile", return_value=self._profile), \
+                patch("promptbase_exporter.client.fetch_prompt_items",
+                      return_value=[item]) as items, \
+                patch("promptbase_exporter.client.fetch_prompt_details",
+                      return_value={"kit": {"description": "A bundle"}}) as details:
+            _profile, records = fetch_prompts("@acb", item_type="bundle")
+        items.assert_called_once_with(self._profile, (), "bundle")
+        details.assert_called_once_with(self._profile, "bundle")
+        self.assertEqual(records[0].item_type, "bundle")
+        self.assertEqual(records[0].description, "A bundle")
+        self.assertEqual(records[0].url, "https://promptbase.com/bundle/kit")
+
+    def test_a_slug_shared_by_two_kinds_stays_separate(self):
+        # Live data: "website" is both a prompt and an app; each kind is fetched
+        # with its own itemType filter, so the two never merge.
+        prompt = {"slug": "website", "title": "P", "type": "gpt", "domain": "text", "created": 2}
+        app = {"slug": "website", "title": "A", "type": "", "domain": "text", "created": 1}
+        by_kind = {"prompt": [prompt], "app": [app]}
+
+        def query(collection, filters, **_kwargs):
+            wanted = next(
+                f["value"]["stringValue"] for f in filters if f["field"]["fieldPath"] == "itemType"
+            )
+            return by_kind[wanted]
+
+        with patch("promptbase_exporter.client._run_query_all", side_effect=query):
+            self.assertEqual(fetch_prompt_items(self._profile, (), "prompt")[0]["title"], "P")
+            self.assertEqual(fetch_prompt_items(self._profile, (), "app")[0]["title"], "A")
 
 
 if __name__ == "__main__":
