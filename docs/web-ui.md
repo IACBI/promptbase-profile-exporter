@@ -34,10 +34,25 @@ Then open <http://127.0.0.1:8765/>. Stop the server with `Ctrl+C`.
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | Address to bind, IPv4 or IPv6 (for example `::1`). Keep the loopback default unless you have a reason not to. |
 | `--port` | `8765` | Port to listen on. |
+| `--open` | off | Open the page in your default browser once the server is listening. |
 | `--version` | | Print the version and exit. |
 
 Files are written relative to the directory you start the server in; the
 "Output directory" field defaults to `exports`.
+
+## Previewing before you export
+
+**Preview matches** applies your filters, sort, and limit and lists what an export
+would select, without writing anything: how many records matched, the split into
+text and image, and a table of the first 100 (title, domain, type, price, views,
+sales, created) with a link to each prompt on PromptBase. It also says how many of
+the matches have no description, because an export stops on those unless "Allow
+partial exports" is on. Use it to check a filter before you write files.
+
+Preview is the first button, so pressing Enter in a text field previews rather
+than exports. It makes the same outbound request as an export and passes the same
+cross-origin and Host checks; only the file writing is skipped. Tables that are
+wider than the window scroll inside their own box instead of widening the page.
 
 ## Security model
 

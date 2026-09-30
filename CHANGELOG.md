@@ -15,6 +15,20 @@ All notable changes to this project will be documented in this file.
   self-contained HTML page with trend charts (`--since DATE` or `--days N` pick the
   baseline). It uses the standard library's `sqlite3` only, stores values through
   parameterised queries, versions its file, and refuses a file that is not its own.
+- The web UI has a **Preview matches** button: it applies your filters, sort, and
+  limit and lists what an export would select (the counts, the text and image
+  split, how many have no description, and a table of the first 100 with links),
+  without writing anything. It is the first button, so Enter in a text field
+  previews rather than exports, and it passes the same cross-origin and Host
+  checks as an export. `pb-web --open` opens the page in your browser once the
+  server is listening.
+
+### Fixed
+
+- In the web UI, the export result table now names the kind it exported ("Bundles",
+  "Apps") instead of always saying "Prompts", and a table that is wider than a
+  phone screen scrolls inside its own box instead of making the whole page scroll
+  sideways.
 
 ## 0.11.0 - 2026-09-30
 
