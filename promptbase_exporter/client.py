@@ -72,7 +72,7 @@ EXTRA_FIELD_SOURCES = {
     "last_sale": "lastSale",
     "unique_sales": "uniqueSales",
 }
-assert tuple(EXTRA_FIELD_SOURCES) == EXTRA_FIELDS
+assert tuple(EXTRA_FIELD_SOURCES) == EXTRA_FIELDS  # noqa: S101 - import-time table check
 # The public collection that holds each kind's description. They all carry
 # slug, description, and created, and are joined to Items by slug (verified:
 # every Bundles and AppDetails document matches exactly one Items document).
@@ -81,7 +81,7 @@ DETAIL_COLLECTIONS = {
     "bundle": "Bundles",
     "app": "AppDetails",
 }
-assert tuple(DETAIL_COLLECTIONS) == ITEM_TYPES
+assert tuple(DETAIL_COLLECTIONS) == ITEM_TYPES  # noqa: S101 - import-time table check
 
 
 class PromptBaseError(RuntimeError):
@@ -207,7 +207,8 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
     last_error: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            # The URL is always an https:// Firestore endpoint built in this module.
+            with urllib.request.urlopen(request, timeout=90) as response:  # noqa: S310
                 return _read_json(response)
         except urllib.error.HTTPError as exc:
             # The error doubles as the open HTTP response; release its socket.

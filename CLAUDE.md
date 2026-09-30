@@ -70,7 +70,7 @@ The local equivalent of CI (run before committing):
 python -m ruff check .
 python -m mypy
 python -m coverage run -m unittest discover -s tests
-python -m coverage report      # must stay >= 70%
+python -m coverage report      # must stay >= 85%
 ```
 
 Run the tool: `python -m promptbase_exporter @acb --dry-run`
@@ -85,7 +85,7 @@ silently if ruff is not installed.
 - **Branch → PR → main.** `main` is protected and requires green CI. Never push
   to `main` directly; work on a feature branch and open a PR.
 - **Tests are required** for behavior changes (`unittest`, no pytest). Mirror
-  the existing test style; keep coverage >= 70%.
+  the existing test style; keep coverage >= 85%.
 - **Update docs in the same change:** add a `## Unreleased` entry to
   `CHANGELOG.md`, and update `docs/cli.md` (options table) /
   `docs/github-action.md` when user-facing flags change. `docs/web-ui.md`

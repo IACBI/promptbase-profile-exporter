@@ -37,11 +37,13 @@ def setUpModule():
 
 
 def sample(slug="one", **overrides):
-    values = dict(
-        title="Title " + slug, description="Line one\nLine two", slug=slug, prompt_type="gpt",
-        domain="text", created=1_767_225_600_000, price=2.5, tags=("a", "b"), engine="gpt-5",
-        unique_sales=2,
-    )
+    values = {
+        "title": "Title " + slug, "description": "Line one\nLine two", "slug": slug,
+        "prompt_type": "gpt",
+        "domain": "text", "created": 1_767_225_600_000, "price": 2.5, "tags": ("a", "b"),
+        "engine": "gpt-5",
+        "unique_sales": 2,
+    }
     values.update(overrides)
     return PromptRecord(**values)
 

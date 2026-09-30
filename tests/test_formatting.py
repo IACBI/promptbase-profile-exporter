@@ -520,12 +520,13 @@ class HtmlExportTests(unittest.TestCase):
 
 
 def extras_record(**overrides):
-    values = dict(
-        title="Extras", description="d", slug="extras", prompt_type="gpt", domain="text",
-        created=1_767_225_600_000, price=2.5,
-        tags=("poster", "icons"), engine="gpt-5.5", nsfw=False, featured=True,
-        updated=1_788_566_967_782, last_sale=None, unique_sales=3,
-    )
+    values = {
+        "title": "Extras", "description": "d", "slug": "extras", "prompt_type": "gpt",
+        "domain": "text",
+        "created": 1_767_225_600_000, "price": 2.5,
+        "tags": ("poster", "icons"), "engine": "gpt-5.5", "nsfw": False, "featured": True,
+        "updated": 1_788_566_967_782, "last_sale": None, "unique_sales": 3,
+    }
     values.update(overrides)
     return PromptRecord(**values)
 
@@ -652,10 +653,11 @@ class ExtraFieldsTests(unittest.TestCase):
 
 
 def kind_record(item_type, **overrides):
-    values = dict(
-        title="Kinds", description="d", slug="kinds", prompt_type="gpt", domain="text",
-        created=1_767_225_600_000, price=2.5, item_type=item_type,
-    )
+    values = {
+        "title": "Kinds", "description": "d", "slug": "kinds", "prompt_type": "gpt",
+        "domain": "text",
+        "created": 1_767_225_600_000, "price": 2.5, "item_type": item_type,
+    }
     values.update(overrides)
     return PromptRecord(**values)
 

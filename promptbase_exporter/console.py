@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 
@@ -19,7 +20,5 @@ def make_output_safe() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:  # a StringIO, or a stream that is not a text file
             continue
-        try:
+        with contextlib.suppress(OSError, ValueError):
             reconfigure(errors="replace")
-        except (OSError, ValueError):
-            pass

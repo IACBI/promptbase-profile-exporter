@@ -54,7 +54,7 @@ EXTRA_FIELD_COLUMNS = {
     "last_sale": ("last_sale", "last_sale_iso"),
     "unique_sales": ("unique_sales",),
 }
-assert tuple(EXTRA_FIELD_COLUMNS) == EXTRA_FIELDS
+assert tuple(EXTRA_FIELD_COLUMNS) == EXTRA_FIELDS  # noqa: S101 - import-time table check
 FORMAT_EXTENSIONS = {
     "txt": "txt",
     "markdown": "md",
@@ -67,8 +67,8 @@ FORMAT_EXTENSIONS = {
 # break although JSON leaves them raw inside a string. An NDJSON record must
 # stay on one physical line, so these are written as \u escapes.
 _NDJSON_LINE_BREAKS = {
-    " ": "\\u2028",
-    " ": "\\u2029",
+    "\u2028": "\\u2028",
+    "\u2029": "\\u2029",
     "\u0085": "\\u0085",
 }
 # Spreadsheet apps evaluate a cell that starts with one of these as a formula

@@ -66,8 +66,11 @@ def load_catalog(
     skipped, unless ``strict`` is set: then it raises ValueError, so a caller
     that must not lose data notices.
     """
-    text = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
+    # A CSV keeps a description's own "\r\n" inside a quoted cell; reading it with
+    # universal newlines would turn that into "\n" and report a change that never happened.
+    with path.open(encoding="utf-8", newline="" if suffix == ".csv" else None) as handle:
+        text = handle.read()
     if suffix == ".json":
         data = json.loads(text)
         if not isinstance(data, list):
@@ -225,10 +228,7 @@ def format_diff_json(diff: CatalogDiff) -> str:
 
 def write_diff_report(path: Path, diff: CatalogDiff) -> Path:
     """Write the report as JSON for a ``.json`` path, otherwise as Markdown."""
-    if path.suffix.lower() == ".json":
-        content = format_diff_json(diff)
-    else:
-        content = format_diff_report(diff)
+    content = format_diff_json(diff) if path.suffix.lower() == ".json" else format_diff_report(diff)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
     return path

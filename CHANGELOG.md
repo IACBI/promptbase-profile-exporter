@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A CSV catalog is now read with its line breaks intact: a description or title
+  with `\r\n` or `\r` inside a quoted cell used to come back as `\n`, so `--compare`,
+  `--update-file`, `pb-diff`, and `pb-convert` could see a change that never
+  happened. None of the profiles checked live (`@acb`, `@emanema`) has such a
+  value today; it was found by the new round-trip fuzz test.
+
+### Changed
+
+- Development only: a seeded fuzz test writes random records full of hostile
+  characters (quotes, separators, Unicode line breaks, emoji, formula prefixes) in
+  every lossless format and requires them to read back exactly; ruff now also
+  checks bugbear, comprehension, simplify, ruff-specific, and security rules; the
+  coverage gate is 85% (it was 70%, and the suite is at 93%).
+
 ## 0.12.0 - 2026-09-30
 
 ### Added

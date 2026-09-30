@@ -1014,7 +1014,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
     def _expected_authorities(self) -> set[str]:
         """Host:port authorities this server legitimately answers to."""
         server_address = self.server.server_address
-        assert isinstance(server_address, tuple)
+        assert isinstance(server_address, tuple)  # noqa: S101 - type narrowing
         host, port = server_address[0], server_address[1]
         names = {_url_host(host)}
         if host in {"127.0.0.1", "0.0.0.0", "::", "::1"}:

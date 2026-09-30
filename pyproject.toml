@@ -70,7 +70,7 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 70
+fail_under = 85
 exclude_also = [
   "if __name__ == .__main__.:",
   "raise SystemExit",
@@ -81,4 +81,12 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# "0.0.0.0" appears in web.py only as a value to recognise, never as an address to bind.
+"promptbase_exporter/web.py" = ["S104"]
+# Tests assert, run the tool's own subprocess, open local test servers, bind test sockets,
+# nest `with` blocks for readability, and use a seeded PRNG to fuzz (not for secrets).
+"tests/*" = ["S101", "S104", "S310", "S311", "S603", "SIM117", "RUF012"]
+".claude/hooks/*" = ["S603", "S607"]

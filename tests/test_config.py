@@ -30,10 +30,11 @@ def setUpModule():
 
 
 def record(slug="a", **overrides):
-    values = dict(
-        title=slug.title(), description="d", slug=slug, prompt_type="gpt", domain="text",
-        created=1, price=1.0, sales=0,
-    )
+    values = {
+        "title": slug.title(), "description": "d", "slug": slug, "prompt_type": "gpt",
+        "domain": "text",
+        "created": 1, "price": 1.0, "sales": 0,
+    }
     values.update(overrides)
     return PromptRecord(**values)
 

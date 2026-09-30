@@ -519,7 +519,7 @@ class ExtraFieldsFetchTests(unittest.TestCase):
 
     def test_requested_fields_are_added_under_their_firestore_names(self):
         fields = self._fetch_items(("last_sale", "tags"))
-        self.assertEqual(fields, PROMPT_ITEM_FIELDS + ("lastSale", "tags"))
+        self.assertEqual(fields, (*PROMPT_ITEM_FIELDS, "lastSale", "tags"))
 
     def test_every_extra_field_has_a_firestore_source(self):
         self.assertEqual(tuple(EXTRA_FIELD_SOURCES), EXTRA_FIELDS)
