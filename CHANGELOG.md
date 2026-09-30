@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.9.3 - 2026-09-30
+
 ### Changed
 
 - Exports download far less data. Queries ask Firestore for only the fields the
@@ -20,7 +22,8 @@ All notable changes to this project will be documented in this file.
   extension. Previously `--update-file catalog.csv --format json` wrote JSON
   into `catalog.csv`, which every later run then failed to read as CSV.
 - The web UI starts on an IPv6 address such as `--host ::1`, including a
-  scoped link-local one such as `fe80::1%eth0`; it used to fail to bind. Requests addressed to `[::1]:port` pass the Host/Origin checks.
+  scoped link-local one such as `fe80::1%eth0`; it used to fail to bind.
+  Requests addressed to `[::1]:port` pass the Host/Origin checks.
 - A write that fails part-way under `--output-file` without `--overwrite` no
   longer leaves a truncated file behind that blocks the retry with "already
   exists".

@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: IACBI/promptbase-profile-exporter@v0.9.2
+      - uses: IACBI/promptbase-profile-exporter@v0.9.3
         with:
           profile-url: ${{ github.event.inputs.profile_url || 'https://promptbase.com/profile/acb' }}
           mode: split
@@ -51,7 +51,7 @@ change under you. For the strongest guarantee, pin the full commit SHA of a
 release, as GitHub recommends for third-party actions:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.2
+- uses: IACBI/promptbase-profile-exporter@v0.9.3
 ```
 
 ## Commit exports back to the repository
@@ -75,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: IACBI/promptbase-profile-exporter@v0.9.2
+      - uses: IACBI/promptbase-profile-exporter@v0.9.3
         with:
           profile-url: https://promptbase.com/profile/acb
           mode: split
@@ -145,7 +145,7 @@ Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 
 ```yaml
 - id: export
-  uses: IACBI/promptbase-profile-exporter@v0.9.2
+  uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: https://promptbase.com/profile/acb
 - run: ls -R "${{ steps.export.outputs.output-dir }}"
@@ -156,7 +156,7 @@ Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 Export only text prompts to CSV:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.2
+- uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: "@acb"
     mode: text
@@ -166,7 +166,7 @@ Export only text prompts to CSV:
 Export only paid image prompts, sorted by views:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.2
+- uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: image
@@ -178,7 +178,7 @@ Export only paid image prompts, sorted by views:
 Create timestamped backups:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.2
+- uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: split
@@ -189,7 +189,7 @@ Create timestamped backups:
 Fail a workflow when the catalog changed:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.2
+- uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: all
@@ -204,7 +204,7 @@ Keep a catalog in the repository up to date, and act on what changed:
 ```yaml
 - uses: actions/checkout@v7
 - id: catalog
-  uses: IACBI/promptbase-profile-exporter@v0.9.2
+  uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: all
@@ -221,7 +221,7 @@ Keep a catalog in the repository up to date, and act on what changed:
 Export several profiles as searchable HTML catalogs:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.2
+- uses: IACBI/promptbase-profile-exporter@v0.9.3
   with:
     profile-url: |
       @acb
