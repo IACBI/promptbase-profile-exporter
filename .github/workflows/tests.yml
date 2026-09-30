@@ -39,6 +39,7 @@ jobs:
       - run: promptbase-export-web --version
       - run: promptbase-diff --version
       - run: promptbase-convert --version
+      - run: promptbase-history --version
 
   # Platforms beyond the required Ubuntu matrix above. The web UI has
   # Windows-specific path handling (UNC paths), and Windows and macOS are where

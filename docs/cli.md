@@ -500,6 +500,45 @@ app catalogs.
 - `--csv-safe` protects the CSV being written; `--from-csv-safe` says the CSV
   being read was written with `--csv-safe`, so its escaped cells are restored.
 
+## Tracking changes over time
+
+`pb-history` (`promptbase-history`, or `python -m promptbase_exporter.history`
+without installing) keeps snapshots of a profile's counters in a SQLite file and
+reports what moved between two of them. It uses only the standard library's
+`sqlite3`, and nothing is sent anywhere.
+
+```bash
+pb-history snapshot @acb --db history.sqlite          # run this on a schedule
+pb-history snapshot @acb @dreamydesigns --db history.sqlite
+pb-history list --db history.sqlite
+pb-history report --db history.sqlite                 # the latest snapshot against the one before
+pb-history report --db history.sqlite --days 7 --metric views --top 20
+pb-history report --db history.sqlite --since 2026-09-01 --format html -o trends.html
+```
+
+- **A snapshot** holds the views, sales, downloads, favorites, reviews, rating,
+  price, and discount of every listing of one kind for one profile (`--item-type`
+  picks prompts, bundles, or apps, which are kept apart), whatever filters a later
+  export would use. A listing is identified by its slug. It takes about 20 ms and
+  roughly 100 bytes per listing to store.
+- **A report** compares the latest snapshot with a baseline: the previous one by
+  default, the first taken on or after `--since DATE` (UTC), or the latest taken at
+  least `--days N` before the latest. It shows the totals before and after, the top
+  movers by `--metric` (`views`, `sales`, `downloads`, `favorites`, or `reviews`;
+  only listings that gained), new and removed listings, and price or discount
+  changes. `--format` is `markdown` (the default), `json`, or `html`, a
+  self-contained page with small trend charts of the totals across every snapshot;
+  `-o` writes it to a file instead of the terminal.
+- **One profile per report:** if the file holds several, name one with `--profile`.
+- **Safe to keep around:** every value is stored through parameterised queries and
+  every value in a report is escaped (HTML) or cell-safe (Markdown). The file has
+  a format version, a file that is not a `pb-history` file is refused and left
+  untouched, and a newer format is refused rather than misread.
+
+Exit codes: `0` on success and `1` for an error, such as a missing file, fewer than
+two snapshots, or a profile that could not be fetched (the others are still
+recorded).
+
 ## Inspecting without writing
 
 ```bash

@@ -79,6 +79,7 @@ promptbase_exporter/
   client.py       # public PromptBase/Firestore access, retries, schema checks
   config.py       # `--config`: read options from a JSON or TOML file
   layout.py       # `--layout files`: one Markdown file per prompt
+  history.py      # `pb-history`: counter snapshots in SQLite and trend reports
   console.py      # makes stdout/stderr safe for text a legacy code page cannot encode
   convert.py      # `pb-convert`: rewrite a saved catalog in another format
   dates.py        # shared date parsing

@@ -50,7 +50,8 @@ GitHub Action for scheduled exports.
   values, as Markdown or JSON; rewrites it in place atomically; and can fail a
   CI job when the catalog drifts. `pb-diff` compares two saved catalogs
   offline, even across formats, and `pb-convert` rewrites a saved catalog in
-  another format, matching a fresh export byte for byte.
+  another format, matching a fresh export byte for byte. `pb-history` keeps
+  snapshots of your counters in a SQLite file and reports what moved.
 - Checks every written file against the expected record count, and stops with
   a clear error if PromptBase changes its public data model instead of
   writing a misleading catalog.
@@ -197,7 +198,9 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
   olmadan günceller, katalog değiştiğinde CI işini başarısız sayabilir.
   `pb-diff` ise kayıtlı iki kataloğu, biçimleri farklı olsa bile, internete
   bağlanmadan karşılaştırır; `pb-convert` kayıtlı bir kataloğu başka bir
-  biçimde yeniden yazar ve sonuç taze bir dışa aktarımla bayt bayt aynıdır.
+  biçimde yeniden yazar ve sonuç taze bir dışa aktarımla bayt bayt aynıdır;
+  `pb-history` sayaçlarınızın anlık görüntülerini bir SQLite dosyasında tutar ve
+  nelerin değiştiğini raporlar.
 - Yazılan her dosyadaki kayıt sayısını doğrular. PromptBase herkese açık veri
   yapısını değiştirirse yanıltıcı bir katalog yazmak yerine açık bir hatayla
   durur.
