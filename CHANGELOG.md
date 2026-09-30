@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `pb-history` (`promptbase-history`, or `python -m promptbase_exporter.history`)
+  keeps snapshots of a profile's views, sales, downloads, favorites, reviews,
+  rating, and price in a SQLite file, and reports what moved: `pb-history snapshot
+  @acb --db history.sqlite` on a schedule, then `pb-history report --db
+  history.sqlite` for the totals before and after, the top movers by a chosen
+  counter, new and removed listings, and price changes, as Markdown, JSON, or a
+  self-contained HTML page with trend charts (`--since DATE` or `--days N` pick the
+  baseline). It uses the standard library's `sqlite3` only, stores values through
+  parameterised queries, versions its file, and refuses a file that is not its own.
 - The web UI has a **Preview matches** button: it applies your filters, sort, and
   limit and lists what an export would select (the counts, the text and image
   split, how many have no description, and a table of the first 100 with links),
