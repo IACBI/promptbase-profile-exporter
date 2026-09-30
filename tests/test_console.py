@@ -9,8 +9,13 @@ from promptbase_exporter.cli import diff_main, main
 from promptbase_exporter.console import make_output_safe
 from promptbase_exporter.models import Profile, PromptRecord
 from promptbase_exporter.web import main as web_main
+from tests.scratch import use_scratch_working_directory
 
 EMOJI_TITLE = "Pin \U0001f4cc prompt"
+
+
+def setUpModule():
+    use_scratch_working_directory()
 
 
 def legacy_stream():

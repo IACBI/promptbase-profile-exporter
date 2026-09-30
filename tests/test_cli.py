@@ -1,6 +1,5 @@
 import io
 import json
-import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -18,24 +17,11 @@ from promptbase_exporter.cli import (
 from promptbase_exporter.client import PromptBaseError
 from promptbase_exporter.formatting import write_export, write_export_to_path
 from promptbase_exporter.models import Profile, PromptRecord
+from tests.scratch import use_scratch_working_directory
 
 
 def setUpModule():
-    # The default --output-dir is relative to the working directory, so a test
-    # that forgets to set one writes exports/ into the repository. Run the
-    # module from an empty scratch directory and fail if anything lands in it.
-    sandbox = TemporaryDirectory()
-    original = os.getcwd()
-    os.chdir(sandbox.name)
-
-    def restore():
-        leaked = sorted(os.listdir(sandbox.name))
-        os.chdir(original)  # Windows cannot remove the current directory
-        sandbox.cleanup()
-        if leaked:
-            raise AssertionError(f"a CLI test wrote into the working directory: {leaked}")
-
-    unittest.addModuleCleanup(restore)
+    use_scratch_working_directory()
 
 
 def record(title, domain, prompt_type, price=0.0, created=1):

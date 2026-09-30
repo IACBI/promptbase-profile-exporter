@@ -27,8 +27,13 @@ from promptbase_exporter.web import (
     DOWNLOAD_CONTENT_TYPES,
     build_request_config,
 )
+from tests.scratch import use_scratch_working_directory
 
 LINE_BREAKS = "\u2028\u2029\u0085"
+
+
+def setUpModule():
+    use_scratch_working_directory()
 
 
 def sample(slug="one", **overrides):
