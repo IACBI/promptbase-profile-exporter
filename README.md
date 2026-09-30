@@ -34,7 +34,8 @@ GitHub Action for scheduled exports.
 - Accepts a profile URL (with or without `https://`), a `profile/<name>` path, a
   username, or `@username`,
   and exports several profiles in one run.
-- Exports a profile's prompts, bundles, or apps (`--item-type`).
+- Exports a profile's prompts, bundles, or apps (`--item-type`), and reads its
+  options from a `.json` or `.toml` file with `--config`.
 - Writes `txt`, `markdown`, `json`, `csv`, or a self-contained `html` page you
   can search in the browser, split into `all`, `text`, and `image` catalogs or
   as a single file. `--csv-safe` keeps CSV cells from running as spreadsheet
@@ -121,6 +122,7 @@ The ones you will reach for most:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
+| `--config` | none | Read options from a `.json` or `.toml` file (see `docs/cli.md`) |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text`, or `image` |
 | `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html` |
 | `--output-dir` | `exports` | Where generated files go |
@@ -175,7 +177,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 - Profil adresi (`https://` ile ya da onsuz), `profile/<ad>` yolu, kullanıcı adı
   ya da `@kullanıcıadı` kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
 - Bir profilin prompt'larını, bundle'larını ya da app'lerini dışa aktarır
-  (`--item-type`).
+  (`--item-type`) ve seçeneklerini `--config` ile bir `.json` ya da `.toml`
+  dosyasından okur.
 - `txt`, `markdown`, `json`, `csv` ya da tarayıcıda arama yapılabilen, tek
   dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
   kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV
@@ -267,6 +270,7 @@ yapılandırma dosyası yoktur. En sık kullanacaklarınız:
 
 | Seçenek | Varsayılan | Amaç |
 | --- | --- | --- |
+| `--config` | yok | Seçenekleri bir `.json` ya da `.toml` dosyasından okur (bkz. `docs/cli.md`) |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text` veya `image` |
 | `--format` | `txt` | `txt`, `markdown`, `json`, `csv` veya `html` |
 | `--output-dir` | `exports` | Üretilen dosyaların yazılacağı klasör |
