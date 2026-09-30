@@ -92,6 +92,64 @@ jobs:
           git push
 ```
 
+## Open a pull request when the catalog changes
+
+Use this to review catalog changes instead of committing them straight to your
+default branch. The first run needs a catalog to compare against; create it once
+with `output-file` (for example `output-file: catalog/acb_all_prompts.json`).
+
+```yaml
+name: Refresh PromptBase catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: update
+        uses: IACBI/promptbase-profile-exporter@v0.9.3
+        with:
+          profile-url: https://promptbase.com/profile/acb
+          mode: all
+          update-file: catalog/acb_all_prompts.json
+          upload-artifact: false
+
+      - name: Open a pull request with the changes
+        if: steps.update.outputs.has-changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADDED: ${{ steps.update.outputs.added }}
+          REMOVED: ${{ steps.update.outputs.removed }}
+          CHANGED: ${{ steps.update.outputs.changed }}
+        run: |
+          set -euo pipefail
+          branch="catalog-refresh-$GITHUB_RUN_ID"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add catalog/
+          git commit -m "Refresh PromptBase catalog"
+          git push -u origin "$branch"
+          gh pr create --base "$GITHUB_REF_NAME" --head "$branch"             --title "Refresh PromptBase catalog"             --body "Added $ADDED, removed $REMOVED, changed $CHANGED. The run's summary page has the full diff."
+```
+
+`update-file` rewrites the catalog in the workflow's checkout, so the job
+commits that change on a new branch and opens the pull request. Two things to
+know: the repository setting "Allow GitHub Actions to create and approve pull
+requests" (Settings, Actions, General) must be on, and a pull request opened
+with the default `GITHUB_TOKEN` does not start other workflows, so use a
+personal access token or a GitHub App token if your checks must run on it.
+
 ## Inputs
 
 | Input | Default | Description |
@@ -117,6 +175,7 @@ jobs:
 | `update-file` | Empty | Compare against this catalog and rewrite it in place. Requires `mode` other than `split`. |
 | `compare` | Empty | Existing catalog path to compare against. Requires `mode` other than `split`. |
 | `diff-output` | Empty | Optional path for the comparison report: JSON for a `.json` path, Markdown otherwise. |
+| `step-summary` | `true` | With `compare` or `update-file`, show the diff report on the workflow run's summary page. Use `false` to turn it off. |
 | `fail-on-diff` | `false` | Exit with code 2 when `compare` or `update-file` finds changes. |
 | `extra-fields` | Empty | Extra fields to include, comma-separated or `all`: `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, `unique_sales`. Not for `txt`. |
 | `csv-safe` | `false` | Protect CSV text cells from spreadsheet formula injection. Requires CSV output. |
@@ -142,6 +201,11 @@ jobs:
 
 The comparison outputs are set even when `fail-on-diff` fails the step, so a
 later step with `if: always()` can still read them.
+
+With `compare` or `update-file`, the action also writes the diff report (the
+Markdown form of `diff-json`) to the workflow run's summary page, so you can see
+what changed without opening a log. A report over 900 KB is cut, with a note to
+use `diff-json` for the full diff. Set `step-summary: false` to turn it off.
 
 Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 
