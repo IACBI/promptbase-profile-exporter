@@ -124,11 +124,11 @@ Further reading:
 ### Configuration
 
 Options are set per run on the command line, or from a `.json` or `.toml` file
-with `--config`. The ones you will reach for most:
+with `--config` (TOML needs Python 3.11 or newer). The ones you will reach for most:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--config` | none | Read options from a `.json` or `.toml` file (see `docs/cli.md`) |
+| `--config` | none | Read options from a `.json` or `.toml` file (TOML needs Python 3.11 or newer; see `docs/cli.md`) |
 | `--layout` | `catalog` | `files` writes one Markdown file per prompt, with front matter |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text`, or `image` |
 | `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html` |
@@ -280,11 +280,11 @@ Ayrıntılı dokümanlar (İngilizce):
 ### Yapılandırma
 
 Seçenekler çalıştırma sırasında komut satırından ya da `--config` ile bir
-`.json` veya `.toml` dosyasından ayarlanır. En sık kullanacaklarınız:
+`.json` veya `.toml` dosyasından ayarlanır (TOML için Python 3.11 veya üstü gerekir). En sık kullanacaklarınız:
 
 | Seçenek | Varsayılan | Amaç |
 | --- | --- | --- |
-| `--config` | yok | Seçenekleri bir `.json` ya da `.toml` dosyasından okur (bkz. `docs/cli.md`) |
+| `--config` | yok | Seçenekleri bir `.json` ya da `.toml` (TOML için Python 3.11+ gerekir) dosyasından okur (bkz. `docs/cli.md`) |
 | `--layout` | `catalog` | `files`, her prompt için front matter'lı ayrı bir Markdown dosyası yazar |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text` veya `image` |
 | `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv` veya `html` |
