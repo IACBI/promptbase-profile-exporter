@@ -490,5 +490,25 @@ class StrictLoadTests(unittest.TestCase):
                 load_catalog(path, strict=True)
 
 
+class CsvLineBreakTests(unittest.TestCase):
+    DESCRIPTION = "first\r\nsecond\rthird\nfourth"
+
+    def _written(self, directory, export_format):
+        return write_export(
+            Path(directory), "acb", "all", [record("Breaks", self.DESCRIPTION)], export_format
+        )
+
+    def test_line_breaks_inside_a_cell_are_read_back_exactly(self):
+        with TemporaryDirectory() as directory:
+            loaded = load_catalog(self._written(directory, "csv"))
+        self.assertEqual(loaded[0]["description"], self.DESCRIPTION)
+
+    def test_a_csv_is_not_reported_changed_against_the_same_records_as_json(self):
+        with TemporaryDirectory() as directory:
+            as_csv = load_catalog(self._written(directory, "csv"))
+            as_json = load_catalog(self._written(directory, "json"))
+        self.assertFalse(compare_catalog_records(as_json, as_csv).has_changes)
+
+
 if __name__ == "__main__":
     unittest.main()

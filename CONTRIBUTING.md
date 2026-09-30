@@ -28,7 +28,7 @@ checks locally before you push:
 python -m ruff check .
 python -m mypy
 python -m coverage run -m unittest discover -s tests
-python -m coverage report        # must stay at or above 70%
+python -m coverage report        # must stay at or above 85%
 python -m build
 python -m twine check dist/*
 ```

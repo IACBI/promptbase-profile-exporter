@@ -64,7 +64,7 @@ def split_config(
     """
     known = {
         option[2:]: action
-        for option, action in parser._option_string_actions.items()  # noqa: SLF001
+        for option, action in parser._option_string_actions.items()
         if option.startswith("--") and option[2:] not in EXCLUDED_OPTIONS
     }
     arguments: list[str] = []
@@ -105,7 +105,7 @@ def _tokens(key: str, option: str, action: argparse.Action, value: Any) -> list[
         return [flag] if value else []
     # The --option=value form, not two tokens: a value that starts with a hyphen
     # (a directory called "-exports") would otherwise be read as another option.
-    if isinstance(action, argparse._AppendAction):  # noqa: SLF001
+    if isinstance(action, argparse._AppendAction):
         values = value if isinstance(value, list) else [value]
         return [f"{flag}={_scalar(key, item)}" for item in values]
     if isinstance(value, list) and option in COMMA_LIST_OPTIONS:

@@ -28,7 +28,7 @@ from .models import ITEM_TYPE_PLURALS, PromptRecord
 
 LAYOUTS = ("catalog", "files")
 FILES_FORMAT = "markdown"
-assert FILES_FORMAT in EXPORT_FORMATS
+assert FILES_FORMAT in EXPORT_FORMATS  # noqa: S101 - import-time table check
 
 # Device names Windows refuses as a file name, with or without an extension.
 _WINDOWS_RESERVED = frozenset(

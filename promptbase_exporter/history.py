@@ -247,7 +247,7 @@ def totals_series(
     """The totals of every counter at every snapshot, oldest first, for a chart."""
     sums = ", ".join(f"SUM(o.{counter})" for counter in COUNTERS)
     rows = connection.execute(
-        f"SELECT s.taken_at, COUNT(o.slug), {sums} FROM snapshots s "
+        f"SELECT s.taken_at, COUNT(o.slug), {sums} FROM snapshots s "  # noqa: S608
         "LEFT JOIN observations o ON o.snapshot_id = s.id "
         "WHERE s.profile = ? AND s.item_type = ? GROUP BY s.id ORDER BY s.taken_at, s.id",
         (profile, item_type),

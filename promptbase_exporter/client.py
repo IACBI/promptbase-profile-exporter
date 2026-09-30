@@ -72,7 +72,7 @@ EXTRA_FIELD_SOURCES = {
     "last_sale": "lastSale",
     "unique_sales": "uniqueSales",
 }
-assert tuple(EXTRA_FIELD_SOURCES) == EXTRA_FIELDS
+assert tuple(EXTRA_FIELD_SOURCES) == EXTRA_FIELDS  # noqa: S101 - import-time table check
 # The public collection that holds each kind's description. They all carry
 # slug, description, and created, and are joined to Items by slug (verified:
 # every Bundles and AppDetails document matches exactly one Items document).
@@ -81,7 +81,7 @@ DETAIL_COLLECTIONS = {
     "bundle": "Bundles",
     "app": "AppDetails",
 }
-assert tuple(DETAIL_COLLECTIONS) == ITEM_TYPES
+assert tuple(DETAIL_COLLECTIONS) == ITEM_TYPES  # noqa: S101 - import-time table check
 
 
 class PromptBaseError(RuntimeError):
