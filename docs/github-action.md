@@ -118,6 +118,7 @@ jobs:
 | `diff-output` | Empty | Optional path for the comparison report: JSON for a `.json` path, Markdown otherwise. |
 | `fail-on-diff` | `false` | Exit with code 2 when `compare` or `update-file` finds changes. |
 | `csv-safe` | `false` | Protect CSV text cells from spreadsheet formula injection. Requires CSV output. |
+| `compare-csv-safe` | `false` | The CSV `compare` / `update-file` catalog was written with `csv-safe`; restore its escaped cells when comparing. |
 | `dry-run` | `false` | Fetch, filter, and validate without writing files. Skips the artifact upload. |
 | `timestamp-filenames` | `false` | Add a timestamp to generated filenames. |
 | `allow-missing-descriptions` | `false` | Write partial exports when descriptions are missing. |

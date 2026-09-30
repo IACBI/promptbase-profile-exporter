@@ -88,6 +88,12 @@ inputs:
     description: Protect CSV text cells from spreadsheet formula injection. Requires csv output.
     required: false
     default: "false"
+  compare-csv-safe:
+    description: >-
+      The CSV compare / update-file catalog was written with csv-safe; restore
+      its escaped cells when comparing.
+    required: false
+    default: "false"
   dry-run:
     description: Fetch, filter, and validate without writing files. Skips the artifact upload.
     required: false
@@ -251,6 +257,7 @@ runs:
         OVERWRITE: ${{ inputs.overwrite }}
         UPDATE_FILE: ${{ inputs.update-file }}
         CSV_SAFE: ${{ inputs.csv-safe }}
+        COMPARE_CSV_SAFE: ${{ inputs.compare-csv-safe }}
         DRY_RUN: ${{ inputs.dry-run }}
         LIMIT: ${{ inputs.limit }}
         SINCE: ${{ inputs.since }}
@@ -378,6 +385,7 @@ runs:
           --allow-missing-descriptions
         add_flag overwrite "$OVERWRITE" --overwrite
         add_flag csv-safe "$CSV_SAFE" --csv-safe
+        add_flag compare-csv-safe "$COMPARE_CSV_SAFE" --compare-csv-safe
         add_flag dry-run "$DRY_RUN" --dry-run
 
         # Always capture a machine-readable diff so its counts become outputs.

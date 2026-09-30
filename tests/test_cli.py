@@ -530,6 +530,14 @@ class NewOptionValidationTests(unittest.TestCase):
             self.assertEqual(exit_code, EXIT_ERROR)
             self.assertIn("take a single profile", stderr)
 
+    def test_compare_csv_safe_requires_a_csv_comparison_catalog(self):
+        for extra in ([], ["--compare", "old.json"]):
+            exit_code, stderr = self._run_expecting_failure(
+                ["@acb", "--mode", "all", "--compare-csv-safe", *extra]
+            )
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("--compare-csv-safe requires a CSV", stderr)
+
     def test_blank_profile_is_rejected(self):
         exit_code, stderr = self._run_expecting_failure(["  "])
         self.assertEqual(exit_code, EXIT_ERROR)
@@ -601,6 +609,58 @@ class NewOptionBehaviourTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(slugs, ["popular"])
+
+    def test_update_file_reads_safe_csv_only_when_told(self):
+        records = [PromptRecord("=cmd", "d", "x", "gpt", "text", 1, 0.0)]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), records),
+        ):
+            catalog = Path(directory) / "catalog.csv"
+            base = ["@acb", "--mode", "all", "--quiet"]
+            first, _, _ = _quiet_main([*base, "--csv-safe", "--output-file", str(catalog)])
+            update = [*base, "--fail-on-diff", "--update-file", str(catalog), "--csv-safe"]
+            # Declared safe: the escaped "'=cmd" is restored and nothing changed.
+            safe_run, _, _ = _quiet_main([*update, "--compare-csv-safe"])
+            # Not declared: the cell is read verbatim, so the title differs.
+            plain_run, _, _ = _quiet_main(update)
+
+        self.assertEqual((first, safe_run, plain_run), (0, 0, EXIT_DIFF))
+
+    def test_safe_output_compared_with_a_plain_csv_keeps_real_apostrophes(self):
+        # Codex: --csv-safe on the output must not change how a plain
+        # comparison catalog is read.
+        records = [PromptRecord("'=SUM(A1)", "d", "s", "gpt", "text", 1, 1.0)]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), records),
+        ):
+            plain = write_export(Path(directory), "old", "all", records, "csv")
+            exit_code, _, stderr = _quiet_main(
+                ["@acb", "--mode", "all", "--format", "csv", "--csv-safe", "--compare",
+                 str(plain), "--fail-on-diff", "-o", str(Path(directory) / "out"), "--quiet"]
+            )
+            written = (Path(directory) / "out" / "acb_all_prompts.csv").read_text(
+                encoding="utf-8"
+            )
+
+        self.assertEqual(exit_code, 0, stderr)
+        # The new file is still protected.
+        self.assertIn("''=SUM(A1)", written)
+
+    def test_compare_csv_safe_works_with_non_csv_output(self):
+        records = [PromptRecord("=A", "d", "a", "gpt", "text", 1, 1.0)]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), records),
+        ):
+            safe = write_export(Path(directory), "old", "all", records, "csv", csv_safe=True)
+            exit_code, _, stderr = _quiet_main(
+                ["@acb", "--mode", "all", "--compare", str(safe), "--compare-csv-safe",
+                 "--fail-on-diff", "-o", str(Path(directory) / "out"), "--quiet"]
+            )
+
+        self.assertEqual(exit_code, 0, stderr)
 
     def test_csv_safe_output_file(self):
         records = [PromptRecord("=cmd", "d", "x", "gpt", "text", 1, 0.0)]
@@ -711,6 +771,28 @@ class DiffCommandTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("- Added: 1", stdout)
+
+    def test_per_input_csv_safe_flags(self):
+        # Codex: a safe CSV and a plain CSV must be comparable in either order.
+        records = [PromptRecord("=A", "d", "a", "gpt", "text", 1, 1.0),
+                   PromptRecord("'=B", "d", "b", "gpt", "text", 2, 1.0)]
+        with TemporaryDirectory() as directory:
+            safe = write_export(Path(directory) / "s", "x", "all", records, "csv", csv_safe=True)
+            plain = write_export(Path(directory) / "p", "x", "all", records, "csv")
+            runs = {
+                "safe->plain": [str(safe), str(plain), "--previous-csv-safe"],
+                "plain->safe": [str(plain), str(safe), "--current-csv-safe"],
+                "safe->safe": [str(safe), str(safe), "--previous-csv-safe",
+                               "--current-csv-safe"],
+            }
+            codes = {
+                name: self._run([*argv, "--fail-on-diff", "--quiet"])[0]
+                for name, argv in runs.items()
+            }
+            undeclared, _, _ = self._run([str(safe), str(plain), "--fail-on-diff", "--quiet"])
+
+        self.assertEqual(codes, {"safe->plain": 0, "plain->safe": 0, "safe->safe": 0})
+        self.assertEqual(undeclared, EXIT_DIFF)
 
     def test_missing_catalog_is_an_error(self):
         with TemporaryDirectory() as directory:

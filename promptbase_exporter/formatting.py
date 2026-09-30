@@ -53,10 +53,11 @@ FORMAT_EXTENSIONS = {
 # Spreadsheet apps evaluate a cell that starts with one of these as a formula
 # (CSV/formula injection). --csv-safe prefixes such text cells with "'".
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-# A --csv-safe CSV starts with a UTF-8 byte order mark. It is the marker that
-# lets the loader undo the escaping exactly (a plain CSV is read verbatim), and
-# it is also what makes Excel open a UTF-8 CSV with the right encoding.
-CSV_SAFE_MARKER = "\ufeff"
+# A --csv-safe CSV starts with a UTF-8 byte order mark so Excel, the target of
+# that mode, opens it as UTF-8. It is not a safe-mode marker: any tool may save
+# a CSV with a BOM, so readers strip it from every CSV and learn about safe
+# mode only from the caller (--csv-safe).
+UTF8_BOM = "\ufeff"
 # The HTML export embeds the full records as JSON in this element so the
 # catalog can be loaded back for --compare/--update-file.
 HTML_DATA_ELEMENT_ID = "promptbase-catalog-data"
@@ -162,8 +163,10 @@ def format_records_as_markdown(records: list[PromptRecord]) -> str:
                 f"## {index}. {_single_line(record.title)}",
                 "",
                 f"- URL: {record.url}",
-                f"- Domain: {record.domain or 'unknown'}",
-                f"- Type: {record.prompt_type or 'unknown'}",
+                # Empty stays empty: a placeholder word would be ambiguous with
+                # a real value of the same spelling when the catalog is diffed.
+                f"- Domain: {record.domain}".rstrip(),
+                f"- Type: {record.prompt_type}".rstrip(),
                 f"- Price: {record.price:g}",
                 f"- Created: {record.created_iso or 'unknown'}",
                 f"- Views: {record.views}",
@@ -216,7 +219,7 @@ def format_records_as_csv(records: list[PromptRecord], *, safe: bool = False) ->
         ]
     output = io.StringIO()
     if safe:
-        output.write(CSV_SAFE_MARKER)
+        output.write(UTF8_BOM)
     writer = csv.DictWriter(output, fieldnames=RECORD_FIELDS, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
@@ -488,7 +491,7 @@ def count_written_records(path: Path, export_format: str) -> int:
     if export_format == "json":
         return len(json.loads(text))
     if export_format == "csv":
-        return sum(1 for _ in csv.DictReader(io.StringIO(text.removeprefix(CSV_SAFE_MARKER))))
+        return sum(1 for _ in csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM))))
     if export_format == "html":
         # Descriptions are HTML-escaped, so this marker only ever comes from
         # the writer itself. The rendered list and the embedded data must agree.

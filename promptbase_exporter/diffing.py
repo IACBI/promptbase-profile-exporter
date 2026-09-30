@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .formatting import (
-    CSV_SAFE_MARKER,
+    UTF8_BOM,
     csv_unescape_formula,
     load_html_catalog_data,
     record_to_dict,
@@ -18,8 +18,6 @@ from .models import PromptRecord
 
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
-# The Markdown writer shows empty type/domain as this placeholder.
-MARKDOWN_UNKNOWN = "unknown"
 # File extensions load_catalog can read.
 CATALOG_SUFFIXES = frozenset({".json", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"})
 
@@ -47,7 +45,14 @@ class CatalogDiff:
         return bool(self.added or self.removed or self.changed)
 
 
-def load_catalog(path: Path) -> list[dict[str, Any]]:
+def load_catalog(path: Path, *, csv_safe: bool = False) -> list[dict[str, Any]]:
+    """Load a catalog file into normalized record dicts.
+
+    ``csv_safe`` says a CSV catalog was written with ``--csv-safe``, so its
+    escaped cells are restored exactly. Nothing inside a CSV can say so
+    reliably, which is why it comes from the caller and defaults to reading
+    every cell verbatim.
+    """
     text = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
     if suffix == ".json":
@@ -56,14 +61,13 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
             raise ValueError("JSON catalog must contain a list of records.")
         return [_normalize_record(item) for item in data if isinstance(item, dict)]
     if suffix == ".csv":
-        # Only a --csv-safe file (marked by its BOM) has escaped cells; a plain
-        # CSV is read verbatim, so a real leading apostrophe is never lost.
-        safe = text.startswith(CSV_SAFE_MARKER)
-        rows = csv.DictReader(io.StringIO(text.removeprefix(CSV_SAFE_MARKER)))
+        # Strip a BOM from any CSV (Excel adds one), or the first column name
+        # would read as "\ufefftitle".
+        rows = csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM)))
         return [
             _normalize_record(
                 {
-                    key: csv_unescape_formula(value or "") if safe else value or ""
+                    key: csv_unescape_formula(value or "") if csv_safe else value or ""
                     for key, value in row.items()
                 }
             )
@@ -246,16 +250,12 @@ def _parse_markdown_catalog(text: str) -> list[dict[str, str]]:
                 "title": title,
                 "description": "\n".join(body_lines).strip(),
                 "slug": _slug_from_url(metadata.get("url", "")),
-                "type": _markdown_metadata(metadata.get("type", "")),
-                "domain": _markdown_metadata(metadata.get("domain", "")),
+                "type": metadata.get("type", ""),
+                "domain": metadata.get("domain", ""),
                 "price": metadata.get("price", ""),
             }
         )
     return records
-
-
-def _markdown_metadata(value: str) -> str:
-    return "" if value == MARKDOWN_UNKNOWN else value
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:

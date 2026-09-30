@@ -114,14 +114,30 @@ CSV stays byte-for-byte faithful for scripts that parse it. Text that already
 starts with an apostrophe before one of those characters gets one more, so the
 escape is always reversible.
 
-A `--csv-safe` file starts with a UTF-8 byte order mark (BOM). Excel needs it
-to open a UTF-8 CSV with the right encoding, and it tells `--compare`,
-`--update-file`, and `pb-diff` to undo the escaping exactly; a CSV without it
-is read verbatim. Safe and plain catalogs of the same prompts therefore compare
-equal, and a title that genuinely starts with `'=` is never misread. Python
-scripts reading a safe file should open it with `encoding="utf-8-sig"`. When
-you refresh a safe catalog with `--update-file`, pass `--csv-safe` again to
-keep it safe.
+A `--csv-safe` file also starts with a UTF-8 byte order mark (BOM), which
+Excel needs to open a UTF-8 CSV with the right encoding; Python scripts should
+read it with `encoding="utf-8-sig"`.
+
+Nothing inside a CSV can reliably say that it was written with `--csv-safe`
+(any tool may add a BOM), so reading one back is declared separately, per
+input, and never follows from how the new file is written:
+
+- `--compare-csv-safe` reads the `--compare` / `--update-file` CSV catalog as
+  safe and restores its escaped cells exactly;
+- `pb-diff` takes `--previous-csv-safe` and `--current-csv-safe`, so a safe
+  and a plain CSV compare correctly in either order.
+
+Without these flags a CSV is read verbatim, so a title that genuinely starts
+with `'=` is never misread. `--csv-safe` alone only protects the file being
+written.
+
+```bash
+# refresh a safe catalog and keep it safe
+pb @acb --mode all --update-file exports/acb_all_prompts.csv --csv-safe --compare-csv-safe
+# protect a new export while comparing it with an ordinary CSV
+pb @acb --mode all --format csv --csv-safe --compare old-plain.csv
+pb-diff old-safe.csv new-plain.csv --previous-csv-safe
+```
 
 ```bash
 pb @acb --mode all --format csv --csv-safe
@@ -268,7 +284,8 @@ truncated file.
 installing) compares two catalogs you already have, with no network access. The
 two files may be in different formats, for example last month's CSV and
 today's HTML export. It takes the same `--diff-output` and `--fail-on-diff`
-options and uses the same exit codes.
+options and uses the same exit codes, plus `--previous-csv-safe` and
+`--current-csv-safe` for CSV inputs written with `--csv-safe`.
 
 ```bash
 pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.html
@@ -306,6 +323,7 @@ pb @acb --quiet          # print nothing except errors
 | `--min-rating` | none | Keep prompts rated at or above this value. |
 | `--limit` | none | Keep only the first N prompts after filtering and sorting, before `--mode` splits them. |
 | `--csv-safe` | off | Prefix CSV text cells starting with `=`, `+`, `-`, or `@` with `'` so spreadsheets do not run them. Needs CSV output. |
+| `--compare-csv-safe` | off | Read the CSV `--compare` / `--update-file` catalog as written with `--csv-safe`. Independent of `--csv-safe`. |
 | `--allow-missing-descriptions` | off | Write files even if some prompt descriptions are missing. |
 | `--timestamp-filenames` | off | Append `_YYYYMMDD_HHMMSS` to generated filenames. |
 | `--output-file` | none | Write a single catalog to this exact path. Needs `--mode all`, `text`, or `image`. |
