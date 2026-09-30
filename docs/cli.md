@@ -154,6 +154,37 @@ embeds the full records as JSON, so it works with `--compare`,
 pb @acb --mode all --format html    # -> exports/acb_all_prompts.html
 ```
 
+### Extra fields
+
+`--extra-fields` adds PromptBase values that the default export leaves out.
+Pass a comma-separated list, or `all`. Only the fields you ask for are
+downloaded, so a default run transfers exactly what it did before.
+
+| Field | What is written |
+| --- | --- |
+| `tags` | PromptBase's tags for the prompt. They include generated pair tags such as `illustration_poster`. |
+| `engine` | The `engine` value, for example `gpt-5.5`. |
+| `nsfw` | PromptBase's NSFW flag. |
+| `featured` | PromptBase's featured flag. |
+| `updated` | PromptBase's `updated` time, as epoch milliseconds plus `updated_iso`. Only some prompts have one. |
+| `last_sale` | The time of the last sale, as epoch milliseconds plus `last_sale_iso`. Only prompts that have sold have one. |
+| `unique_sales` | The `uniqueSales` count. |
+
+A time PromptBase does not record is `null` in JSON and an empty cell in CSV,
+not a zero. In CSV a list is joined with `, ` and a flag is `true` or `false`;
+`--csv-safe` protects these cells like the others. Markdown adds one metadata
+line per field, and HTML shows them next to each prompt and embeds them in its
+JSON. TXT holds only a title and a description, so `--extra-fields` with
+`txt` is an error rather than a silent omission.
+
+```bash
+pb @acb --mode all --format json --extra-fields tags,engine,unique_sales
+pb @acb --mode all --format csv --extra-fields all
+```
+
+Extra fields are written for you to read; `--compare` and `--update-file`
+still compare the same fields as before.
+
 ## Filtering and sorting
 
 Filters narrow the prompt set first; `--mode` then splits what remains, and
@@ -325,6 +356,7 @@ pb @acb --quiet          # print nothing except errors
 | `--min-sales` | none | Keep prompts with at least this many sales. |
 | `--min-rating` | none | Keep prompts rated at or above this value. |
 | `--limit` | none | Keep only the first N prompts after filtering and sorting, before `--mode` splits them. |
+| `--extra-fields` | none | Include extra fields, comma-separated or `all`: `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, `unique_sales`. Not for `txt`. |
 | `--csv-safe` | off | Prefix CSV text cells starting with `=`, `+`, `-`, or `@` with `'` so spreadsheets do not run them. Needs CSV output. |
 | `--compare-csv-safe` | off | Read the CSV `--compare` / `--update-file` catalog as written with `--csv-safe`. Independent of `--csv-safe`. |
 | `--allow-missing-descriptions` | off | Write files even if some prompt descriptions are missing. |

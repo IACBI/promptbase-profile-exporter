@@ -3,8 +3,8 @@
 A small built-in web interface for running exports from the browser. Its form
 covers the export options of the [command line](cli.md): mode, format
 (including the searchable HTML catalog), sort, filters (among them minimum
-sales and rating), limit, timestamped filenames, partial exports, and CSV
-formula protection. It adds a download link for each file it writes.
+sales and rating), limit, extra fields, timestamped filenames, partial
+exports, and CSV formula protection. It adds a download link for each file it writes.
 
 It can also compare the export with a catalog you already have: enter the
 catalog's path in "Compare with existing catalog" (a JSON, CSV, TXT, Markdown,

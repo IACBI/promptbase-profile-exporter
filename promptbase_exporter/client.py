@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from . import __version__
-from .models import Profile, PromptRecord
+from .models import EXTRA_FIELDS, Profile, PromptRecord
 
 FIRESTORE_RUN_QUERY = (
     "https://firestore.googleapis.com/v1/projects/"
@@ -60,6 +60,19 @@ PROMPT_ITEM_FIELDS = (
     "numReviews",
 )
 PROMPT_DETAIL_FIELDS = ("slug", "description", "created")
+# The Firestore field behind each optional record field. Requested fields are
+# added to the projection, so a default export still downloads only the fields
+# above.
+EXTRA_FIELD_SOURCES = {
+    "tags": "tags",
+    "engine": "engine",
+    "nsfw": "nsfw",
+    "featured": "featured",
+    "updated": "updated",
+    "last_sale": "lastSale",
+    "unique_sales": "uniqueSales",
+}
+assert tuple(EXTRA_FIELD_SOURCES) == EXTRA_FIELDS
 
 
 class PromptBaseError(RuntimeError):
@@ -347,7 +360,10 @@ def _distinct_uid_for_username(docs: list[dict[str, Any]], username: str) -> str
     return distinct_uids[0] if distinct_uids else ""
 
 
-def fetch_prompt_items(profile: Profile) -> list[dict[str, Any]]:
+def fetch_prompt_items(
+    profile: Profile,
+    extra_fields: Sequence[str] = (),
+) -> list[dict[str, Any]]:
     docs = _run_query_all(
         "Items",
         [
@@ -359,7 +375,7 @@ def fetch_prompt_items(profile: Profile) -> list[dict[str, Any]]:
             _order_by("created", "DESCENDING"),
             _order_by("__name__", "DESCENDING"),
         ],
-        fields=PROMPT_ITEM_FIELDS,
+        fields=PROMPT_ITEM_FIELDS + tuple(EXTRA_FIELD_SOURCES[name] for name in extra_fields),
     )
     _raise_if_schema_changed("Items", docs, PROMPT_ITEM_SCHEMA_FIELDS)
 
@@ -396,9 +412,20 @@ def fetch_prompt_details(profile: Profile) -> dict[str, dict[str, Any]]:
     return by_slug
 
 
-def fetch_prompts(profile_input: str) -> tuple[Profile, list[PromptRecord]]:
+def fetch_prompts(
+    profile_input: str,
+    extra_fields: Sequence[str] = (),
+) -> tuple[Profile, list[PromptRecord]]:
+    """Fetch a profile's approved prompts.
+
+    ``extra_fields`` names optional record fields (see ``models.EXTRA_FIELDS``)
+    to download as well; the others keep their defaults.
+    """
+    unknown = [name for name in extra_fields if name not in EXTRA_FIELD_SOURCES]
+    if unknown:
+        raise ValueError(f"Unknown extra field(s): {', '.join(unknown)}")
     profile = resolve_profile(profile_input)
-    items = fetch_prompt_items(profile)
+    items = fetch_prompt_items(profile, extra_fields)
     details_by_slug = fetch_prompt_details(profile)
 
     records: list[PromptRecord] = []
@@ -421,6 +448,13 @@ def fetch_prompts(profile_input: str) -> tuple[Profile, list[PromptRecord]]:
                 favorites=_int_field(item, "favorites"),
                 rating=_float_field(item, "rating"),
                 reviews=_int_field(item, "numReviews"),
+                tags=_str_tuple_field(item, "tags"),
+                engine=str(item.get("engine") or "").strip(),
+                nsfw=bool(item.get("nsfw")),
+                featured=bool(item.get("featured")),
+                updated=_optional_int_field(item, "updated"),
+                last_sale=_optional_int_field(item, "lastSale"),
+                unique_sales=_int_field(item, "uniqueSales"),
             )
         )
 
@@ -459,6 +493,20 @@ def _int_field(item: dict[str, Any], field: str) -> int:
         raise PromptBaseError(
             f"Expected numeric PromptBase field '{field}', got {value!r}"
         ) from exc
+
+
+def _optional_int_field(item: dict[str, Any], field: str) -> int | None:
+    """An integer field, or None when PromptBase does not record it."""
+    if item.get(field) is None or item.get(field) == "":
+        return None
+    return _int_field(item, field)
+
+
+def _str_tuple_field(item: dict[str, Any], field: str) -> tuple[str, ...]:
+    value = item.get(field)
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(tag).strip() for tag in value if str(tag).strip())
 
 
 def _float_field(item: dict[str, Any], field: str) -> float:

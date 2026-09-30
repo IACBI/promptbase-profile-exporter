@@ -85,6 +85,12 @@ inputs:
       Requires mode all, text, or image.
     required: false
     default: ""
+  extra-fields:
+    description: >-
+      Optional comma-separated extra fields to include, or all: tags, engine,
+      nsfw, featured, updated, last_sale, unique_sales. Not available for txt.
+    required: false
+    default: ""
   csv-safe:
     description: Protect CSV text cells from spreadsheet formula injection. Requires csv output.
     required: false
@@ -257,6 +263,7 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
         OVERWRITE: ${{ inputs.overwrite }}
         UPDATE_FILE: ${{ inputs.update-file }}
+        EXTRA_FIELDS: ${{ inputs.extra-fields }}
         CSV_SAFE: ${{ inputs.csv-safe }}
         COMPARE_CSV_SAFE: ${{ inputs.compare-csv-safe }}
         DRY_RUN: ${{ inputs.dry-run }}
@@ -354,6 +361,10 @@ runs:
 
         if [[ -n "$LIMIT" ]]; then
           args+=("--limit" "$LIMIT")
+        fi
+
+        if [[ -n "$EXTRA_FIELDS" ]]; then
+          args+=("--extra-fields" "$EXTRA_FIELDS")
         fi
 
         if [[ -n "$OUTPUT_FILE" ]]; then
