@@ -10,6 +10,7 @@ from typing import Any
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
+from .console import make_output_safe
 from .dates import parse_datetime_ms
 from .diffing import (
     CatalogDiff,
@@ -263,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    make_output_safe()
     parser = build_parser()
     args = parser.parse_args(argv)
     args.mode = MODE_ALIASES.get(args.mode, args.mode)
@@ -684,6 +686,7 @@ def build_diff_parser() -> argparse.ArgumentParser:
 
 def diff_main(argv: list[str] | None = None) -> int:
     """Entry point for ``pb-diff``: compare two catalog files offline."""
+    make_output_safe()
     args = build_diff_parser().parse_args(argv)
     loaded: list[list[dict[str, Any]]] = []
     for path, csv_safe in (

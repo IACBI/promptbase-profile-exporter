@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from . import __version__
+from .console import make_output_safe
 from .diffing import load_catalog
 from .formatting import (
     EXPORT_FORMATS,
@@ -246,6 +247,7 @@ def main(
     converter: Callable[..., int] = convert_catalog,
 ) -> int:
     """Entry point for ``pb-convert``."""
+    make_output_safe()
     args = build_parser().parse_args(argv)
     try:
         destination, export_format = resolve_target(args)

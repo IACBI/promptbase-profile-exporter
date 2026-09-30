@@ -34,6 +34,14 @@ All notable changes to this project will be documented in this file.
   CSV the tags are joined with `, `, or written as a JSON array if a tag
   contains a comma, so the cell can always be read back.
 
+### Fixed
+
+- The commands no longer crash with a `UnicodeEncodeError` when their output is
+  redirected to a pipe or a log file on Windows and a message names a prompt
+  title (or a path) that the console's legacy code page cannot encode, such as
+  one with an emoji. Such characters are printed as `?`; catalogs are still
+  written as UTF-8.
+
 ## 0.9.3 - 2026-09-30
 
 ### Changed
