@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- With `compare` or `update-file`, the GitHub Action now shows the diff report
+  on the workflow run's summary page (`step-summary`, on by default, `false`
+  turns it off). A report over 900 KB is cut, with a note to use `diff-json`;
+  the summary is still written when `fail-on-diff` fails the step. The Action
+  docs gain a recipe that opens a pull request when the catalog changes.
 - `pb-convert` (`promptbase-convert`, or `python -m promptbase_exporter.convert`)
   rewrites a saved catalog in another format without fetching anything. Its
   result is the file a direct export would have written, byte for byte, extra
