@@ -40,6 +40,11 @@ All notable changes to this project will be documented in this file.
   reading the response (`RemoteDisconnected`, `IncompleteRead`,
   `ConnectionResetError`). These previously escaped the retry loop and crashed
   the CLI with a traceback instead of retrying or reporting a clean error.
+- Build the wheel reliably when a generated `exports/` directory is present.
+  setuptools' flat-layout auto-discovery treated `exports/` as a second
+  top-level package and aborted with `Multiple top-level packages discovered`,
+  breaking `pip install .` / `uv tool install .` from a working tree that had
+  already produced exports. The package list is now declared explicitly.
 
 ### Added
 
@@ -55,10 +60,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Move shared date parsing into `promptbase_exporter.dates` so the web UI no
-  longer imports from the CLI module.
-- Reuse the dates the web layer already parsed for validation instead of
-  parsing `since`/`until` a second time during export.
 - Pause briefly between successive pages of a paginated PromptBase query so
   large-profile fetches stay polite and avoid rate limits; single-page fetches
   never wait.
@@ -69,18 +70,8 @@ All notable changes to this project will be documented in this file.
   pinning the GitHub Action to a release tag, so it no longer ships a failing
   publish job; see `RELEASE.md` for how to re-add PyPI distribution later.
 
-### Fixed
-
-- Build the wheel reliably when a generated `exports/` directory is present.
-  setuptools' flat-layout auto-discovery treated `exports/` as a second
-  top-level package and aborted with `Multiple top-level packages discovered`,
-  breaking `pip install .` / `uv tool install .` from a working tree that had
-  already produced exports. The package list is now declared explicitly.
-
 ### Internal
 
-- Ship a `py.typed` marker so downstream type checkers see the package's hints.
-- Add Python 3.13 to the test matrix and package classifiers.
 - Type-check the package with `mypy` and measure coverage in CI; add dedicated
   tests for date parsing and the web download endpoint.
 - Add a Dependabot config that keeps the pinned GitHub Actions up to date.
