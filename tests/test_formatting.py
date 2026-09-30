@@ -265,6 +265,35 @@ class FormattingTests(unittest.TestCase):
             self.assertEqual(output_path.read_text(encoding="utf-8"), "[]\n")
             self.assertEqual(os.listdir(directory), ["catalog.json"])
 
+    def test_failed_exclusive_write_removes_the_partial_file(self):
+        # A leftover would make the retry fail with "already exists".
+        real_open = Path.open
+
+        def open_then_fail_on_write(path, *args, **kwargs):
+            handle = real_open(path, *args, **kwargs)
+            original_write = handle.write
+
+            def write(text):
+                original_write(text[:5])
+                raise OSError("disk full")
+
+            handle.write = write
+            return handle
+
+        with TemporaryDirectory() as directory:
+            output_path = Path(directory) / "catalog.json"
+            with patch.object(Path, "open", open_then_fail_on_write):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    write_export_to_path(
+                        output_path, [record("Text One", "text", 1)], "json", overwrite=False
+                    )
+            self.assertEqual(os.listdir(directory), [])
+
+            write_export_to_path(
+                output_path, [record("Text One", "text", 1)], "json", overwrite=False
+            )
+            self.assertEqual(count_written_records(output_path, "json"), 1)
+
     def test_infer_format_from_path(self):
         self.assertEqual(infer_format_from_path(Path("catalog.txt")), "txt")
         self.assertEqual(infer_format_from_path(Path("catalog.md")), "markdown")

@@ -454,6 +454,15 @@ class DiffReportTests(unittest.TestCase):
         self.assertEqual(fields["title"], {"previous": "Old title", "current": "New title"})
         self.assertEqual(fields["description"]["current"], "a longer text")
 
+    def test_json_report_stays_valid_json_for_non_finite_prices(self):
+        diff = compare_catalog_records(
+            [row("A", slug="a", price="nan")], [row("A", slug="a", price=2.0)]
+        )
+        # allow_nan=False raises on NaN/Infinity, as strict JSON parsers would.
+        text = json.dumps(diff_to_dict(diff), allow_nan=False)
+        fields = json.loads(text)["changed"][0]["fields"]
+        self.assertEqual(fields["price"], {"previous": None, "current": 2.0})
+
     def test_json_report_for_identical_catalogs(self):
         data = diff_to_dict(compare_catalog_records([row("A", slug="a")], [row("A", slug="a")]))
         self.assertFalse(data["has_changes"])

@@ -5,6 +5,7 @@ import html
 import math
 import os
 import re
+import socket
 import sys
 import threading
 import urllib.parse
@@ -170,10 +171,10 @@ def build_request_config(
     if price_filter not in PRICE_FILTERS:
         raise WebInputError(f"Unsupported price filter: {price_filter}.")
 
-    min_price = _parse_optional_price(form_data, "min_price")
-    max_price = _parse_optional_price(form_data, "max_price")
+    min_price = _parse_optional_float(form_data, "min_price")
+    max_price = _parse_optional_float(form_data, "max_price")
     min_sales = _parse_optional_int(form_data, "min_sales", minimum=0)
-    min_rating = _parse_optional_price(form_data, "min_rating")
+    min_rating = _parse_optional_float(form_data, "min_rating")
     if min_price is not None and max_price is not None and min_price > max_price:
         raise WebInputError("Minimum price cannot be greater than maximum price.")
     limit = _parse_optional_int(form_data, "limit", minimum=1)
@@ -764,7 +765,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         server_address = self.server.server_address
         assert isinstance(server_address, tuple)
         host, port = server_address[0], server_address[1]
-        names = {host}
+        names = {_url_host(host)}
         if host in {"127.0.0.1", "0.0.0.0", "::", "::1"}:
             names |= {"127.0.0.1", "localhost", "[::1]"}
         authorities = set(names)
@@ -880,10 +881,25 @@ def _warn_if_exposed(host: str) -> None:
     )
 
 
+class _IPv6HTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def _make_server(host: str, port: int) -> ThreadingHTTPServer:
+    # ThreadingHTTPServer is IPv4-only; binding "::1" on it fails to resolve.
+    server_class = _IPv6HTTPServer if ":" in host else ThreadingHTTPServer
+    return server_class((host, port), PromptBaseWebHandler)
+
+
+def _url_host(host: str) -> str:
+    """Return ``host`` as it appears in a URL or Host header (IPv6 bracketed)."""
+    return f"[{host}]" if ":" in host else host
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     _warn_if_exposed(host)
-    with ThreadingHTTPServer((host, port), PromptBaseWebHandler) as server:
-        print(f"Serving PromptBase Profile Exporter at http://{host}:{port}/")
+    with _make_server(host, port) as server:
+        print(f"Serving PromptBase Profile Exporter at http://{_url_host(host)}:{port}/")
         server.serve_forever()
 
 
@@ -978,7 +994,7 @@ def _single_value(
     return str(value[0])
 
 
-def _parse_optional_price(
+def _parse_optional_float(
     data: Mapping[str, str | Sequence[str]],
     name: str,
 ) -> float | None:
@@ -989,7 +1005,7 @@ def _parse_optional_price(
         value = float(raw)
     except ValueError as exc:
         raise WebInputError(f"{name.replace('_', ' ').title()} must be a number.") from exc
-    # float() accepts "nan" and "inf"; NaN compares false against every price
+    # float() accepts "nan" and "inf"; NaN compares false against every value
     # and would silently filter out all records.
     if not math.isfinite(value):
         raise WebInputError(f"{name.replace('_', ' ').title()} must be a number.")

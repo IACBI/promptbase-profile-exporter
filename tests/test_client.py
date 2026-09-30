@@ -1,13 +1,19 @@
+import gzip
 import http.client
 import io
 import json
 import unittest
 import urllib.error
+from email.message import Message
 from unittest.mock import MagicMock, patch
 
 from promptbase_exporter import __version__
 from promptbase_exporter.client import (
     MAX_RETRIES,
+    PROMPT_DETAIL_FIELDS,
+    PROMPT_DETAIL_SCHEMA_FIELDS,
+    PROMPT_ITEM_FIELDS,
+    PROMPT_ITEM_SCHEMA_FIELDS,
     USER_AGENT,
     PromptBaseError,
     _open_json_with_retry,
@@ -128,6 +134,22 @@ class RunQueryResponseTests(unittest.TestCase):
         self.assertEqual(body["structuredQuery"]["from"], [{"collectionId": "Items"}])
 
 
+    def test_request_accepts_gzip_and_projects_requested_fields(self):
+        with patch(
+            "promptbase_exporter.client._open_json_with_retry", return_value=[]
+        ) as open_json:
+            _run_query("Items", self._filters, fields=("slug", "title"))
+            _run_query("Items", self._filters)
+
+        projected, unprojected = (call.args[0] for call in open_json.call_args_list)
+        self.assertEqual(projected.get_header("Accept-encoding"), "gzip")
+        self.assertEqual(
+            json.loads(projected.data)["structuredQuery"]["select"],
+            {"fields": [{"fieldPath": "slug"}, {"fieldPath": "title"}]},
+        )
+        self.assertNotIn("select", json.loads(unprojected.data)["structuredQuery"])
+
+
 class SchemaDriftTests(unittest.TestCase):
     def test_raise_if_schema_changed_reports_missing_fields(self):
         with self.assertRaisesRegex(PromptBaseError, "missing expected field"):
@@ -200,6 +222,49 @@ class FetchPromptTests(unittest.TestCase):
         self.assertEqual(sum(record.is_image for record in records), 1)
 
 
+    def test_projection_covers_every_field_fetch_prompts_reads(self):
+        # Firestore omits unrequested fields, so a field read in fetch_prompts
+        # but missing from the projection would silently turn into 0 or "".
+        item = {
+            "slug": "one", "title": "One", "type": "gpt", "domain": "text",
+            "created": 5, "price": 2.5, "discount": 0.2, "views": 7, "sales": 3,
+            "downloads": 4, "favorites": 6, "rating": 4.5, "numReviews": 8,
+            "status": "approved", "uid": "uid-1", "itemType": "prompt",
+            "unrelated": "x", "_doc_name": "Items/one",
+        }
+        detail = {
+            "slug": "one", "description": "Described", "created": 5, "uid": "uid-1",
+            "output": "large example output", "_doc_name": "PromptDetails/one",
+        }
+
+        def fake_query_all(collection, _filters, *, fields=None, **_kwargs):
+            doc = item if collection == "Items" else detail
+            if fields is not None:
+                doc = {k: v for k, v in doc.items() if k in fields or k == "_doc_name"}
+            return [doc]
+
+        def records(project):
+            def query(collection, filters, **kwargs):
+                if not project:
+                    kwargs.pop("fields", None)
+                return fake_query_all(collection, filters, **kwargs)
+
+            with patch(
+                "promptbase_exporter.client.resolve_profile",
+                return_value=Profile(username="acb", uid="uid-1"),
+            ), patch("promptbase_exporter.client._run_query_all", side_effect=query):
+                return fetch_prompts("@acb")[1]
+
+        self.assertEqual(records(project=True), records(project=False))
+        self.assertEqual(records(project=True)[0].reviews, 8)
+
+    def test_projections_include_schema_and_cursor_fields(self):
+        self.assertLessEqual(PROMPT_ITEM_SCHEMA_FIELDS | {"created"}, set(PROMPT_ITEM_FIELDS))
+        self.assertLessEqual(
+            PROMPT_DETAIL_SCHEMA_FIELDS | {"created"}, set(PROMPT_DETAIL_FIELDS)
+        )
+
+
 class ResolveProfileTests(unittest.TestCase):
     def test_resolve_profile_rejects_ambiguous_profile_uids(self):
         with patch(
@@ -255,9 +320,13 @@ class ResolveProfileTests(unittest.TestCase):
 
 class RetryTests(unittest.TestCase):
     @staticmethod
-    def _response(body: bytes) -> MagicMock:
+    def _response(body: bytes, content_encoding: str | None = None) -> MagicMock:
+        stream = io.BytesIO(body)
+        stream.headers = Message()
+        if content_encoding:
+            stream.headers["Content-Encoding"] = content_encoding
         cm = MagicMock()
-        cm.__enter__.return_value = io.BytesIO(body)
+        cm.__enter__.return_value = stream
         cm.__exit__.return_value = False
         return cm
 
@@ -400,6 +469,33 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, MAX_RETRIES)
         self.assertEqual(sleep.call_count, MAX_RETRIES - 1)
         self.assertIsInstance(ctx.exception.__cause__, json.JSONDecodeError)
+
+
+    def test_gzip_response_is_decompressed(self):
+        body = gzip.compress(b'[{"document": 5}]')
+        with patch("promptbase_exporter.client.urllib.request.urlopen") as urlopen:
+            urlopen.return_value = self._response(body, content_encoding="gzip")
+
+            self.assertEqual(_open_json_with_retry(MagicMock()), [{"document": 5}])
+
+    def test_corrupt_gzip_body_is_retried(self):
+        truncated = gzip.compress(b'[{"document": 6}]')[:-6]
+        with patch(
+            "promptbase_exporter.client.urllib.request.urlopen"
+        ) as urlopen, patch(
+            "promptbase_exporter.client.time.sleep"
+        ) as sleep:
+            urlopen.side_effect = [
+                self._response(b"not gzip at all", content_encoding="gzip"),
+                self._response(truncated, content_encoding="gzip"),
+                self._response(gzip.compress(b'[{"document": 6}]'), content_encoding="gzip"),
+            ]
+
+            result = _open_json_with_retry(MagicMock())
+
+        self.assertEqual(result, [{"document": 6}])
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
 
 if __name__ == "__main__":

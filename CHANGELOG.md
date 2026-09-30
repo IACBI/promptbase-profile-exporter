@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Exports download far less data. Queries ask Firestore for only the fields the
+  exporter reads and accept a gzip-compressed response, so a 243-prompt
+  profile transfers about 100 KB instead of 3.8 MB and fetches roughly a third
+  faster. The exported catalogs are unchanged.
+- A profile URL copied without its scheme, such as
+  `promptbase.com/profile/acb`, is now accepted instead of being looked up as
+  a username.
+
+### Fixed
+
+- `--update-file` rejects a `--format` that does not match the file's
+  extension. Previously `--update-file catalog.csv --format json` wrote JSON
+  into `catalog.csv`, which every later run then failed to read as CSV.
+- The web UI starts on an IPv6 address such as `--host ::1`; it used to fail
+  to bind. Requests addressed to `[::1]:port` pass the Host/Origin checks.
+- A write that fails part-way under `--output-file` without `--overwrite` no
+  longer leaves a truncated file behind that blocks the retry with "already
+  exists".
+- A JSON diff report stays valid JSON when a compared catalog holds a
+  non-finite price such as `nan`: the value is reported as `null` rather than
+  a bare `NaN`.
+
 ## 0.9.2 - 2026-09-30
 
 ### Fixed

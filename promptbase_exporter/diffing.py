@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -386,9 +387,11 @@ def _quoted(value: Any) -> str:
 def _json_value(field: str, value: Any) -> Any:
     if field in NUMERIC_COMPARE_FIELDS:
         try:
-            return float(value)
+            number = float(value)
         except (TypeError, ValueError):
             return None
+        # json.dumps would emit a bare NaN/Infinity, which is not valid JSON.
+        return number if math.isfinite(number) else None
     return "" if value is None else str(value)
 
 

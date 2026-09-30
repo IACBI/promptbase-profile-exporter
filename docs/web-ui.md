@@ -30,7 +30,7 @@ Then open <http://127.0.0.1:8765/>. Stop the server with `Ctrl+C`.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | Address to bind. Keep the loopback default unless you have a reason not to. |
+| `--host` | `127.0.0.1` | Address to bind, IPv4 or IPv6 (for example `::1`). Keep the loopback default unless you have a reason not to. |
 | `--port` | `8765` | Port to listen on. |
 | `--version` | | Print the version and exit. |
 

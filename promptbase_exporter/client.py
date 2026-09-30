@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import gzip
 import http.client
 import json
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
+from collections.abc import Sequence
 from typing import Any
 
 from . import __version__
@@ -34,6 +37,27 @@ PAGE_DELAY_SECONDS = 0.2
 SCHEMA_DRIFT_MISSING_RATIO = 0.8
 PROMPT_ITEM_SCHEMA_FIELDS = {"slug", "title", "created", "domain", "type"}
 PROMPT_DETAIL_SCHEMA_FIELDS = {"slug", "description"}
+# Fields requested from each collection (a Firestore projection). Documents
+# carry many more, including large ones such as example outputs, so asking for
+# only what fetch_prompts reads makes the responses over an order of magnitude
+# smaller. Every field read below, and every schema-drift and cursor field,
+# must be listed here or it will silently come back missing.
+PROMPT_ITEM_FIELDS = (
+    "slug",
+    "title",
+    "type",
+    "domain",
+    "created",
+    "price",
+    "discount",
+    "views",
+    "sales",
+    "downloads",
+    "favorites",
+    "rating",
+    "numReviews",
+)
+PROMPT_DETAIL_FIELDS = ("slug", "description", "created")
 
 
 class PromptBaseError(RuntimeError):
@@ -47,6 +71,10 @@ def parse_profile_input(profile_input: str) -> str:
         raise PromptBaseError("Profile input is empty.")
 
     raw = raw.rstrip("/")
+    # A URL copied without its scheme ("promptbase.com/profile/acb") would
+    # otherwise be taken as the username itself.
+    if raw.lower().startswith(("promptbase.com/", "www.promptbase.com/")):
+        raw = f"https://{raw}"
     parsed = urllib.parse.urlparse(raw)
 
     if parsed.scheme and parsed.netloc:
@@ -95,6 +123,7 @@ def _run_query(
     order_by: list[dict[str, Any]] | None = None,
     limit: int = 500,
     start_after: list[dict[str, Any]] | None = None,
+    fields: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not filters:
         raise ValueError("At least one filter is required.")
@@ -114,6 +143,8 @@ def _run_query(
         "where": where,
         "limit": limit,
     }
+    if fields:
+        structured_query["select"] = {"fields": [{"fieldPath": field} for field in fields]}
     if order_by:
         structured_query["orderBy"] = order_by
     if start_after:
@@ -122,7 +153,12 @@ def _run_query(
     request = urllib.request.Request(
         FIRESTORE_RUN_QUERY,
         data=json.dumps({"structuredQuery": structured_query}).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+            # JSON compresses well: gzip makes responses a few times smaller.
+            "Accept-Encoding": "gzip",
+        },
     )
 
     rows = _open_json_with_retry(request)
@@ -134,12 +170,12 @@ def _run_query(
         document = row.get("document") if isinstance(row, dict) else None
         if not document:
             continue
-        fields = {
+        doc = {
             key: firestore_value(item)
             for key, item in document.get("fields", {}).items()
         }
-        fields["_doc_name"] = document.get("name", "")
-        docs.append(fields)
+        doc["_doc_name"] = document.get("name", "")
+        docs.append(doc)
     return docs
 
 
@@ -148,7 +184,7 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
-                return json.load(response)
+                return _read_json(response)
         except urllib.error.HTTPError as exc:
             # The error doubles as the open HTTP response; release its socket.
             exc.close()
@@ -165,6 +201,10 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
             http.client.BadStatusLine,
             urllib.error.URLError,
             json.JSONDecodeError,
+            # A truncated or corrupt gzip body, the compressed IncompleteRead.
+            gzip.BadGzipFile,
+            EOFError,
+            zlib.error,
         ) as exc:
             last_error = exc
             if attempt == MAX_RETRIES:
@@ -173,12 +213,21 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
     raise PromptBaseError(f"PromptBase query failed: {last_error}") from last_error
 
 
+def _read_json(response: Any) -> Any:
+    """Decode a JSON response body, gunzipping it if the server compressed it."""
+    body = response.read()
+    if (response.headers.get("Content-Encoding") or "").strip().lower() == "gzip":
+        body = gzip.decompress(body)
+    return json.loads(body)
+
+
 def _run_query_all(
     collection: str,
     filters: list[dict[str, Any]],
     *,
     order_by: list[dict[str, Any]],
     page_size: int = DEFAULT_PAGE_SIZE,
+    fields: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not order_by:
         # Pagination relies on cursors built from the ordering key.
@@ -192,6 +241,7 @@ def _run_query_all(
             order_by=order_by,
             limit=page_size,
             start_after=start_after,
+            fields=fields,
         )
         docs.extend(page_docs)
         if len(page_docs) < page_size:
@@ -307,6 +357,7 @@ def fetch_prompt_items(profile: Profile) -> list[dict[str, Any]]:
             _order_by("created", "DESCENDING"),
             _order_by("__name__", "DESCENDING"),
         ],
+        fields=PROMPT_ITEM_FIELDS,
     )
     _raise_if_schema_changed("Items", docs, PROMPT_ITEM_SCHEMA_FIELDS)
 
@@ -327,6 +378,7 @@ def fetch_prompt_details(profile: Profile) -> dict[str, dict[str, Any]]:
         "PromptDetails",
         [field_filter("uid", "EQUAL", {"stringValue": profile.uid})],
         order_by=[_order_by("__name__", "ASCENDING")],
+        fields=PROMPT_DETAIL_FIELDS,
     )
     _raise_if_schema_changed("PromptDetails", docs, PROMPT_DETAIL_SCHEMA_FIELDS)
 

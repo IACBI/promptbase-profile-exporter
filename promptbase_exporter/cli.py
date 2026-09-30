@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         options = normalize_options(args)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     # One timestamp for the whole run keeps a multi-profile export's files
     # grouped under the same suffix.
@@ -287,15 +287,15 @@ def export_profile(
         profile, records = fetch_prompts(profile_input)
     except PromptBaseError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     if not records:
         print(f"error: no approved prompts found for @{profile.username}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     if not sorted_newest_to_oldest(records):
         print("error: prompt records are not sorted newest to oldest", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     selected_records = filter_records_by_metadata(
         records,
@@ -312,7 +312,7 @@ def export_profile(
     )
     if not selected_records:
         print("error: no prompts matched the selected filters", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
     selected_records = sort_records(selected_records, args.sort)
     if args.limit is not None:
         selected_records = selected_records[: args.limit]
@@ -327,7 +327,7 @@ def export_profile(
         )
         for record in missing_descriptions[:10]:
             print(f"  - {record.title} ({record.slug})", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     modes = ["all", "text", "image"] if args.mode == "split" else [args.mode]
     output_dir = Path(args.output_dir)
@@ -371,7 +371,7 @@ def export_profile(
     if args.dry_run or args.list_domains or args.list_types:
         if not args.quiet:
             print("Dry run: no files written.")
-        return 0
+        return EXIT_SUCCESS
 
     diff_exit_code = EXIT_SUCCESS
     if options["compare_path"]:
@@ -408,16 +408,16 @@ def export_profile(
             )
         except FileExistsError as exc:
             print(f"error: {exc}. Use --overwrite to replace it.", file=sys.stderr)
-            return 1
+            return EXIT_ERROR
         except OSError as exc:
             print(
                 f"error: could not write {options['output_file']}: {exc}",
                 file=sys.stderr,
             )
-            return 1
+            return EXIT_ERROR
         written_count = validate_written(output_path, options["export_format"], len(filtered))
         if written_count is None:
-            return 1
+            return EXIT_ERROR
         if not args.quiet:
             print(f"Wrote {mode:>5}: {written_count:>4} prompts -> {output_path}")
             print_summary(selected_records, all_count=len(records))
@@ -437,16 +437,16 @@ def export_profile(
             )
         except OSError as exc:
             print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
-            return 1
+            return EXIT_ERROR
         written_count = validate_written(output_path, options["export_format"], len(filtered))
         if written_count is None:
-            return 1
+            return EXIT_ERROR
         if not args.quiet:
             print(f"Wrote {mode:>5}: {written_count:>4} prompts -> {output_path}")
 
     if not args.quiet:
         print_summary(selected_records, all_count=len(records))
-    return 0
+    return EXIT_SUCCESS
 
 
 def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
@@ -503,6 +503,13 @@ def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
     if args.update_file:
         if not args.update_file.exists():
             raise ValueError(f"--update-file does not exist: {args.update_file}")
+        # The catalog is read back by its extension on the next run, so writing
+        # another format into it would break every later comparison.
+        if args.format and args.format != infer_format_from_path(args.update_file):
+            raise ValueError(
+                f"--format {args.format} does not match the --update-file extension "
+                f"{args.update_file.suffix}"
+            )
         output_file = args.update_file
         compare_path = args.update_file
         overwrite_output = True

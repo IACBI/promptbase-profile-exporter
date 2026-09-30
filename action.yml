@@ -19,7 +19,8 @@ inputs:
   format:
     description: >-
       Output format: txt, markdown, json, csv, or html. Empty means txt, or the
-      format inferred from output-file / update-file.
+      format inferred from output-file / update-file. With update-file, it must
+      match that file's extension.
     required: false
     default: ""
   output-dir:

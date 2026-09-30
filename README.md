@@ -31,7 +31,8 @@ GitHub Action for scheduled exports.
 
 ### Features
 
-- Accepts a profile URL, a `profile/<name>` path, a username, or `@username`,
+- Accepts a profile URL (with or without `https://`), a `profile/<name>` path, a
+  username, or `@username`,
   and exports several profiles in one run.
 - Writes `txt`, `markdown`, `json`, `csv`, or a self-contained `html` page you
   can search in the browser, split into `all`, `text`, and `image` catalogs or
@@ -166,8 +167,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 
 ### Özellikler
 
-- Profil adresi, `profile/<ad>` yolu, kullanıcı adı ya da `@kullanıcıadı`
-  kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
+- Profil adresi (`https://` ile ya da onsuz), `profile/<ad>` yolu, kullanıcı adı
+  ya da `@kullanıcıadı` kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
 - `txt`, `markdown`, `json`, `csv` ya da tarayıcıda arama yapılabilen, tek
   dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
   kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV
