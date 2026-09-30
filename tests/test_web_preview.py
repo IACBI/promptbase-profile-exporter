@@ -1,9 +1,11 @@
+import io
 import re
 import threading
 import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
@@ -238,22 +240,63 @@ class OpenBrowserTests(unittest.TestCase):
         for wildcard in ("", "0.0.0.0"):  # reached through loopback
             self.assertEqual(browser_url(wildcard, 80), "http://127.0.0.1:80/")
 
-    def fake_server(self):
+    def fake_server(self, port=9001):
         server = MagicMock()
         server.__enter__.return_value = server
         server.__exit__.return_value = False
+        server.server_address = ("127.0.0.1", port)
         return server
 
-    def test_open_is_off_by_default_and_opens_after_the_server_is_bound(self):
-        with patch.object(web, "_make_server", return_value=self.fake_server()) as make, \
+    class SyncThread:
+        """A stand-in that runs its target at once, so a test can see the result."""
+
+        def __init__(self, target, args=(), **_kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    def test_open_is_off_by_default(self):
+        with patch.object(web, "_make_server", return_value=self.fake_server()), \
                 patch.object(web.webbrowser, "open") as opened:
             web.serve("127.0.0.1", 9001)
-            opened.assert_not_called()
-            order = []
-            make.return_value.serve_forever.side_effect = lambda: order.append("serve")
-            opened.side_effect = lambda url: order.append(url)
+        opened.assert_not_called()
+
+    def test_a_blocking_browser_cannot_stall_the_server(self):
+        # A terminal browser set in $BROWSER returns only when it exits, and it
+        # cannot finish until the server answers: open() must not hold serve() up.
+        served, released, threads = threading.Event(), threading.Event(), []
+        real_thread = threading.Thread
+
+        def record_thread(*args, **kwargs):
+            threads.append(kwargs)
+            return real_thread(*args, **kwargs)
+
+        server = self.fake_server()
+        server.serve_forever.side_effect = served.set
+
+        def blocking_open(_url):
+            served.wait(5)
+            released.set()
+
+        with patch.object(web, "_make_server", return_value=server), \
+                patch.object(web.webbrowser, "open", side_effect=blocking_open), \
+                patch.object(web.threading, "Thread", record_thread):
             web.serve("127.0.0.1", 9001, open_browser=True)
-        self.assertEqual(order, ["http://127.0.0.1:9001/", "serve"])
+            self.assertTrue(released.wait(5))
+        self.assertTrue(served.is_set())
+        self.assertIs(threads[0]["daemon"], True)
+
+    def test_the_port_the_system_assigned_is_printed_and_opened(self):
+        urls = []
+        with patch.object(web, "_make_server", return_value=self.fake_server(port=41234)), \
+                patch.object(web.webbrowser, "open", side_effect=urls.append), \
+                patch.object(web.threading, "Thread", self.SyncThread), \
+                redirect_stdout(io.StringIO()) as out:
+            web.serve("127.0.0.1", 0, open_browser=True)
+        self.assertEqual(urls, ["http://127.0.0.1:41234/"])
+        self.assertIn("http://127.0.0.1:41234/", out.getvalue())
+        self.assertNotIn(":0/", out.getvalue())
 
     def test_the_flag_reaches_serve(self):
         with patch.object(web, "serve") as serve:

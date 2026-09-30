@@ -1173,10 +1173,16 @@ def browser_url(host: str, port: int) -> str:
 def serve(host: str = "127.0.0.1", port: int = 8765, *, open_browser: bool = False) -> None:
     _warn_if_exposed(host)
     with _make_server(host, port) as server:
-        print(f"Serving PromptBase Profile Exporter at http://{_url_host(host)}:{port}/")
+        # The port actually bound: --port 0 asks the system for a free one.
+        bound_port = int(server.server_address[1])
+        print(f"Serving PromptBase Profile Exporter at http://{_url_host(host)}:{bound_port}/")
         if open_browser:
-            # Open after the socket is bound, so the page loads the moment it opens.
-            webbrowser.open(browser_url(host, port))
+            # The socket is already listening, so the page loads as soon as the browser
+            # asks. Opened on its own thread: a browser that blocks until it exits (a
+            # terminal browser set in $BROWSER) would otherwise keep the server from
+            # ever starting to answer it.
+            url = browser_url(host, bound_port)
+            threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
         server.serve_forever()
 
 
