@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Documentation only: the README (both languages) now lists `pb-history`, the web UI's
+  Preview button and `--open`, `--config`, and `ndjson` where it had not; the CLI guide's
+  contents list is complete; the coverage floor is stated as 85% everywhere.
+
 ## 0.12.1 - 2026-09-30
 
 ### Fixed

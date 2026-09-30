@@ -89,6 +89,7 @@ promptbase_exporter/
   models.py       # Profile and PromptRecord
   pipeline.py     # record selection (filter, sort, limit) shared by the CLI and web UI
   web.py          # local web UI
+  __main__.py     # `python -m promptbase_exporter` entry point
 tests/            # unittest suite
 docs/             # CLI, web UI, and GitHub Action guides
 action.yml        # composite GitHub Action

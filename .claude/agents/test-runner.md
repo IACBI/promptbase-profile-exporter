@@ -21,7 +21,7 @@ Rules:
 - For any failure, show the specific failing test names / error messages /
   ruff or mypy findings — enough for the caller to act, with file:line. Read the
   relevant source only if it helps you explain the failure.
-- Note if coverage dropped below the 70% floor (that fails CI).
+- Note if coverage dropped below the 85% floor (that fails CI).
 - Do not run networked commands or real exports. If `coverage`/`mypy`/`ruff` is
   missing, say so and suggest `python -m pip install -e ".[dev]"`.
 
