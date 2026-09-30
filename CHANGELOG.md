@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.9.2 - 2026-09-30
+
 ### Fixed
 
 - A CSV that merely starts with a UTF-8 BOM, such as one saved by Excel, is no
