@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.9.0 - 2026-09-30
+
 ### Added
 
 - HTML export (`--format html`): one self-contained, searchable catalog page
@@ -45,6 +47,9 @@ All notable changes to this project will be documented in this file.
   splits prompts into text and image files.
 - A diff no longer reports a field as changed when the new catalog lacks it
   (for example comparing a JSON catalog against a TXT one).
+- `SECURITY.md` lists 0.9.x as supported and covers the comparison field and
+  exported-file injection; `CONTRIBUTING.md` reflects Python 3.14 and the new
+  modules.
 - Reorganize the documentation. The README is now a concise English and
   Türkçe guide; the full command-line reference, the web UI guide with its
   security model, and the GitHub Action guide live in `docs/`. The Action

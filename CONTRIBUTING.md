@@ -18,7 +18,7 @@ alone.
 
 ## Checks
 
-CI runs these on Python 3.10 through 3.13, and `main` only accepts a pull
+CI runs these on Python 3.10 through 3.14, and `main` only accepts a pull
 request once they pass. Run them locally before you push:
 
 ```bash
@@ -75,8 +75,9 @@ promptbase_exporter/
   cli.py          # argument parsing, option validation, exit codes
   client.py       # public PromptBase/Firestore access, retries, schema checks
   dates.py        # shared date parsing
-  diffing.py      # catalog comparison and diff reports
-  formatting.py   # filtering, sorting, format writers, output validation
+  diff.py         # `python -m promptbase_exporter.diff` entry point (pb-diff)
+  diffing.py      # catalog loading, comparison, and Markdown/JSON diff reports
+  formatting.py   # filtering, sorting, format writers, atomic writes, validation
   models.py       # Profile and PromptRecord
   web.py          # local web UI
 tests/            # unittest suite

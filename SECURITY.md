@@ -7,8 +7,8 @@ release is supported; please upgrade before reporting.
 
 | Version | Supported |
 | --- | --- |
-| 0.8.x | Yes |
-| < 0.8 | No |
+| 0.9.x | Yes |
+| < 0.9 | No |
 
 ## Reporting a vulnerability
 
@@ -26,8 +26,11 @@ The exporter reads only public PromptBase data and never asks for credentials,
 API keys, or cookies. Reports are most useful when they involve:
 
 - the local web UI: bypassing its CSRF or DNS-rebinding checks, writing
-  outside the working directory, or reading files through `/download` (see the
+  outside the working directory, or reading files through `/download` or the
+  comparison-catalog field (see the
   [security model](docs/web-ui.md#security-model));
+- script injection through exported files, such as the HTML catalog or CSV
+  cells written with `--csv-safe`;
 - file writes outside the requested output location, or path traversal;
 - command execution, including through the GitHub Action's inputs;
 - packaging or supply-chain issues that affect users.
