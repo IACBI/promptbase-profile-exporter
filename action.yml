@@ -282,9 +282,13 @@ runs:
           esac
         }
 
-        mapfile -t profiles < <(
-          printf '%s\n' "$PROFILE_URL" | tr ',' '\n' | tr -s '[:space:]' '\n' | sed '/^$/d'
-        )
+        # A read loop rather than mapfile, which Bash 3.2 (macOS) lacks.
+        profiles=()
+        while IFS= read -r profile; do
+          if [[ -n "$profile" ]]; then
+            profiles+=("$profile")
+          fi
+        done < <(printf '%s\n' "$PROFILE_URL" | tr ',' '\n' | tr -s '[:space:]' '\n')
         if [[ ${#profiles[@]} -eq 0 ]]; then
           echo "::error::profile-url is required."
           exit 1

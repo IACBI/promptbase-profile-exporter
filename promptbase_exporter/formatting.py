@@ -221,16 +221,18 @@ def csv_escape_formula(value: object) -> object:
     """Prefix a text cell that a spreadsheet would run as a formula with ``'``.
 
     Only strings are touched: numeric cells such as prices are written by the
-    exporter itself and cannot carry a formula.
+    exporter itself and cannot carry a formula. A value that already starts
+    with apostrophes before a formula character gets one more, so the escape
+    stays reversible for text that genuinely begins with ``'=``.
     """
-    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
+    if isinstance(value, str) and value.lstrip("'").startswith(CSV_FORMULA_PREFIXES):
         return "'" + value
     return value
 
 
 def csv_unescape_formula(value: str) -> str:
-    """Reverse :func:`csv_escape_formula` when loading a ``--csv-safe`` catalog."""
-    if len(value) > 1 and value[0] == "'" and value[1:].startswith(CSV_FORMULA_PREFIXES):
+    """Reverse :func:`csv_escape_formula` for a value known to be escaped."""
+    if value.startswith("'") and value.lstrip("'").startswith(CSV_FORMULA_PREFIXES):
         return value[1:]
     return value
 

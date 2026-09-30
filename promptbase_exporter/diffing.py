@@ -8,11 +8,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .formatting import csv_unescape_formula, load_html_catalog_data, record_to_dict
+from .formatting import csv_escape_formula, load_html_catalog_data, record_to_dict
 from .models import PromptRecord
 
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
+# Marks a record loaded from CSV. Its text cells are kept exactly as stored:
+# a CSV does not say whether it was written with --csv-safe, so a leading
+# apostrophe cannot be stripped blindly (it may be real data). Comparison
+# accepts either the plain or the escaped spelling instead.
+CSV_SOURCE_KEY = "_csv"
 # File extensions load_catalog can read.
 CATALOG_SUFFIXES = frozenset({".json", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"})
 
@@ -50,9 +55,10 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
         return [_normalize_record(item) for item in data if isinstance(item, dict)]
     if suffix == ".csv":
         return [
-            _normalize_record(
-                {key: csv_unescape_formula(value or "") for key, value in row.items()}
-            )
+            {
+                **_normalize_record({key: value or "" for key, value in row.items()}),
+                CSV_SOURCE_KEY: True,
+            }
             for row in csv.DictReader(io.StringIO(text))
         ]
     if suffix in {".html", ".htm"}:
@@ -244,8 +250,14 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(record)
     if "prompt_type" in normalized and "type" not in normalized:
         normalized["type"] = normalized["prompt_type"]
-    for key in ("title", "description", "slug", "type", "domain", "url"):
+    for key in ("title", "description", "slug"):
         normalized[key] = str(normalized.get(key) or "").strip()
+    # Only normalize metadata the source actually has: whether a key is present
+    # is how comparison tells "this format does not record the field" (TXT)
+    # apart from "the field was cleared".
+    for key in ("type", "domain", "url"):
+        if key in normalized:
+            normalized[key] = str(normalized[key] or "").strip()
     return normalized
 
 
@@ -265,19 +277,37 @@ def _match_previous(
 
 def _changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
     changed: list[str] = []
+    from_csv = bool(previous.get(CSV_SOURCE_KEY) or current.get(CSV_SOURCE_KEY))
     for field in COMPARE_FIELDS:
-        # TXT catalogs carry no metadata. A field one side does not record is
-        # unknown, not changed, whichever side it is missing from.
-        if field not in {"title", "description"} and (
-            _metadata_missing(previous.get(field)) or _metadata_missing(current.get(field))
-        ):
-            continue
-        normalize = _comparable_number if field in NUMERIC_COMPARE_FIELDS else _comparable_value
-        previous_value = normalize(previous.get(field))
-        current_value = normalize(current.get(field))
-        if previous_value != current_value:
+        if field not in {"title", "description"}:
+            # Nothing recorded before (TXT, or an empty cell): no baseline.
+            if _metadata_missing(previous.get(field)):
+                continue
+            # The current catalog's format does not store the field at all.
+            # A field that is present but empty was cleared, and is reported.
+            if field not in current:
+                continue
+        if field in NUMERIC_COMPARE_FIELDS:
+            equal = _comparable_number(previous.get(field)) == _comparable_number(
+                current.get(field)
+            )
+        else:
+            equal = _text_equal(previous.get(field), current.get(field), csv=from_csv)
+        if not equal:
             changed.append(field)
     return changed
+
+
+def _text_equal(previous: Any, current: Any, *, csv: bool) -> bool:
+    if _comparable_value(previous) == _comparable_value(current):
+        return True
+    if not csv:
+        return False
+    # One side may be a --csv-safe cell. The escape is injective, so matching
+    # the escaped spelling of the other side is exact, never a guess.
+    return _comparable_value(previous) == _comparable_value(
+        csv_escape_formula(current)
+    ) or _comparable_value(csv_escape_formula(previous)) == _comparable_value(current)
 
 
 def _comparable_value(value: Any) -> str:

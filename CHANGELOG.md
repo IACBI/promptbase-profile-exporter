@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- Comparing a CSV catalog no longer reports a title or description that
+  genuinely starts with an apostrophe before `=`, `+`, `-`, or `@` (such as
+  `'=SUM(A1)`) as changed on every run. CSV cells are now loaded exactly as
+  stored, and a cell matches both its plain and its `--csv-safe` spelling;
+  `--csv-safe` escapes such text reversibly (`'=x` becomes `''=x`).
+- `--compare`, `--update-file`, and `pb-diff` again report `type`, `domain`,
+  or `price` values that were cleared in the newer catalog. 0.9.0 skipped any
+  field that was empty on either side; now a field is skipped only when the
+  older catalog has no value or the newer catalog's format (TXT) does not
+  store it.
+- The GitHub Action no longer needs Bash 4: it parses `profile-url` with a
+  read loop instead of `mapfile`, which the Bash 3.2 on macOS runners lacks.
+  CI now runs the action on macOS and its export step under `/bin/bash` 3.2.
+
 ## 0.9.0 - 2026-09-30
 
 ### Added

@@ -354,6 +354,19 @@ class CsvSafeTests(unittest.TestCase):
         self.assertEqual(csv_unescape_formula("'quoted'"), "'quoted'")
         self.assertEqual(csv_unescape_formula("'"), "'")
 
+    def test_escape_is_reversible_for_text_already_starting_with_apostrophes(self):
+        self.assertEqual(csv_escape_formula("'=SUM(A1)"), "''=SUM(A1)")
+        self.assertEqual(csv_escape_formula("''+x"), "'''+x")
+        self.assertEqual(csv_escape_formula("'plain"), "'plain")
+        for value in ("'=SUM(A1)", "''+x", "=x", "'plain", "plain"):
+            escaped = str(csv_escape_formula(value))
+            self.assertEqual(
+                csv_unescape_formula(escaped) if escaped != value else escaped, value
+            )
+        # Distinct inputs never share an escaped form.
+        values = ["=x", "'=x", "''=x"]
+        self.assertEqual(len({csv_escape_formula(value) for value in values}), len(values))
+
     def test_write_export_threads_csv_safe_through(self):
         with TemporaryDirectory() as directory:
             path = write_export(

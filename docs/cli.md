@@ -110,10 +110,13 @@ Prompt titles and descriptions are written by whoever owns the profile, so if
 you open CSV exports of other people's profiles in a spreadsheet, add
 `--csv-safe`: such cells get a leading apostrophe, which spreadsheets display
 as plain text. Numeric columns are never changed. It is off by default so the
-CSV stays byte-for-byte faithful for scripts that parse it. `--compare`,
-`--update-file`, and `pb-diff` strip the apostrophe again when they read a
-catalog, so safe and plain catalogs compare equal. When you refresh a safe
-catalog with `--update-file`, pass `--csv-safe` again to keep it safe.
+CSV stays byte-for-byte faithful for scripts that parse it. Text that already
+starts with an apostrophe before one of those characters gets one more, so the
+escape is always reversible. `--compare`, `--update-file`, and `pb-diff` read
+CSV cells exactly as stored and treat a cell and its `--csv-safe` spelling as
+equal, so safe and plain catalogs compare equal and a title that genuinely
+starts with `'=` is never reported as changed. When you refresh a safe catalog
+with `--update-file`, pass `--csv-safe` again to keep it safe.
 
 ```bash
 pb @acb --mode all --format csv --csv-safe

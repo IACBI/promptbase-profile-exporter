@@ -124,10 +124,17 @@ class DiffingTests(unittest.TestCase):
                 Path(directory), "acb", "all", records, "csv", csv_safe=True
             )
 
-            for path in (html_path, csv_path):
-                loaded = load_catalog(path)
-                self.assertEqual([item["title"] for item in loaded], [r.title for r in records])
-                self.assertFalse(compare_catalogs(loaded, records).has_changes, path.suffix)
+            html_loaded = load_catalog(html_path)
+            csv_loaded = load_catalog(csv_path)
+
+        self.assertEqual([item["title"] for item in html_loaded], [r.title for r in records])
+        # CSV cells are kept exactly as stored; the comparison, not the loader,
+        # knows that "'=Formula title" is the safe spelling of "=Formula title".
+        self.assertEqual(
+            [item["title"] for item in csv_loaded], ["'=Formula title", "<b>Markup</b>"]
+        )
+        for loaded in (html_loaded, csv_loaded):
+            self.assertFalse(compare_catalogs(loaded, records).has_changes)
 
     def test_load_catalog_rejects_unknown_extension(self):
         with TemporaryDirectory() as directory:
@@ -218,6 +225,41 @@ class CatalogRecordComparisonTests(unittest.TestCase):
         self.assertEqual(diff.changed[0].fields, ("title", "type"))
         self.assertEqual(diff.unchanged, 1)
 
+    def test_cleared_metadata_in_rich_catalogs_is_reported(self):
+        previous = [row("A", slug="a", type="gpt", domain="text", price=2.0)]
+        current = [row("A", slug="a", type="", domain="", price="")]
+
+        diff = compare_catalog_records(previous, current)
+
+        self.assertEqual(diff.changed[0].fields, ("type", "domain", "price"))
+
+    def test_cleared_metadata_is_reported_for_loaded_json_catalogs(self):
+        with TemporaryDirectory() as directory:
+            old = Path(directory) / "old.json"
+            new = Path(directory) / "new.json"
+            old.write_text(
+                '[{"title": "A", "slug": "a", "description": "d", "type": "gpt"}]',
+                encoding="utf-8",
+            )
+            new.write_text(
+                '[{"title": "A", "slug": "a", "description": "d", "type": null}]',
+                encoding="utf-8",
+            )
+
+            diff = compare_catalog_records(load_catalog(old), load_catalog(new))
+
+        self.assertEqual(diff.changed[0].fields, ("type",))
+
+    def test_txt_catalog_on_either_side_reports_no_metadata_change(self):
+        with TemporaryDirectory() as directory:
+            records = [PromptRecord("A", "d", "a", "gpt", "text", 1, 2.0)]
+            txt = load_catalog(write_export(Path(directory), "x", "all", records, "txt"))
+            rich = load_catalog(write_export(Path(directory), "x", "all", records, "json"))
+
+        self.assertNotIn("type", txt[0])
+        self.assertFalse(compare_catalog_records(rich, txt).has_changes)
+        self.assertFalse(compare_catalog_records(txt, rich).has_changes)
+
     def test_duplicate_match_is_reported_as_added(self):
         previous = [row("Same", slug="same")]
         current = [row("Same", slug="same"), row("Same", slug="same")]
@@ -226,6 +268,53 @@ class CatalogRecordComparisonTests(unittest.TestCase):
 
         self.assertEqual(diff.unchanged, 1)
         self.assertEqual(len(diff.added), 1)
+
+
+class CsvApostropheTests(unittest.TestCase):
+    """Text that genuinely starts with an apostrophe must survive CSV round trips."""
+
+    TITLES = ("'=SUM(A1:A2)", "''+x", "'plain quote", "=formula", "normal")
+
+    def _records(self, titles):
+        return [
+            PromptRecord(title, "d", f"s{index}", "gpt", "text", index, 1.0)
+            for index, title in enumerate(titles)
+        ]
+
+    def test_plain_and_safe_csv_round_trip_without_changes(self):
+        records = self._records(self.TITLES)
+        with TemporaryDirectory() as directory:
+            for safe in (False, True):
+                path = write_export(
+                    Path(directory) / str(safe), "acb", "all", records, "csv", csv_safe=safe
+                )
+                diff = compare_catalogs(load_catalog(path), records)
+                self.assertFalse(diff.has_changes, f"csv_safe={safe}")
+
+    def test_safe_and_plain_csv_files_compare_equal_both_ways(self):
+        records = self._records(self.TITLES)
+        with TemporaryDirectory() as directory:
+            plain = load_catalog(write_export(Path(directory) / "p", "a", "all", records, "csv"))
+            safe = load_catalog(
+                write_export(Path(directory) / "s", "a", "all", records, "csv", csv_safe=True)
+            )
+
+        self.assertFalse(compare_catalog_records(plain, safe).has_changes)
+        self.assertFalse(compare_catalog_records(safe, plain).has_changes)
+
+    def test_real_title_change_in_csv_is_still_reported(self):
+        with TemporaryDirectory() as directory:
+            path = write_export(
+                Path(directory), "a", "all", self._records(["=old"]), "csv", csv_safe=True
+            )
+            diff = compare_catalogs(load_catalog(path), self._records(["=new"]))
+
+        self.assertEqual(diff.changed[0].fields, ("title",))
+
+    def test_escape_equivalence_is_limited_to_csv_sources(self):
+        # Outside CSV an apostrophe is always data.
+        diff = compare_catalog_records([row("'=x", slug="a")], [row("=x", slug="a")])
+        self.assertEqual(diff.changed[0].fields, ("title",))
 
 
 class DiffReportTests(unittest.TestCase):
