@@ -9,6 +9,7 @@ import socket
 import sys
 import threading
 import urllib.parse
+import webbrowser
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -150,6 +151,38 @@ class WebExportResult:
     other_records: int
     files: tuple[ExportedFile, ...]
     diff: CatalogDiff | None = None
+    item_type: str = "prompt"
+
+
+# How many matching records the preview lists; the counts above it cover them all.
+PREVIEW_ROWS = 100
+
+
+@dataclass(frozen=True)
+class PreviewRow:
+    title: str
+    url: str
+    domain: str
+    prompt_type: str
+    price: float
+    views: int
+    sales: int
+    created: str
+
+
+@dataclass(frozen=True)
+class WebPreview:
+    """What a request would export, without writing anything."""
+
+    username: str
+    item_type: str
+    total_records: int
+    selected_records: int
+    text_records: int
+    image_records: int
+    other_records: int
+    without_description: int
+    rows: tuple[PreviewRow, ...]
 
 
 class FetchPrompts(Protocol):
@@ -299,15 +332,11 @@ def build_request_config(
     )
 
 
-def run_export(
+def _fetch_selection(
     request: ExportRequest,
-    *,
-    fetcher: FetchPrompts = fetch_prompts,
-    writer: WriteExport = write_export,
-    counter: CountWrittenRecords = count_written_records,
-    files_writer: FilesWriter = write_markdown_files,
-) -> WebExportResult:
-    """Fetch, filter, sort, write, and validate exports for one web request."""
+    fetcher: FetchPrompts,
+) -> tuple[Profile, list[PromptRecord], list[PromptRecord]]:
+    """Fetch a profile and apply a request's selection; the steps export and preview share."""
     profile, records = fetcher(
         request.profile_input,
         extra_fields=request.extra_fields,
@@ -322,6 +351,53 @@ def run_export(
     selected_records = request.selection().apply(records)
     if not selected_records:
         raise WebInputError(f"No {kind} matched the selected filters.")
+    return profile, records, selected_records
+
+
+def run_preview(
+    request: ExportRequest,
+    *,
+    fetcher: FetchPrompts = fetch_prompts,
+) -> WebPreview:
+    """List what an export request would select, writing nothing."""
+    profile, records, selected_records = _fetch_selection(request, fetcher)
+    image_count = len(filter_records(selected_records, "image"))
+    text_count = len(filter_records(selected_records, "text"))
+    return WebPreview(
+        username=profile.username,
+        item_type=request.item_type,
+        total_records=len(records),
+        selected_records=len(selected_records),
+        text_records=text_count,
+        image_records=image_count,
+        other_records=len(selected_records) - image_count - text_count,
+        without_description=len(without_description(selected_records)),
+        rows=tuple(
+            PreviewRow(
+                title=" ".join(record.title.split()),
+                url=record.url,
+                domain=record.domain,
+                prompt_type=record.prompt_type,
+                price=record.price,
+                views=record.views,
+                sales=record.sales,
+                created=record.created_iso[:10],
+            )
+            for record in selected_records[:PREVIEW_ROWS]
+        ),
+    )
+
+
+def run_export(
+    request: ExportRequest,
+    *,
+    fetcher: FetchPrompts = fetch_prompts,
+    writer: WriteExport = write_export,
+    counter: CountWrittenRecords = count_written_records,
+    files_writer: FilesWriter = write_markdown_files,
+) -> WebExportResult:
+    """Fetch, filter, sort, write, and validate exports for one web request."""
+    profile, records, selected_records = _fetch_selection(request, fetcher)
 
     missing_descriptions = without_description(selected_records)
     if missing_descriptions and not request.allow_missing_descriptions:
@@ -406,6 +482,7 @@ def run_export(
         other_records=len(selected_records) - image_count - text_count,
         files=tuple(exported_files),
         diff=diff,
+        item_type=request.item_type,
     )
 
 
@@ -413,29 +490,33 @@ def render_form(
     request: ExportRequest | None = None,
     *,
     result: WebExportResult | None = None,
+    preview: WebPreview | None = None,
     error: str | None = None,
 ) -> str:
     """Render the local web UI as a complete HTML document."""
     request = request or default_request()
     status_block = ""
-    if error:
+    if preview:
+        status_block = _render_preview(preview)
+    elif error:
         status_block = f'<section class="notice error"><h2>Error</h2><p>{_h(error)}</p></section>'
     elif result:
         rows = "\n".join(_render_file_row(item) for item in result.files)
+        kind = ITEM_TYPE_PLURALS[result.item_type]
         status_block = f"""
         <section class="notice success">
           <h2>Export complete</h2>
           <p>
             @{_h(result.username)}: {result.selected_records} selected from
-            {result.total_records} prompts. Text: {result.text_records},
+            {result.total_records} {kind}. Text: {result.text_records},
             image: {result.image_records}, other: {result.other_records}.
           </p>
-          <table>
+          <div class="tablewrap"><table>
             <thead>
-              <tr><th>Mode</th><th>Prompts</th><th>File</th><th>Download</th></tr>
+              <tr><th>Mode</th><th>{kind.capitalize()}</th><th>File</th><th>Download</th></tr>
             </thead>
             <tbody>{rows}</tbody>
-          </table>
+          </table></div>
           {_render_diff(result.diff)}
         </section>
         """
@@ -563,6 +644,11 @@ def render_form(
       gap: 12px;
       margin-top: 18px;
     }}
+    button.secondary {{
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+    }}
     button {{
       border: 0;
       border-radius: 6px;
@@ -572,6 +658,9 @@ def render_form(
       font: inherit;
       font-weight: 700;
       cursor: pointer;
+    }}
+    .tablewrap {{
+      overflow-x: auto;
     }}
     table {{
       width: 100%;
@@ -743,7 +832,10 @@ def render_form(
         </label>
       </div>
       <div class="actions">
-        <button type="submit">Export prompts</button>
+        <button type="submit" name="action" value="preview" class="secondary">
+          Preview matches
+        </button>
+        <button type="submit" name="action" value="export">Export</button>
       </div>
     </form>
   </main>
@@ -758,6 +850,48 @@ def _render_extra_field_checkboxes(selected: Sequence[str]) -> str:
         f'{_checked(name in selected)}> {_h(name)}</label>'
         for name in EXTRA_FIELDS
     )
+
+
+def _render_preview(preview: WebPreview) -> str:
+    kind = ITEM_TYPE_PLURALS[preview.item_type]
+    rows = "\n".join(
+        "<tr>"
+        f'<td><a href="{_h(row.url)}" rel="noopener noreferrer">{_h(row.title)}</a></td>'
+        f"<td>{_h(row.domain)}</td><td>{_h(row.prompt_type)}</td>"
+        f"<td>{_h(f'{row.price:g}')}</td><td>{row.views}</td><td>{row.sales}</td>"
+        f"<td>{_h(row.created)}</td>"
+        "</tr>"
+        for row in preview.rows
+    )
+    note = ""
+    if preview.selected_records > len(preview.rows):
+        note = f"<p>Showing the first {len(preview.rows)} of {preview.selected_records}.</p>"
+    warning = ""
+    if preview.without_description:
+        warning = (
+            f"<p>{preview.without_description} of these have no description: an export "
+            "stops unless partial exports are allowed.</p>"
+        )
+    return f"""
+        <section class="notice success">
+          <h2>Preview</h2>
+          <p>
+            @{_h(preview.username)}: {preview.selected_records} selected from
+            {preview.total_records} {kind}. Text: {preview.text_records},
+            image: {preview.image_records}, other: {preview.other_records}.
+            Nothing has been written.
+          </p>
+          {warning}
+          <div class="tablewrap"><table>
+            <thead>
+              <tr><th>Title</th><th>Domain</th><th>Type</th><th>Price</th><th>Views</th>
+                <th>Sales</th><th>Created</th></tr>
+            </thead>
+            <tbody>{rows}</tbody>
+          </table></div>
+          {note}
+        </section>
+        """
 
 
 def _render_diff(diff: CatalogDiff | None) -> str:
@@ -847,8 +981,8 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             self._send_text("not found\n", status=404)
             return
 
-        # /export performs outbound fetches and writes files, so reject
-        # cross-origin (CSRF) and rebound-DNS requests before doing any work.
+        # /export performs outbound fetches and (except for a preview) writes files, so
+        # reject cross-origin (CSRF) and rebound-DNS requests before doing any work.
         rejection = self._reject_unsafe_request()
         if rejection is not None:
             self._send_text(f"{rejection}\n", status=403)
@@ -858,8 +992,10 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         try:
             form = self._read_form()
             request = build_request_config(form)
-            result = run_export(request)
-            self._send_html(render_form(request, result=result))
+            if _single_value(form, "action", "export") == "preview":
+                self._send_html(render_form(request, preview=run_preview(request)))
+            else:
+                self._send_html(render_form(request, result=run_export(request)))
         except WebInputError as exc:
             self._send_html(render_form(request, error=str(exc)), status=400)
         except PromptBaseError as exc:
@@ -1025,10 +1161,22 @@ def _url_host(host: str) -> str:
     return f"[{host}]" if ":" in host else host
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+def browser_url(host: str, port: int) -> str:
+    """The address to open for a server bound to ``host``.
+
+    Binding to every interface ("" or 0.0.0.0) is reached through loopback.
+    """
+    reachable = "127.0.0.1" if host in {"", "0.0.0.0"} else host
+    return f"http://{_url_host(reachable)}:{port}/"
+
+
+def serve(host: str = "127.0.0.1", port: int = 8765, *, open_browser: bool = False) -> None:
     _warn_if_exposed(host)
     with _make_server(host, port) as server:
         print(f"Serving PromptBase Profile Exporter at http://{_url_host(host)}:{port}/")
+        if open_browser:
+            # Open after the socket is bound, so the page loads the moment it opens.
+            webbrowser.open(browser_url(host, port))
         server.serve_forever()
 
 
@@ -1039,12 +1187,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--open", action="store_true", help="Open the page in your browser.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     make_output_safe()
     args = parser.parse_args(argv)
 
     try:
-        serve(args.host, args.port)
+        serve(args.host, args.port, open_browser=args.open)
     except KeyboardInterrupt:
         print("\nServer stopped.", file=sys.stderr)
     return 0
