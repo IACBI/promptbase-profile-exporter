@@ -32,14 +32,13 @@ from .formatting import (
     SORT_OPTIONS,
     count_written_records,
     filter_records,
-    filter_records_by_metadata,
     parse_csv_option,
     parse_extra_fields,
-    sort_records,
     sorted_newest_to_oldest,
     write_export,
 )
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, Profile, PromptRecord
+from .pipeline import Selection, split_modes, without_description
 
 WEB_MODES = ("split", "all", "text", "image")
 PRICE_FILTERS = ("all", "free", "paid")
@@ -105,6 +104,30 @@ class ExportRequest:
     compare_path: Path | None = None
     extra_fields: tuple[str, ...] = ()
     item_type: str = "prompt"
+
+    def selection(self) -> Selection:
+        """The record selection this request asks for."""
+        # build_request_config already parses since/until to validate them; reuse
+        # those values and only parse here when a request was constructed directly.
+        since_created = self.since_created
+        if since_created is None and self.since:
+            since_created = parse_datetime_ms(self.since, end_of_day=False)
+        until_created = self.until_created
+        if until_created is None and self.until:
+            until_created = parse_datetime_ms(self.until, end_of_day=True)
+        return Selection(
+            domains=frozenset(parse_csv_option(self.domain)),
+            prompt_types=frozenset(parse_csv_option(self.prompt_type)),
+            price=self.price_filter,
+            min_price=self.min_price,
+            max_price=self.max_price,
+            since_created=since_created,
+            until_created=until_created,
+            min_sales=self.min_sales,
+            min_rating=self.min_rating,
+            sort=self.sort,
+            limit=self.limit,
+        )
 
 
 @dataclass(frozen=True)
@@ -280,36 +303,11 @@ def run_export(
     if not sorted_newest_to_oldest(records):
         raise WebInputError(f"The {request.item_type} records are not sorted newest to oldest.")
 
-    free_only = request.price_filter == "free"
-    paid_only = request.price_filter == "paid"
-    # build_request_config already parses since/until to validate them; reuse
-    # those values and only parse here when a request was constructed directly.
-    since_created = request.since_created
-    if since_created is None and request.since:
-        since_created = parse_datetime_ms(request.since, end_of_day=False)
-    until_created = request.until_created
-    if until_created is None and request.until:
-        until_created = parse_datetime_ms(request.until, end_of_day=True)
-    selected_records = filter_records_by_metadata(
-        records,
-        domains=parse_csv_option(request.domain),
-        prompt_types=parse_csv_option(request.prompt_type),
-        free_only=free_only,
-        paid_only=paid_only,
-        min_price=request.min_price,
-        max_price=request.max_price,
-        since_created=since_created,
-        until_created=until_created,
-        min_sales=request.min_sales,
-        min_rating=request.min_rating,
-    )
+    selected_records = request.selection().apply(records)
     if not selected_records:
         raise WebInputError(f"No {kind} matched the selected filters.")
 
-    selected_records = sort_records(selected_records, request.sort)
-    if request.limit is not None:
-        selected_records = selected_records[: request.limit]
-    missing_descriptions = [record for record in selected_records if not record.description]
+    missing_descriptions = without_description(selected_records)
     if missing_descriptions and not request.allow_missing_descriptions:
         raise WebInputError(
             "Missing descriptions for "
@@ -317,7 +315,7 @@ def run_export(
             "Enable partial exports to write these records."
         )
 
-    modes = ("all", "text", "image") if request.mode == "split" else (request.mode,)
+    modes = split_modes(request.mode)
     timestamp = (
         datetime.now().strftime("%Y%m%d_%H%M%S")
         if request.timestamp_filenames

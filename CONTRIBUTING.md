@@ -84,6 +84,7 @@ promptbase_exporter/
   diffing.py      # catalog loading, comparison, and Markdown/JSON diff reports
   formatting.py   # filtering, sorting, format writers, atomic writes, validation
   models.py       # Profile and PromptRecord
+  pipeline.py     # record selection (filter, sort, limit) shared by the CLI and web UI
   web.py          # local web UI
 tests/            # unittest suite
 docs/             # CLI, web UI, and GitHub Action guides

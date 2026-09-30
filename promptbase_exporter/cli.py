@@ -4,6 +4,8 @@ import argparse
 import math
 import sys
 from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -25,16 +27,15 @@ from .formatting import (
     SORT_OPTIONS,
     count_written_records,
     filter_records,
-    filter_records_by_metadata,
     infer_format_from_path,
     parse_csv_option,
     parse_extra_fields,
-    sort_records,
     sorted_newest_to_oldest,
     write_export,
     write_export_to_path,
 )
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
+from .pipeline import Selection, split_modes, without_description
 
 MODE_ALIASES = {
     "text-only": "text",
@@ -49,6 +50,19 @@ MODES = ("split", "all", "text", "image", *MODE_ALIASES)
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
 EXIT_DIFF = 2
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """The validated, derived form of the command line that export_profile needs."""
+
+    profiles: tuple[str, ...]
+    selection: Selection
+    export_format: str
+    extra_fields: tuple[str, ...]
+    output_file: Path | None
+    compare_path: Path | None
+    overwrite_output: bool
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -283,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     exit_codes: list[int] = []
-    for index, profile_input in enumerate(options["profiles"]):
+    for index, profile_input in enumerate(options.profiles):
         if index and not args.quiet:
             print()
         exit_codes.append(export_profile(profile_input, args, options, timestamp))
@@ -298,13 +312,13 @@ def main(argv: list[str] | None = None) -> int:
 def export_profile(
     profile_input: str,
     args: argparse.Namespace,
-    options: dict[str, Any],
+    options: RunOptions,
     timestamp: str | None,
 ) -> int:
     """Fetch, filter, and write the exports for one profile; return its exit code."""
     try:
         profile, records = fetch_prompts(
-            profile_input, extra_fields=options["extra_fields"], item_type=args.item_type
+            profile_input, extra_fields=options.extra_fields, item_type=args.item_type
         )
     except PromptBaseError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -319,27 +333,12 @@ def export_profile(
         print(f"error: {args.item_type} records are not sorted newest to oldest", file=sys.stderr)
         return EXIT_ERROR
 
-    selected_records = filter_records_by_metadata(
-        records,
-        domains=parse_csv_option(args.domain),
-        prompt_types=parse_csv_option(args.prompt_type),
-        free_only=args.free_only,
-        paid_only=args.paid_only,
-        min_price=args.min_price,
-        max_price=args.max_price,
-        since_created=options["since_created"],
-        until_created=options["until_created"],
-        min_sales=args.min_sales,
-        min_rating=args.min_rating,
-    )
+    selected_records = options.selection.apply(records)
     if not selected_records:
         print(f"error: no {kind} matched the selected filters", file=sys.stderr)
         return EXIT_ERROR
-    selected_records = sort_records(selected_records, args.sort)
-    if args.limit is not None:
-        selected_records = selected_records[: args.limit]
 
-    missing_descriptions = [record for record in selected_records if not record.description]
+    missing_descriptions = without_description(selected_records)
     if missing_descriptions and not args.allow_missing_descriptions:
         print(
             "error: missing descriptions for "
@@ -351,7 +350,7 @@ def export_profile(
             print(f"  - {record.title} ({record.slug})", file=sys.stderr)
         return EXIT_ERROR
 
-    modes = ["all", "text", "image"] if args.mode == "split" else [args.mode]
+    modes = split_modes(args.mode)
     output_dir = Path(args.output_dir)
 
     if not args.quiet:
@@ -361,13 +360,13 @@ def export_profile(
         if args.verbose:
             if args.item_type != "prompt":
                 print(f"Item type: {args.item_type}")
-            print(f"Format: {options['export_format']}")
+            print(f"Format: {options.export_format}")
             print(f"Sort: {args.sort}")
             print(f"Output directory: {output_dir}")
-            if options["output_file"]:
-                print(f"Output file: {options['output_file']}")
-            if options["extra_fields"]:
-                print(f"Extra fields: {', '.join(options['extra_fields'])}")
+            if options.output_file:
+                print(f"Output file: {options.output_file}")
+            if options.extra_fields:
+                print(f"Extra fields: {', '.join(options.extra_fields)}")
             if args.domain:
                 print(f"Domain filter: {args.domain}")
             if args.prompt_type:
@@ -400,11 +399,11 @@ def export_profile(
         return EXIT_SUCCESS
 
     diff_exit_code = EXIT_SUCCESS
-    if options["compare_path"]:
+    if options.compare_path:
         diff_exit_code = handle_compare(
             selected_records,
             modes,
-            options["compare_path"],
+            options.compare_path,
             args.diff_output or [],
             args.fail_on_diff,
             quiet=args.quiet,
@@ -421,17 +420,17 @@ def export_profile(
             # EXIT_DIFF code is returned after writing.
             return diff_exit_code
 
-    if options["output_file"]:
+    if options.output_file:
         mode = modes[0]
         filtered = filter_records(selected_records, mode)
         try:
             output_path = write_export_to_path(
-                options["output_file"],
+                options.output_file,
                 filtered,
-                options["export_format"],
-                overwrite=options["overwrite_output"],
+                options.export_format,
+                overwrite=options.overwrite_output,
                 csv_safe=args.csv_safe,
-                extra_fields=options["extra_fields"],
+                extra_fields=options.extra_fields,
                 item_type=args.item_type,
             )
         except FileExistsError as exc:
@@ -439,11 +438,11 @@ def export_profile(
             return EXIT_ERROR
         except OSError as exc:
             print(
-                f"error: could not write {options['output_file']}: {exc}",
+                f"error: could not write {options.output_file}: {exc}",
                 file=sys.stderr,
             )
             return EXIT_ERROR
-        written_count = validate_written(output_path, options["export_format"], len(filtered))
+        written_count = validate_written(output_path, options.export_format, len(filtered))
         if written_count is None:
             return EXIT_ERROR
         if not args.quiet:
@@ -459,16 +458,16 @@ def export_profile(
                 profile.username,
                 mode,
                 filtered,
-                options["export_format"],
+                options.export_format,
                 timestamp=timestamp,
                 csv_safe=args.csv_safe,
-                extra_fields=options["extra_fields"],
+                extra_fields=options.extra_fields,
                 item_type=args.item_type,
             )
         except OSError as exc:
             print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
             return EXIT_ERROR
-        written_count = validate_written(output_path, options["export_format"], len(filtered))
+        written_count = validate_written(output_path, options.export_format, len(filtered))
         if written_count is None:
             return EXIT_ERROR
         if not args.quiet:
@@ -479,7 +478,7 @@ def export_profile(
     return EXIT_SUCCESS
 
 
-def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
+def normalize_options(args: argparse.Namespace) -> RunOptions:
     # Order-preserving de-duplication: the same profile twice would only
     # rewrite the same files.
     profiles = list(dict.fromkeys(profile.strip() for profile in args.profiles))
@@ -571,16 +570,27 @@ def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise ValueError("--since cannot be later than --until")
 
-    return {
-        "profiles": profiles,
-        "compare_path": compare_path,
-        "export_format": export_format,
-        "extra_fields": extra_fields,
-        "output_file": output_file,
-        "overwrite_output": overwrite_output,
-        "since_created": since_created,
-        "until_created": until_created,
-    }
+    return RunOptions(
+        profiles=tuple(profiles),
+        selection=Selection(
+            domains=frozenset(parse_csv_option(args.domain)),
+            prompt_types=frozenset(parse_csv_option(args.prompt_type)),
+            price="free" if args.free_only else "paid" if args.paid_only else "all",
+            min_price=args.min_price,
+            max_price=args.max_price,
+            since_created=since_created,
+            until_created=until_created,
+            min_sales=args.min_sales,
+            min_rating=args.min_rating,
+            sort=args.sort,
+            limit=args.limit,
+        ),
+        export_format=export_format,
+        extra_fields=extra_fields,
+        output_file=output_file,
+        compare_path=compare_path,
+        overwrite_output=overwrite_output,
+    )
 
 
 def validate_written(output_path: Path, export_format: str, expected: int) -> int | None:
@@ -602,7 +612,7 @@ def validate_written(output_path: Path, export_format: str, expected: int) -> in
 
 def handle_compare(
     selected_records: list[PromptRecord],
-    modes: list[str],
+    modes: Sequence[str],
     compare_path: Path,
     diff_outputs: list[Path],
     fail_on_diff: bool,
@@ -719,7 +729,7 @@ def print_counts(title: str, counts: dict[str, int]) -> None:
         print(f"  {key}: {value}")
 
 
-def print_planned_outputs(records: list[PromptRecord], modes: list[str]) -> None:
+def print_planned_outputs(records: list[PromptRecord], modes: Sequence[str]) -> None:
     print("Planned outputs:")
     for mode in modes:
         print(f"  {mode}: {len(filter_records(records, mode))}")

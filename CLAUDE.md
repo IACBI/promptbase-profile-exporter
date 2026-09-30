@@ -26,8 +26,9 @@ a CLI, a local web UI, and a composite GitHub Action.
 ## Architecture (one line each)
 
 `promptbase_exporter/`
-- `cli.py` — argparse CLI, option validation (`normalize_options`), and the
-  `main()` orchestration + exit codes (0 ok / 1 error / 2 `--fail-on-diff`).
+- `cli.py` — argparse CLI, option validation (`normalize_options`, which returns the typed
+  `RunOptions`), and the `main()` orchestration + exit codes (0 ok / 1 error /
+  2 `--fail-on-diff`).
 - `client.py` — public PromptBase/Firestore access: profile resolution,
   paginated queries, retry/backoff, and schema-drift detection.
 - `dates.py` — shared `parse_datetime_ms` (used by both `cli.py` and `web.py`).
@@ -38,6 +39,9 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `formatting.py` — filtering, sorting, the per-format writers (txt,
   markdown, json, csv with optional `--csv-safe`, html), atomic writes, and
   `count_written_records` (post-write validation).
+- `pipeline.py` — `Selection` (filter → sort → limit), `split_modes`, and
+  `without_description`, shared by `cli.py` and `web.py`. Add a new filter here once;
+  `SurfacesAgreeTests` fails if the CLI and the web form drift apart.
 - `diffing.py` — catalog loading and comparison (`--compare`/`--update-file`,
   `pb-diff`) and the Markdown/JSON diff reports.
 - `diff.py` — `python -m promptbase_exporter.diff` entry point for `pb-diff`.
