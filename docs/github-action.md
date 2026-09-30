@@ -177,6 +177,7 @@ personal access token or a GitHub App token if your checks must run on it.
 | `diff-output` | Empty | Optional path for the comparison report: JSON for a `.json` path, Markdown otherwise. |
 | `step-summary` | `true` | With `compare` or `update-file`, show the diff report on the workflow run's summary page. Use `false` to turn it off. |
 | `fail-on-diff` | `false` | Exit with code 2 when `compare` or `update-file` finds changes. |
+| `layout` | Empty | `files` writes one Markdown file per prompt, with YAML front matter, into a folder per catalog. Empty means one file per catalog. |
 | `extra-fields` | Empty | Extra fields to include, comma-separated or `all`: `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, `unique_sales`. Not for `txt`. |
 | `csv-safe` | `false` | Protect CSV text cells from spreadsheet formula injection. Requires CSV output. |
 | `compare-csv-safe` | `false` | The CSV `compare` / `update-file` catalog was written with `csv-safe`; restore its escaped cells when comparing. |

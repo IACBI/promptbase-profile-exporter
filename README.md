@@ -34,7 +34,8 @@ GitHub Action for scheduled exports.
 - Accepts a profile URL (with or without `https://`), a `profile/<name>` path, a
   username, or `@username`,
   and exports several profiles in one run.
-- Exports a profile's prompts, bundles, or apps (`--item-type`).
+- Exports a profile's prompts, bundles, or apps (`--item-type`), optionally as one
+  Markdown file per prompt with front matter (`--layout files`).
 - Writes `txt`, `markdown`, `json`, `ndjson` (one record per line), `csv`, or a
   self-contained `html` page you
   can search in the browser, split into `all`, `text`, and `image` catalogs or
@@ -122,6 +123,7 @@ The ones you will reach for most:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
+| `--layout` | `catalog` | `files` writes one Markdown file per prompt, with front matter |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text`, or `image` |
 | `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html` |
 | `--output-dir` | `exports` | Where generated files go |
@@ -176,7 +178,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 - Profil adresi (`https://` ile ya da onsuz), `profile/<ad>` yolu, kullanıcı adı
   ya da `@kullanıcıadı` kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
 - Bir profilin prompt'larını, bundle'larını ya da app'lerini dışa aktarır
-  (`--item-type`).
+  (`--item-type`); istenirse her prompt için front matter'lı ayrı bir Markdown
+  dosyası yazar (`--layout files`).
 - `txt`, `markdown`, `json`, `ndjson` (satır başına bir kayıt), `csv` ya da
   tarayıcıda arama yapılabilen, tek dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
   kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV
@@ -268,6 +271,7 @@ yapılandırma dosyası yoktur. En sık kullanacaklarınız:
 
 | Seçenek | Varsayılan | Amaç |
 | --- | --- | --- |
+| `--layout` | `catalog` | `files`, her prompt için front matter'lı ayrı bir Markdown dosyası yazar |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text` veya `image` |
 | `--format` | `txt` | `txt`, `markdown`, `json`, `csv` veya `html` |
 | `--output-dir` | `exports` | Üretilen dosyaların yazılacağı klasör |

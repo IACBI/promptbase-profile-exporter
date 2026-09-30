@@ -147,10 +147,11 @@ class ExportStepTests(unittest.TestCase):
     def test_options_are_passed_to_the_exporter_only_when_set(self):
         self.run_step()
         defaults = self.passed_args()
-        for flag in ("--extra-fields", "--item-type"):
+        for flag in ("--extra-fields", "--item-type", "--layout"):
             self.assertNotIn(flag, defaults)
-        self.run_step(EXTRA_FIELDS="tags,engine", ITEM_TYPE="bundle")
+        self.run_step(EXTRA_FIELDS="tags,engine", ITEM_TYPE="bundle", LAYOUT="files")
         args = self.passed_args()
+        self.assertEqual(args[args.index("--layout") + 1], "files")
         self.assertEqual(args[args.index("--extra-fields") + 1], "tags,engine")
         self.assertEqual(args[args.index("--item-type") + 1], "bundle")
 

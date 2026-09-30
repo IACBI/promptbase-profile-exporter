@@ -196,6 +196,48 @@ embeds the full records as JSON, so it works with `--compare`,
 pb @acb --mode all --format html    # -> exports/acb_all_prompts.html
 ```
 
+### One file per prompt
+
+`--layout files` writes one Markdown file per prompt instead of one file per
+catalog, which suits note tools that index front matter (Obsidian, a Git-based
+wiki, a Notion import). Each catalog gets its own folder, named like the catalog
+file without the extension:
+
+```bash
+pb @acb --layout files --mode all --extra-fields tags
+# -> exports/acb_all_prompts/3d-clay-ui-icons-2.md, exports/acb_all_prompts/...
+```
+
+```markdown
+---
+title: "3D Clay UI Icons"
+slug: "3d-clay-ui-icons-2"
+url: "https://promptbase.com/prompt/3d-clay-ui-icons-2"
+price: 4.99
+tags: ["3d", "icons", "cute"]
+---
+
+# 3D Clay UI Icons
+
+Transform your digital interfaces with ...
+```
+
+- The front matter holds every field of the JSON format except the description,
+  which is the body. Values are written as JSON scalars, which are valid YAML, so
+  every string is quoted and escaped: a title such as `yes` or `2026-01-01` is
+  never read back as a boolean or a date.
+- **File names** are the prompt's slug, made safe: anything other than letters,
+  digits, `.`, `_`, and `-` becomes `_`, a leading dot is dropped, a name Windows
+  reserves (`CON`, `NUL`, ...) gets a `_` suffix, and two names that differ only
+  by case get a `-2`, `-3` suffix, so a slug can never write outside its folder.
+- **Nothing is deleted.** A run replaces the files it writes (each atomically) and
+  leaves the rest, including files of your own and files for prompts that have
+  since been removed.
+- It needs Markdown (`--format` may be left out) and cannot be combined with
+  `--output-file`, `--compare`, or `--update-file`, which work on a single
+  catalog file. The web UI does not offer it. `--timestamp-filenames` adds the
+  timestamp to the folder name.
+
 ### Extra fields
 
 `--extra-fields` adds PromptBase values that the default export leaves out.
@@ -423,6 +465,7 @@ pb @acb --quiet          # print nothing except errors
 | `profile` (positional) | required | PromptBase profile URL (with or without `https://`), path, username, or `@username`. Repeat to export several profiles. |
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
+| `--layout` | `catalog` | `catalog` writes one file per catalog; `files` writes one Markdown file per prompt into a folder per catalog. See [One file per prompt](#one-file-per-prompt). |
 | `--item-type` | `prompt` | Kind of listing to export: `prompt`, `bundle`, or `app`. |
 | `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`; with `--update-file` it must match that extension. |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |

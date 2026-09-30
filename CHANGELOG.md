@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `--layout files` (Action input `layout`) writes one Markdown file per prompt
+  instead of one file per catalog, into a folder per catalog
+  (`exports/acb_all_prompts/<slug>.md`), for note tools that index front matter.
+  The YAML front matter holds the record's fields as JSON scalars, which are valid
+  YAML, so every string is quoted and a title such as `yes` or `2026-01-01` is never
+  read back as a boolean or a date. File names are the slug made safe (no path
+  separators or leading dots, Windows device names suffixed, case-insensitive
+  duplicates numbered), and nothing is ever deleted. It needs Markdown and cannot be
+  combined with `--output-file`, `--compare`, or `--update-file`.
 - A new `ndjson` format (`--format ndjson`, `.ndjson`; `.jsonl` is accepted on
   input and inferred from `--output-file`): one compact JSON object per line
   with the JSON format's fields and no enclosing array, for `jq -c`,
