@@ -16,6 +16,7 @@ from promptbase_exporter.web import (
     ExportRequest,
     PromptBaseWebHandler,
     WebInputError,
+    _ipv6_bind_address,
     _make_server,
     _url_host,
     _warn_if_exposed,
@@ -289,6 +290,16 @@ class ServerBindTests(unittest.TestCase):
         self.assertEqual(_url_host("127.0.0.1"), "127.0.0.1")
         self.assertEqual(_url_host("localhost"), "localhost")
         self.assertEqual(_url_host("::1"), "[::1]")
+
+    def test_ipv6_bind_address_keeps_the_scope_id(self):
+        # A (host, port) pair would bind with scope id 0, which the kernel
+        # rejects for a link-local address.
+        self.assertEqual(_ipv6_bind_address("::1", 8765), ("::1", 8765, 0, 0))
+        try:
+            address = _ipv6_bind_address("fe80::1%1", 8765)
+        except socket.gaierror as exc:
+            self.skipTest(f"numeric IPv6 scope ids are not supported: {exc}")
+        self.assertEqual(address, ("fe80::1", 8765, 0, 1))
 
     def test_binds_ipv4_loopback(self):
         with _make_server("127.0.0.1", 0) as server:

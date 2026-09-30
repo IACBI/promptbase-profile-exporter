@@ -143,6 +143,8 @@ class RunQueryResponseTests(unittest.TestCase):
 
         projected, unprojected = (call.args[0] for call in open_json.call_args_list)
         self.assertEqual(projected.get_header("Accept-encoding"), "gzip")
+        # Google APIs also require "gzip" in the User-Agent to compress.
+        self.assertIn("gzip", projected.get_header("User-agent"))
         self.assertEqual(
             json.loads(projected.data)["structuredQuery"]["select"],
             {"fields": [{"fieldPath": "slug"}, {"fieldPath": "title"}]},

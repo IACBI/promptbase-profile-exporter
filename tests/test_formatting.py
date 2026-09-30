@@ -294,6 +294,34 @@ class FormattingTests(unittest.TestCase):
             )
             self.assertEqual(count_written_records(output_path, "json"), 1)
 
+    def test_failed_exclusive_write_keeps_a_file_another_writer_swapped_in(self):
+        real_open = Path.open
+
+        with TemporaryDirectory() as directory:
+            output_path = Path(directory) / "catalog.json"
+            other = Path(directory) / "other.json"
+            other.write_text("[]\n", encoding="utf-8")
+
+            def open_then_lose_the_race(path, *args, **kwargs):
+                handle = real_open(path, *args, **kwargs)
+
+                def write(_text):
+                    # Closed first: Windows cannot replace a file held open.
+                    handle.close()
+                    os.replace(other, output_path)
+                    raise OSError("disk full")
+
+                handle.write = write
+                return handle
+
+            with patch.object(Path, "open", open_then_lose_the_race):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    write_export_to_path(
+                        output_path, [record("Text One", "text", 1)], "json", overwrite=False
+                    )
+
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "[]\n")
+
     def test_infer_format_from_path(self):
         self.assertEqual(infer_format_from_path(Path("catalog.txt")), "txt")
         self.assertEqual(infer_format_from_path(Path("catalog.md")), "markdown")

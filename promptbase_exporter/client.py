@@ -21,9 +21,11 @@ FIRESTORE_RUN_QUERY = (
 
 # Identify the tool honestly rather than posing as a browser, so the operator
 # of the public endpoint can see (and contact) what is making these requests.
+# Google APIs document that a gzip response needs "gzip" in the User-Agent as
+# well as Accept-Encoding: gzip, hence the "(gzip)" suffix.
 USER_AGENT = (
     f"promptbase-profile-exporter/{__version__} "
-    "(+https://github.com/IACBI/promptbase-profile-exporter)"
+    "(+https://github.com/IACBI/promptbase-profile-exporter) (gzip)"
 )
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}

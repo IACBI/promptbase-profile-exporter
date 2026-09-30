@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
@@ -887,8 +887,22 @@ class _IPv6HTTPServer(ThreadingHTTPServer):
 
 def _make_server(host: str, port: int) -> ThreadingHTTPServer:
     # ThreadingHTTPServer is IPv4-only; binding "::1" on it fails to resolve.
-    server_class = _IPv6HTTPServer if ":" in host else ThreadingHTTPServer
-    return server_class((host, port), PromptBaseWebHandler)
+    if ":" not in host:
+        return ThreadingHTTPServer((host, port), PromptBaseWebHandler)
+    return _IPv6HTTPServer(_ipv6_bind_address(host, port), PromptBaseWebHandler)
+
+
+def _ipv6_bind_address(host: str, port: int) -> tuple[Any, ...]:
+    """Return the full IPv6 sockaddr for ``host``, keeping any ``%scope``.
+
+    socket.bind() with a (host, port) pair resets the scope id to 0, so a
+    link-local literal such as ``fe80::1%eth0`` would fail to bind.
+    """
+    info = socket.getaddrinfo(
+        host, port, socket.AF_INET6, socket.SOCK_STREAM, 0, socket.AI_NUMERICHOST
+    )
+    # (address, port, flowinfo, scope_id) for AF_INET6.
+    return tuple(info[0][4])
 
 
 def _url_host(host: str) -> str:
