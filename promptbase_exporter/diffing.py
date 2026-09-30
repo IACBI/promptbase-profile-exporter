@@ -8,11 +8,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .formatting import csv_unescape_formula, load_html_catalog_data, record_to_dict
+from .formatting import (
+    CSV_SAFE_MARKER,
+    csv_unescape_formula,
+    load_html_catalog_data,
+    record_to_dict,
+)
 from .models import PromptRecord
 
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
+# The Markdown writer shows empty type/domain as this placeholder.
+MARKDOWN_UNKNOWN = "unknown"
 # File extensions load_catalog can read.
 CATALOG_SUFFIXES = frozenset({".json", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"})
 
@@ -49,11 +56,18 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
             raise ValueError("JSON catalog must contain a list of records.")
         return [_normalize_record(item) for item in data if isinstance(item, dict)]
     if suffix == ".csv":
+        # Only a --csv-safe file (marked by its BOM) has escaped cells; a plain
+        # CSV is read verbatim, so a real leading apostrophe is never lost.
+        safe = text.startswith(CSV_SAFE_MARKER)
+        rows = csv.DictReader(io.StringIO(text.removeprefix(CSV_SAFE_MARKER)))
         return [
             _normalize_record(
-                {key: csv_unescape_formula(value or "") for key, value in row.items()}
+                {
+                    key: csv_unescape_formula(value or "") if safe else value or ""
+                    for key, value in row.items()
+                }
             )
-            for row in csv.DictReader(io.StringIO(text))
+            for row in rows
         ]
     if suffix in {".html", ".htm"}:
         return [
@@ -232,20 +246,30 @@ def _parse_markdown_catalog(text: str) -> list[dict[str, str]]:
                 "title": title,
                 "description": "\n".join(body_lines).strip(),
                 "slug": _slug_from_url(metadata.get("url", "")),
-                "type": metadata.get("type", ""),
-                "domain": metadata.get("domain", ""),
+                "type": _markdown_metadata(metadata.get("type", "")),
+                "domain": _markdown_metadata(metadata.get("domain", "")),
                 "price": metadata.get("price", ""),
             }
         )
     return records
 
 
+def _markdown_metadata(value: str) -> str:
+    return "" if value == MARKDOWN_UNKNOWN else value
+
+
 def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(record)
     if "prompt_type" in normalized and "type" not in normalized:
         normalized["type"] = normalized["prompt_type"]
-    for key in ("title", "description", "slug", "type", "domain", "url"):
+    for key in ("title", "description", "slug"):
         normalized[key] = str(normalized.get(key) or "").strip()
+    # Only normalize metadata the source actually has: whether a key is present
+    # is how comparison tells "this format does not record the field" (TXT)
+    # apart from "the field was cleared".
+    for key in ("type", "domain", "url"):
+        if key in normalized:
+            normalized[key] = str(normalized[key] or "").strip()
     return normalized
 
 
@@ -266,16 +290,16 @@ def _match_previous(
 def _changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
     changed: list[str] = []
     for field in COMPARE_FIELDS:
-        # TXT catalogs carry no metadata. A field one side does not record is
-        # unknown, not changed, whichever side it is missing from.
-        if field not in {"title", "description"} and (
-            _metadata_missing(previous.get(field)) or _metadata_missing(current.get(field))
-        ):
-            continue
+        if field not in {"title", "description"}:
+            # Nothing recorded before (TXT, or an empty cell): no baseline.
+            if _metadata_missing(previous.get(field)):
+                continue
+            # The current catalog's format does not store the field at all.
+            # A field that is present but empty was cleared, and is reported.
+            if field not in current:
+                continue
         normalize = _comparable_number if field in NUMERIC_COMPARE_FIELDS else _comparable_value
-        previous_value = normalize(previous.get(field))
-        current_value = normalize(current.get(field))
-        if previous_value != current_value:
+        if normalize(previous.get(field)) != normalize(current.get(field)):
             changed.append(field)
     return changed
 

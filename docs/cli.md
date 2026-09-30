@@ -110,10 +110,18 @@ Prompt titles and descriptions are written by whoever owns the profile, so if
 you open CSV exports of other people's profiles in a spreadsheet, add
 `--csv-safe`: such cells get a leading apostrophe, which spreadsheets display
 as plain text. Numeric columns are never changed. It is off by default so the
-CSV stays byte-for-byte faithful for scripts that parse it. `--compare`,
-`--update-file`, and `pb-diff` strip the apostrophe again when they read a
-catalog, so safe and plain catalogs compare equal. When you refresh a safe
-catalog with `--update-file`, pass `--csv-safe` again to keep it safe.
+CSV stays byte-for-byte faithful for scripts that parse it. Text that already
+starts with an apostrophe before one of those characters gets one more, so the
+escape is always reversible.
+
+A `--csv-safe` file starts with a UTF-8 byte order mark (BOM). Excel needs it
+to open a UTF-8 CSV with the right encoding, and it tells `--compare`,
+`--update-file`, and `pb-diff` to undo the escaping exactly; a CSV without it
+is read verbatim. Safe and plain catalogs of the same prompts therefore compare
+equal, and a title that genuinely starts with `'=` is never misread. Python
+scripts reading a safe file should open it with `encoding="utf-8-sig"`. When
+you refresh a safe catalog with `--update-file`, pass `--csv-safe` again to
+keep it safe.
 
 ```bash
 pb @acb --mode all --format csv --csv-safe

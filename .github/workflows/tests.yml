@@ -79,3 +79,38 @@ jobs:
             @acb
             emanema
           dry-run: true
+
+  # macOS ships Bash 3.2 as /bin/bash: run the action there, and run its
+  # export script under that exact shell, so Bash 4-only syntax cannot return.
+  action-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./
+        with:
+          profile-url: "@acb, emanema"
+          dry-run: true
+      - name: Run the export step under /bin/bash 3.2
+        run: |
+          set -euo pipefail
+          /bin/bash --version | head -1
+          python3 - <<'PY'
+          import re
+          import textwrap
+          from pathlib import Path
+
+          text = Path("action.yml").read_text(encoding="utf-8")
+          script = textwrap.dedent(re.findall(r"\n      run: \|\n((?:        .*\n|\n)+)", text)[2])
+          Path("export-step.sh").write_text(script, encoding="utf-8")
+          PY
+          mkdir -p stub
+          printf '#!/bin/sh\nprintf "%%s\n" "$@"\n' > stub/promptbase-export
+          chmod +x stub/promptbase-export
+          out=$(env PATH="$PWD/stub:$PATH" GITHUB_OUTPUT=/dev/null RUNNER_TEMP="$RUNNER_TEMP" \
+            PROFILE_URL=$'@acb, emanema\n  @other' MODE=all FORMAT= OUTPUT_DIR=exports SORT=newest \
+            DOMAIN= PROMPT_TYPE= PRICE_MODE= MIN_PRICE= MAX_PRICE= MIN_SALES= MIN_RATING= \
+            OUTPUT_FILE= OVERWRITE=false UPDATE_FILE= CSV_SAFE=false DRY_RUN=true LIMIT= \
+            SINCE= UNTIL= COMPARE= DIFF_OUTPUT= FAIL_ON_DIFF=false TIMESTAMP_FILENAMES=false \
+            ALLOW_MISSING_DESCRIPTIONS=false /bin/bash export-step.sh)
+          echo "$out"
+          test "$(echo "$out" | head -3 | tr '\n' ' ')" = "@acb emanema @other "

@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- Comparing a CSV catalog no longer misreads text that genuinely starts with
+  an apostrophe before `=`, `+`, `-`, or `@` (such as `'=SUM(A1)`), which 0.9.0
+  reported as changed on every run. A `--csv-safe` file now starts with a UTF-8
+  BOM (which Excel also needs to detect UTF-8); only such a file has its
+  escaping undone, and exactly, while a plain CSV is read verbatim. The escape
+  is now reversible (`'=x` becomes `''=x`). A safe CSV written by 0.9.0 has no
+  BOM and is read as plain, so its escaped cells show as changed once until
+  it is rewritten.
+- `--compare`, `--update-file`, and `pb-diff` again report `type`, `domain`,
+  or `price` values that were cleared in the newer catalog. 0.9.0 skipped any
+  field that was empty on either side; now a field is skipped only when the
+  older catalog has no value or the newer catalog's format (TXT) does not
+  store it. Markdown's `unknown` placeholder for an empty type or domain is
+  read as empty, so Markdown and JSON exports of the same prompts compare
+  equal.
+- The GitHub Action no longer needs Bash 4: it parses `profile-url` with a
+  read loop instead of `mapfile`, which the Bash 3.2 on macOS runners lacks.
+  CI now runs the action on macOS and its export step under `/bin/bash` 3.2.
+
 ## 0.9.0 - 2026-09-30
 
 ### Added
