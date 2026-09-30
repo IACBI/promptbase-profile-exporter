@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
+import re
 import sqlite3
 import sys
 from collections.abc import Sequence
@@ -55,6 +57,12 @@ CREATE TABLE observations (
     PRIMARY KEY (snapshot_id, slug)
 ) WITHOUT ROWID;
 """
+
+_EXPECTED_COLUMNS = {
+    "snapshots": ["id", "taken_at", "profile", "item_type", "record_count"],
+    "observations": ["snapshot_id", "slug", "title", "price", "discount", "views", "sales",
+                     "downloads", "favorites", "rating", "reviews"],
+}
 
 
 class HistoryError(RuntimeError):
@@ -141,6 +149,9 @@ def _prepare(connection: sqlite3.Connection, path: Path, create: bool) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version == SCHEMA_VERSION:
+        # The version number alone proves nothing: any SQLite file can carry it.
+        if not _has_expected_schema(connection):
+            raise HistoryError(f"{path} is a SQLite file, but not a pb-history file")
         return
     if version != 0:
         raise HistoryError(
@@ -156,6 +167,14 @@ def _prepare(connection: sqlite3.Connection, path: Path, create: bool) -> None:
     with connection:
         connection.executescript(_SCHEMA)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _has_expected_schema(connection: sqlite3.Connection) -> bool:
+    for table, columns in _EXPECTED_COLUMNS.items():
+        found = [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
+        if found != columns:
+            return False
+    return True
 
 
 def record_snapshot(
@@ -235,7 +254,7 @@ def totals_series(
     )
     return [
         (datetime.fromisoformat(row[0]),
-         {"prompts": int(row[1]), **{c: int(row[2 + i] or 0) for i, c in enumerate(COUNTERS)}})
+         {"listings": int(row[1]), **{c: int(row[2 + i] or 0) for i, c in enumerate(COUNTERS)}})
         for row in rows
     ]
 
@@ -271,7 +290,10 @@ def choose_baseline(
             )
         return candidates[0], latest
     if days is not None:
-        cutoff = latest.taken_at - timedelta(days=days)
+        try:
+            cutoff = latest.taken_at - timedelta(days=days)
+        except (OverflowError, ValueError) as exc:
+            raise HistoryError(f"--days {days:g} is out of range") from exc
         candidates = [snap for snap in earlier if snap.taken_at <= cutoff]
         if not candidates:
             oldest = (latest.taken_at - earlier[0].taken_at).total_seconds() / 86400
@@ -284,7 +306,7 @@ def choose_baseline(
 
 
 def _totals(observations: dict[str, Observation]) -> dict[str, float]:
-    values: dict[str, float] = {"prompts": float(len(observations))}
+    values: dict[str, float] = {"listings": float(len(observations))}
     for counter in COUNTERS:
         values[counter] = float(sum(getattr(o, counter) for o in observations.values()))
     rated = [o.rating for o in observations.values() if o.rating > 0]
@@ -304,6 +326,8 @@ def build_report(
 ) -> Report:
     if metric not in COUNTERS:
         raise HistoryError(f"unknown metric {metric!r}: use one of {', '.join(COUNTERS)}")
+    if top < 1:
+        raise HistoryError("the number of movers to list must be at least 1")
     totals_before, totals_after = _totals(before), _totals(after)
     totals = {key: (totals_before[key], totals_after[key]) for key in totals_before}
     movers = []
@@ -353,8 +377,22 @@ def _delta(before: float, after: float) -> str:
     return "0" if change == 0 else f"{change:+g}"
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]<>&|~!#])")
+
+
 def _cell(text: object) -> str:
-    return " ".join(str(text).split()).replace("|", "\\|")
+    """Text from a remote listing made safe for a Markdown line or table cell.
+
+    Backslash-escaping ``<`` and ``&`` keeps a title from becoming raw HTML, and the
+    brackets keep it from becoming a link, in renderers that allow either.
+    """
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", " ".join(str(text).split()))
+
+
+def _code(text: object) -> str:
+    """A code span: nothing inside is interpreted, so only pipes and backticks matter."""
+    flat = " ".join(str(text).split()).replace("|", "\\|")
+    return f"`` {flat} ``" if "`" in flat else f"`{flat}`"
 
 
 def _heading(report: Report) -> str:
@@ -383,17 +421,17 @@ def render_markdown(report: Report) -> str:
             "| --- | " + " | ".join(["---:"] * (len(COUNTERS) + 1)) + " |"]
         for mover in report.movers:
             others = " | ".join(f"{mover.change[c]:+d}" for c in COUNTERS if c != report.metric)
-            lines.append(f"| {_cell(mover.title)} (`{_cell(mover.slug)}`) | "
+            lines.append(f"| {_cell(mover.title)} ({_code(mover.slug)}) | "
                          f"{mover.change[report.metric]:+d} | {others} | {_number(mover.price)} |")
     else:
         lines.append(f"No {kind} gained {report.metric} in this period.")
     lines += ["", f"## New {kind} ({len(report.new)})", ""]
-    lines += [f"- {_cell(o.title)} (`{_cell(o.slug)}`)" for o in report.new] or ["None."]
+    lines += [f"- {_cell(o.title)} ({_code(o.slug)})" for o in report.new] or ["None."]
     lines += ["", f"## Removed {kind} ({len(report.removed)})", ""]
-    lines += [f"- {_cell(o.title)} (`{_cell(o.slug)}`)" for o in report.removed] or ["None."]
+    lines += [f"- {_cell(o.title)} ({_code(o.slug)})" for o in report.removed] or ["None."]
     lines += ["", f"## Price changes ({len(report.price_changes)})", ""]
     lines += [
-        f"- {_cell(after.title)} (`{_cell(after.slug)}`): price {_number(before.price)} to "
+        f"- {_cell(after.title)} ({_code(after.slug)}): price {_number(before.price)} to "
         f"{_number(after.price)}, discount {_number(before.discount)} to {_number(after.discount)}"
         for before, after in report.price_changes
     ] or ["None."]
@@ -537,6 +575,26 @@ def render(report: Report, report_format: str) -> str:
 # -- command line ---------------------------------------------------------------------
 
 
+def _days(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError(f"must be a finite number, 0 or more: {text!r}")
+    return value
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or more: {text!r}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="promptbase-history",
@@ -558,9 +616,10 @@ def build_parser() -> argparse.ArgumentParser:
     window = report.add_mutually_exclusive_group()
     window.add_argument("--since", type=date.fromisoformat, metavar="YYYY-MM-DD",
                         help="Compare with the first snapshot taken on or after this UTC date.")
-    window.add_argument("--days", type=float, help="Compare with a snapshot at least this old.")
+    window.add_argument("--days", type=_days, help="Compare with a snapshot at least this old.")
     report.add_argument("--metric", choices=COUNTERS, default="sales")
-    report.add_argument("--top", type=int, default=10)
+    report.add_argument("--top", type=_positive_int, default=10,
+                        help="How many top movers to list (default 10).")
     report.add_argument("--format", choices=REPORT_FORMATS, default="markdown")
     report.add_argument("-o", "--output", type=Path, help="Write the report here, not to stdout.")
 
@@ -573,14 +632,29 @@ def _snapshot_command(args: argparse.Namespace) -> int:
     failed = False
     connection = connect(args.db, create=True)
     try:
-        for profile_input in dict.fromkeys(args.profiles):
+        requested: set[str] = set()
+        recorded: set[str] = set()
+        for profile_input in args.profiles:
             try:
+                # "@acb", "acb" and the profile URL are one profile: one snapshot per run,
+                # or the report would compare a run with itself.
+                wanted = parse_profile_input(profile_input).lower()
+                if wanted in requested:
+                    continue
+                requested.add(wanted)
                 profile, records = fetch_prompts(profile_input, item_type=args.item_type)
             except PromptBaseError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 failed = True
                 continue
-            if not records:
+            if profile.username.lower() in recorded:
+                continue
+            recorded.add(profile.username.lower())
+            if not records and not _has_earlier_listings(
+                connection, profile.username, args.item_type
+            ):
+                # With nothing earlier, an empty snapshot is more likely a wrong kind or
+                # profile than a real change, and a later report could not use it.
                 print(f"error: no approved {ITEM_TYPE_PLURALS[args.item_type]} found for "
                       f"@{profile.username}", file=sys.stderr)
                 failed = True
@@ -593,6 +667,12 @@ def _snapshot_command(args: argparse.Namespace) -> int:
     finally:
         connection.close()
     return EXIT_ERROR if failed else EXIT_SUCCESS
+
+
+def _has_earlier_listings(connection: sqlite3.Connection, profile: str, item_type: str) -> bool:
+    return any(
+        snap.record_count > 0 for snap in list_snapshots(connection, profile, item_type)
+    )
 
 
 def _select(connection: sqlite3.Connection, args: argparse.Namespace) -> list[Snapshot]:
@@ -617,7 +697,7 @@ def _report_command(args: argparse.Namespace) -> int:
         report = build_report(
             baseline, latest,
             load_observations(connection, baseline.id), load_observations(connection, latest.id),
-            metric=args.metric, top=max(args.top, 0),
+            metric=args.metric, top=args.top,
             series=totals_series(connection, latest.profile, latest.item_type),
         )
     finally:

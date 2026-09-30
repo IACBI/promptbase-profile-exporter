@@ -115,6 +115,22 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(history.HistoryError):
                 history.connect(corrupt, create=False)
 
+    def test_a_foreign_file_that_only_carries_our_version_number_is_refused(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "other.sqlite"
+            with closing(sqlite3.connect(path)) as other:
+                other.execute("CREATE TABLE snapshots (note TEXT)")
+                other.execute(f"PRAGMA user_version = {history.SCHEMA_VERSION}")
+                other.commit()
+            for create in (True, False):
+                with self.subTest(create=create), self.assertRaisesRegex(
+                    history.HistoryError, "not a pb-history file"
+                ):
+                    history.connect(path, create=create)
+            with closing(sqlite3.connect(path)) as other:
+                columns = [row[1] for row in other.execute("PRAGMA table_info(snapshots)")]
+        self.assertEqual(columns, ["note"])
+
     def test_values_with_sql_metacharacters_are_stored_as_data(self):
         nasty = "x'); DROP TABLE observations; --"
         with TemporaryDirectory() as directory:
@@ -156,7 +172,7 @@ class StorageTests(unittest.TestCase):
                 series = history.totals_series(connection, "acb", "prompt")
         self.assertEqual([point[1]["views"] for point in series], [3, 12])
         self.assertEqual([point[1]["sales"] for point in series], [1, 3])
-        self.assertEqual(series[0][1]["prompts"], 2)
+        self.assertEqual(series[0][1]["listings"], 2)
 
 
 class BaselineTests(unittest.TestCase):
@@ -220,7 +236,7 @@ class ReportTests(unittest.TestCase):
         report = self.report(before, after)
         self.assertEqual(report.totals["views"], (16.0, 33.0))  # 10+5+1, then 25+5+3
         self.assertEqual(report.totals["sales"], (3.0, 6.0))
-        self.assertEqual(report.totals["prompts"], (4.0, 4.0))
+        self.assertEqual(report.totals["listings"], (4.0, 4.0))
         self.assertEqual(report.totals["average rating"], (4.0, 5.0))  # rated ones only
         self.assertEqual([m.slug for m in report.movers], ["a"])
         self.assertEqual(report.movers[0].change["sales"], 3)
@@ -246,7 +262,8 @@ class ReportTests(unittest.TestCase):
         by_views = self.report(before, after, metric="views")
         self.assertEqual([m.slug for m in by_views.movers], ["d"])
         self.assertEqual([m.slug for m in self.report(before, after, top=2).movers], ["b", "a"])
-        self.assertEqual(self.report(before, after, top=0).movers, [])
+        with self.assertRaisesRegex(history.HistoryError, "at least 1"):
+            self.report(before, after, top=0)
 
     def test_a_counter_that_fell_is_not_a_mover_but_shows_in_the_totals(self):
         report = self.report([rec("a", sales=5)], [rec("a", sales=3)])
@@ -295,6 +312,25 @@ class RenderTests(unittest.TestCase):
         text = history.render_markdown(self.make(title="evil | title\nwith newline"))
         self.assertIn("evil \\| title with newline", text)
         self.assertNotIn("\nwith newline", text)
+
+    def test_markdown_titles_cannot_become_html_or_links(self):
+        title = '<img src=x onerror=alert(1)> [click](javascript:alert(1)) *bold* & more'
+        text = history.render_markdown(self.make(title=title))
+        self.assertIn(r"\<img src=x onerror=alert(1)\>", text)
+        self.assertIn(r"\[click\]", text)
+        self.assertIn(r"\*bold\* \& more", text)
+        self.assertNotRegex(text, r"(?<!\\)[<>]")  # every angle bracket is escaped
+
+    def test_a_slug_with_backticks_or_pipes_stays_inside_its_code_span(self):
+        self.assertEqual(history._code("we`ird|slug"), r"`` we`ird\|slug ``")
+        self.assertEqual(history._code("plain  slug"), "`plain slug`")
+
+    def test_the_count_row_is_labelled_listings_for_every_kind(self):
+        report = self.make()
+        self.assertIn("| listings |", history.render_markdown(report))
+        self.assertIn("listings", json.loads(history.render_json(report))["totals"])
+        self.assertIn("<td>listings</td>", history.render_html(report))
+        self.assertNotIn("| prompts |", history.render_markdown(report))
 
     def test_json_is_valid_and_complete(self):
         data = json.loads(history.render_json(self.make()))
@@ -364,6 +400,51 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Profile not found: ghost", stderr)
         self.assertIn("Recorded snapshot 1", stdout)
 
+    def test_aliases_of_one_profile_are_recorded_once(self):
+        with TemporaryDirectory() as directory, self.fetch() as fetch:
+            db = Path(directory) / "h.sqlite"
+            code, stdout, _ = run([
+                "snapshot", "@acb", "ACB", "https://promptbase.com/profile/acb",
+                "--db", str(db),
+            ])
+            listed = run(["list", "--db", str(db)])[1]
+        self.assertEqual(code, 0)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(stdout.count("Recorded snapshot"), 1)
+        self.assertEqual(listed.count("\n"), 1)
+
+    def test_two_names_that_resolve_to_one_profile_are_recorded_once(self):
+        outcomes = [(Profile("acb", "u"), [rec("a")]), (Profile("ACB", "u"), [rec("a")])]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.history.fetch_prompts", side_effect=outcomes
+        ):
+            db = Path(directory) / "h.sqlite"
+            code, stdout, _ = run(["snapshot", "acb", "old-name", "--db", str(db)])
+            listed = run(["list", "--db", str(db)])[1]
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout.count("Recorded snapshot"), 1)
+        self.assertEqual(listed.count("\n"), 1)
+
+    def test_a_profile_that_lost_every_listing_is_recorded_as_empty(self):
+        with TemporaryDirectory() as directory:
+            db = str(Path(directory) / "h.sqlite")
+            store(db, "acb", [(0, [rec("a", sales=2)])])
+            with patch("promptbase_exporter.history.fetch_prompts",
+                       return_value=(Profile("acb", "u"), [])):
+                code, stdout, _ = run(["snapshot", "@acb", "--db", db])
+                again = run(["snapshot", "@acb", "--db", db])[0]
+            code_report, markdown, _ = run(["report", "--db", db])
+        self.assertEqual((code, again, code_report), (0, 0, 0))
+        self.assertIn("Recorded snapshot 2: 0 prompts", stdout)
+        self.assertIn("## Removed prompts (0)", markdown)  # empty against empty: nothing moved
+
+    def test_the_report_marks_every_listing_removed_when_the_profile_empties(self):
+        with TemporaryDirectory() as directory:
+            db = str(Path(directory) / "h.sqlite")
+            store(db, "acb", [(0, [rec("a"), rec("b")]), (1, [])])
+            _, markdown, _ = run(["report", "--db", db])
+        self.assertIn("## Removed prompts (2)", markdown)
+
     def test_an_empty_profile_is_an_error(self):
         with TemporaryDirectory() as directory, patch(
             "promptbase_exporter.history.fetch_prompts", return_value=(Profile("acb", "u"), [])
@@ -409,6 +490,14 @@ class CommandTests(unittest.TestCase):
         self.assertIn("+7", default)
         self.assertIn("+9", since)
 
+    def test_an_absurdly_large_window_is_an_error_not_a_traceback(self):
+        with TemporaryDirectory() as directory:
+            db = str(Path(directory) / "h.sqlite")
+            store(db, "acb", [(0, [rec("a")]), (1, [rec("a", sales=1)])])
+            code, _, stderr = run(["report", "--db", db, "--days", "1e18"])
+        self.assertEqual(code, 1)
+        self.assertIn("out of range", stderr)
+
     def test_several_profiles_need_a_choice(self):
         with TemporaryDirectory() as directory:
             db = str(Path(directory) / "h.sqlite")
@@ -446,6 +535,13 @@ class CommandTests(unittest.TestCase):
             ["report", "--db", "x", "--since", "soon"],
             ["report", "--db", "x", "--since", "2026-01-01", "--days", "3"],
             ["report", "--db", "x", "--metric", "rating"],
+            ["report", "--db", "x", "--days", "nan"],
+            ["report", "--db", "x", "--days", "inf"],
+            ["report", "--db", "x", "--days", "-1"],
+            ["report", "--db", "x", "--days", "soon"],
+            ["report", "--db", "x", "--top", "0"],
+            ["report", "--db", "x", "--top", "-3"],
+            ["report", "--db", "x", "--top", "many"],
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(run(argv)[0], 2)
