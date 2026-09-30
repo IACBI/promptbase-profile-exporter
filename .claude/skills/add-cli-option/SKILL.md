@@ -42,7 +42,7 @@ checklist; skipping a step leaves the CLI, web UI, Action, and docs out of sync.
 - `tests/test_cli.py` — parsing, validation errors, and effect on selection.
 - `tests/test_web.py` — `build_request_config` accepts/normalizes it and
   rejects bad input.
-- Keep coverage >= 70%.
+- Keep coverage >= 85%.
 
 ## 5. Docs (same change)
 

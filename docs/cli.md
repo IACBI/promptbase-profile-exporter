@@ -6,12 +6,16 @@ from the project folder. `pb --help` always prints the authoritative option
 list for your version.
 
 - [Choosing a profile](#choosing-a-profile)
+- [Configuration file](#configuration-file)
+- [Prompts, bundles, and apps](#prompts-bundles-and-apps)
 - [Modes: which catalogs to write](#modes-which-catalogs-to-write)
 - [Output formats](#output-formats)
 - [Filtering and sorting](#filtering-and-sorting)
 - [Writing to an exact path](#writing-to-an-exact-path)
 - [Comparing and updating catalogs](#comparing-and-updating-catalogs)
 - [Comparing two files offline](#comparing-two-files-offline)
+- [Converting a catalog offline](#converting-a-catalog-offline)
+- [Tracking changes over time](#tracking-changes-over-time)
 - [Inspecting without writing](#inspecting-without-writing)
 - [Options](#options)
 - [Exit codes](#exit-codes)
@@ -83,8 +87,8 @@ pb @a --config promptbase.toml @b           # profiles and options may alternate
   (choices, number types, exclusive options), and a problem stops the run before
   anything is fetched, with an error that names the file, for example
   `error: promptbase.toml: argument -f/--format: invalid choice: 'yaml'`.
-- Only `pb` reads it. The Action has its own inputs, and `pb-web`, `pb-diff`, and
-  `pb-convert` take their options on the command line.
+- Only `pb` reads it. The Action has its own inputs, and `pb-web`, `pb-diff`,
+  `pb-convert`, and `pb-history` take their options on the command line.
 
 ## Prompts, bundles, and apps
 

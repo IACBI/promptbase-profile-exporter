@@ -6,7 +6,9 @@ bundles, or apps), layout (one file per catalog, or one Markdown file per
 prompt), mode, format
 (including the searchable HTML catalog), sort, filters (among them minimum
 sales and rating), limit, extra fields, timestamped filenames, partial
-exports, and CSV formula protection. It adds a download link for each file it writes.
+exports, and CSV formula protection. It adds a **Preview matches** button, which
+lists what a run would select without writing anything, and a download link for
+each file it writes.
 
 It can also compare the export with a catalog you already have: enter the
 catalog's path in "Compare with existing catalog" (a JSON, CSV, TXT, Markdown,
@@ -17,9 +19,10 @@ was written with CSV formula protection; this is independent of whether the
 new export is protected. The comparison is taken before any file is written,
 so it is
 accurate even when the export overwrites that catalog. Rewriting a catalog in
-place (`--update-file`), several profiles per run, and the preview options
-(`--dry-run`, `--list-domains`, `--list-types`) are command-line only. Like the
-rest of the tool, it needs nothing beyond the Python standard library.
+place (`--update-file`), several profiles per run, and the command-line preview
+flags (`--dry-run`, `--list-domains`, `--list-types`) are command-line only; the
+form has its own **Preview matches** button instead (see below). Like the rest
+of the tool, it needs nothing beyond the Python standard library.
 
 ## Starting it
 

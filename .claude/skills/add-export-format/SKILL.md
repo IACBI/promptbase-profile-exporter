@@ -40,7 +40,7 @@ existing five formats (`txt`, `markdown`, `json`, `csv`, `html`) as the template
 - `tests/test_formatting.py` — round-trip: write records, then
   `count_written_records` returns the right count; assert key fields appear.
 - `tests/test_diffing.py` — if you added a `load_catalog` branch, cover it.
-- Keep coverage >= 70%.
+- Keep coverage >= 85%.
 
 ## 5. Docs (same change)
 

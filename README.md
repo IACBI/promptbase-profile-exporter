@@ -1,7 +1,7 @@
 <a id="top"></a>
 # PromptBase Profile Exporter
 
-Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, CSV, or searchable HTML catalogs.
+Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, NDJSON, CSV, or searchable HTML catalogs.
 
 [![tests](https://github.com/IACBI/promptbase-profile-exporter/actions/workflows/tests.yml/badge.svg)](https://github.com/IACBI/promptbase-profile-exporter/actions/workflows/tests.yml)
 [![release](https://img.shields.io/github/v/release/IACBI/promptbase-profile-exporter)](https://github.com/IACBI/promptbase-profile-exporter/releases/latest)
@@ -69,12 +69,12 @@ cd promptbase-profile-exporter
 uv tool install .            # or: python -m pip install -e .
 ```
 
-This puts four commands on your `PATH`: `pb` for exports, `pb-web` for the
-web UI, `pb-diff` to compare two catalog files, and `pb-convert` to rewrite a
-catalog in another format (long forms: `promptbase-export`,
-`promptbase-export-web`, `promptbase-diff`, and `promptbase-convert`). Without
-installing, run `python -m promptbase_exporter` from the project folder
-instead of `pb`.
+This puts five commands on your `PATH`: `pb` for exports, `pb-web` for the
+web UI, `pb-diff` to compare two catalog files, `pb-convert` to rewrite a
+catalog in another format, and `pb-history` to track counters over time (long
+forms: `promptbase-export`, `promptbase-export-web`, `promptbase-diff`,
+`promptbase-convert`, and `promptbase-history`). Without installing, run
+`python -m promptbase_exporter` from the project folder instead of `pb`.
 
 ### Usage
 
@@ -87,6 +87,7 @@ pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a cata
 pb @acb @dreamydesigns --mode all --format html                 # searchable HTML, two profiles
 pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.json    # compare two saved catalogs
 pb-convert exports/acb_all_prompts.json --format csv            # rewrite a catalog, offline
+pb-history snapshot @acb --db history.sqlite                   # record counters; run it on a schedule
 ```
 
 The default run creates three files:
@@ -98,7 +99,9 @@ exports/acb_image_prompts.txt
 ```
 
 Prefer a browser? `pb-web` starts a local UI at <http://127.0.0.1:8765/> with
-the export options as a form and a download link for each file.
+the export options as a form, a **Preview matches** button that lists what a
+run would select without writing anything, and a download link for each file;
+`pb-web --open` also opens the page in your browser.
 
 To export on a schedule, use the GitHub Action:
 
@@ -120,8 +123,8 @@ Further reading:
 
 ### Configuration
 
-Everything is set per run with command-line options; there is no config file.
-The ones you will reach for most:
+Options are set per run on the command line, or from a `.json` or `.toml` file
+with `--config`. The ones you will reach for most:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -218,11 +221,12 @@ cd promptbase-profile-exporter
 uv tool install .            # or: python -m pip install -e .
 ```
 
-Bu, `PATH`'inize dört komut ekler: dışa aktarım için `pb`, web arayüzü için
+Bu, `PATH`'inize beş komut ekler: dışa aktarım için `pb`, web arayüzü için
 `pb-web`, iki katalog dosyasını karşılaştırmak için `pb-diff`, bir kataloğu
-başka bir biçimde yeniden yazmak için `pb-convert` (uzun adları:
-`promptbase-export`, `promptbase-export-web`, `promptbase-diff` ve
-`promptbase-convert`).
+başka bir biçimde yeniden yazmak için `pb-convert`, sayaçları zaman içinde
+izlemek için `pb-history` (uzun adları: `promptbase-export`,
+`promptbase-export-web`, `promptbase-diff`, `promptbase-convert` ve
+`promptbase-history`).
 Kurulum yapmadan kullanmak isterseniz proje klasöründe `pb` yerine
 `python -m promptbase_exporter` çalıştırın.
 
@@ -237,6 +241,7 @@ pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a cata
 pb @acb @dreamydesigns --mode all --format html                 # searchable HTML, two profiles
 pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.json    # compare two saved catalogs
 pb-convert exports/acb_all_prompts.json --format csv            # rewrite a catalog, offline
+pb-history snapshot @acb --db history.sqlite                   # record counters; run it on a schedule
 ```
 
 Varsayılan çalıştırma üç dosya oluşturur:
@@ -248,8 +253,10 @@ exports/acb_image_prompts.txt
 ```
 
 Tarayıcıyı mı tercih edersiniz? `pb-web`, <http://127.0.0.1:8765/> adresinde
-dışa aktarım seçeneklerini bir form olarak sunan ve her dosya için indirme
-bağlantısı veren yerel bir arayüz başlatır.
+dışa aktarım seçeneklerini bir form olarak, bir çalıştırmanın neleri seçeceğini
+hiçbir şey yazmadan listeleyen bir **Preview matches** düğmesini ve her dosya
+için indirme bağlantısını sunan yerel bir arayüz başlatır; `pb-web --open`
+sayfayı tarayıcınızda da açar.
 
 Dışa aktarımı belirli aralıklarla çalıştırmak için GitHub Action'ı
 kullanabilirsiniz:
@@ -272,15 +279,15 @@ Ayrıntılı dokümanlar (İngilizce):
 
 ### Yapılandırma
 
-Her şey çalıştırma sırasında komut satırı seçenekleriyle ayarlanır; ayrı bir
-yapılandırma dosyası yoktur. En sık kullanacaklarınız:
+Seçenekler çalıştırma sırasında komut satırından ya da `--config` ile bir
+`.json` veya `.toml` dosyasından ayarlanır. En sık kullanacaklarınız:
 
 | Seçenek | Varsayılan | Amaç |
 | --- | --- | --- |
 | `--config` | yok | Seçenekleri bir `.json` ya da `.toml` dosyasından okur (bkz. `docs/cli.md`) |
 | `--layout` | `catalog` | `files`, her prompt için front matter'lı ayrı bir Markdown dosyası yazar |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text` veya `image` |
-| `--format` | `txt` | `txt`, `markdown`, `json`, `csv` veya `html` |
+| `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv` veya `html` |
 | `--output-dir` | `exports` | Üretilen dosyaların yazılacağı klasör |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, `rating` |
 | `--domain`, `--type` | yok | Virgülle ayrılmış filtreler, ör. `--type gpt,claude` |
