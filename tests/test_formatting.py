@@ -615,7 +615,7 @@ class ExtraFieldsTests(unittest.TestCase):
 
     def test_html_shows_and_embeds_the_extra_fields(self):
         page = format_records_as_html([extras_record(nsfw=True)], EXTRA_FIELDS)
-        for fact in ("engine gpt-5.5", "tags poster, icons", "nsfw", "featured",
+        for fact in ("engine gpt-5.5", "tags poster, icons", "nsfw true", "featured true",
                      "updated 2026-09-05", "3 unique sales"):
             self.assertIn(fact, page)
         embedded = load_html_catalog_data(page)
@@ -623,6 +623,16 @@ class ExtraFieldsTests(unittest.TestCase):
         plain = format_records_as_html([extras_record()])
         self.assertNotIn("engine gpt-5.5", plain)
         self.assertNotIn('"engine"', plain)
+
+    def test_html_shows_false_and_zero_when_requested(self):
+        record = extras_record(nsfw=False, featured=False, unique_sales=0)
+        page = format_records_as_html([record], ("nsfw", "featured", "unique_sales"))
+        for fact in ("nsfw false", "featured false", "0 unique sales"):
+            self.assertIn(fact, page)
+        # Not requested, not shown.
+        plain = format_records_as_html([record], ("engine",))
+        for fact in ("nsfw", "featured", "unique sales"):
+            self.assertNotIn(fact, plain.split('<script type="application/json"')[0])
 
     def test_html_escapes_hostile_extra_values(self):
         page = format_records_as_html(

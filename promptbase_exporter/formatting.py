@@ -456,15 +456,17 @@ def _html_extra_facts(record: PromptRecord, extra_fields: Sequence[str]) -> list
         facts.append(f"engine {values['engine']}")
     if values.get("tags"):
         facts.append(f"tags {_cell_text(values['tags'])}")
-    if values.get("nsfw"):
-        facts.append("nsfw")
-    if values.get("featured"):
-        facts.append("featured")
+    # A recorded false or zero is a value, not an absence: show it, so a
+    # requested flag is never indistinguishable from one that was not requested.
+    if "nsfw" in values:
+        facts.append(f"nsfw {_cell_text(values['nsfw'])}")
+    if "featured" in values:
+        facts.append(f"featured {_cell_text(values['featured'])}")
     if values.get("updated_iso"):
         facts.append(f"updated {str(values['updated_iso'])[:10]}")
     if values.get("last_sale_iso"):
         facts.append(f"last sale {str(values['last_sale_iso'])[:10]}")
-    if values.get("unique_sales"):
+    if "unique_sales" in values:
         facts.append(f"{values['unique_sales']} unique sales")
     return facts
 
