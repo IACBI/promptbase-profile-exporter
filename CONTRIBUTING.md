@@ -18,8 +18,11 @@ alone.
 
 ## Checks
 
-CI runs these on Python 3.10 through 3.14, and `main` only accepts a pull
-request once they pass. Run them locally before you push:
+CI runs these on Python 3.10 through 3.14 (Ubuntu), plus the test suite on
+Windows and macOS with the oldest and newest Python, and `main` only accepts a
+pull request once the required ones pass. A nightly `canary` workflow repeats
+the live export and opens an issue if PromptBase data stops working. Run the
+checks locally before you push:
 
 ```bash
 python -m ruff check .

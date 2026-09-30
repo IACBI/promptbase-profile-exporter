@@ -1,11 +1,19 @@
 name: tests
 
+# Only pushes to main and pull requests: a push to a branch with an open pull
+# request used to run the whole suite twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# A newer push to the same pull request makes the older run pointless.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   unittest:
@@ -27,6 +35,27 @@ jobs:
       - run: python -m promptbase_exporter --help
       - run: promptbase-export-web --version
       - run: promptbase-diff --version
+
+  # Platforms beyond the required Ubuntu matrix above. The web UI has
+  # Windows-specific path handling (UNC paths), and Windows and macOS are where
+  # most desktop users run the CLI, so they get the suite on the oldest and
+  # newest supported Python. Kept as a separate job so the required check names
+  # above stay unchanged.
+  unittest-os:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m unittest discover -s tests
+      - run: python -m promptbase_exporter --version
 
   package:
     runs-on: ubuntu-latest
