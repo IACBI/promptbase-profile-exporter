@@ -12,6 +12,7 @@ from typing import Any
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
+from .config import ConfigError, check_arguments, find_config_path, load_config, split_config
 from .console import make_output_safe
 from .dates import parse_datetime_ms
 from .diffing import (
@@ -72,11 +73,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "profiles",
-        nargs="+",
+        nargs="*",
         metavar="profile",
         help=(
             "PromptBase profile URL, path, username, or @username. Pass several to "
-            "export each profile in one run."
+            "export each profile in one run. Required unless --config lists profiles."
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "Read options from a .json or .toml file (TOML needs Python 3.11+). Use the "
+            "long option names as keys, plus 'profiles'; anything on the command line "
+            "overrides the file."
         ),
     )
     parser.add_argument(
@@ -280,7 +291,24 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     make_output_safe()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+    config_arguments: list[str] = []
+    config_profiles: list[str] = []
+    try:
+        config_path = find_config_path(parser, raw_argv)
+        if config_path is not None:
+            config_arguments, config_profiles = split_config(load_config(config_path), parser)
+            check_arguments(build_parser, config_arguments, config_path)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    # The file's options come first, so the command line overrides them. Intermixed
+    # parsing lets profiles and options alternate: `pb @a --mode all @b`.
+    args = parser.parse_intermixed_args([*config_arguments, *raw_argv])
+    if not args.profiles:
+        if not config_profiles:
+            parser.error("the following arguments are required: profile")
+        args.profiles = config_profiles
     args.mode = MODE_ALIASES.get(args.mode, args.mode)
 
     try:
