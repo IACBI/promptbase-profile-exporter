@@ -545,28 +545,49 @@ class CompareFileTests(unittest.TestCase):
         self.assertIn("<h3>Comparison</h3>", page)
         self.assertIn("- Removed: 1", page)
 
-    def test_csv_safe_applies_to_the_comparison_catalog(self):
+    def test_comparison_catalog_decoding_is_independent_of_output_protection(self):
         records = [record("=Formula", "text", "gpt", created=2, price=2.0)]
 
         def fetcher(_profile_input):
             return Profile(username="acb", uid="uid-1"), records
 
         with _in_directory() as root:
-            write_export(root, "old", "all", records, "csv", csv_safe=True)
-            form = {
-                "profile": "acb",
-                "mode": "all",
-                "format": "csv",
-                "output_dir": "out",
-                "compare_file": "old_all_prompts.csv",
-            }
-            safe = run_export(build_request_config({**form, "csv_safe": "1"}), fetcher=fetcher)
-            plain = run_export(build_request_config(form), fetcher=fetcher)
+            write_export(root, "safe", "all", records, "csv", csv_safe=True)
+            write_export(root, "plain", "all", records, "csv")
+            form = {"profile": "acb", "mode": "all", "format": "csv", "output_dir": "out"}
+            # Protected catalog declared, plain output.
+            declared = run_export(
+                build_request_config(
+                    {**form, "compare_file": "safe_all_prompts.csv", "compare_csv_safe": "1"}
+                ),
+                fetcher=fetcher,
+            )
+            # Protected output, plain catalog: the catalog is read verbatim.
+            protected_output = run_export(
+                build_request_config(
+                    {**form, "compare_file": "plain_all_prompts.csv", "csv_safe": "1"}
+                ),
+                fetcher=fetcher,
+            )
+            # Protected catalog not declared: read verbatim, so it differs.
+            undeclared = run_export(
+                build_request_config({**form, "compare_file": "safe_all_prompts.csv"}),
+                fetcher=fetcher,
+            )
 
-        self.assertFalse(safe.diff.has_changes)
-        # Read verbatim, the escaped slug "'=formula" no longer matches.
-        self.assertEqual([item["slug"] for item in plain.diff.removed], ["'=formula"])
-        self.assertEqual([item["slug"] for item in plain.diff.added], ["=formula"])
+        self.assertFalse(declared.diff.has_changes)
+        self.assertFalse(protected_output.diff.has_changes)
+        self.assertTrue(undeclared.diff.has_changes)
+
+    def test_compare_csv_safe_needs_a_csv_catalog(self):
+        with _in_directory():
+            Path("old.json").write_text("[]", encoding="utf-8")
+            for form in (
+                {"compare_csv_safe": "1"},
+                {"compare_csv_safe": "1", "compare_file": "old.json"},
+            ):
+                with self.assertRaisesRegex(WebInputError, "CSV comparison catalog"):
+                    build_request_config({"profile": "acb", "mode": "all", **form})
 
     def test_unreadable_compare_catalog_is_a_400_error(self):
         def fetcher(_profile_input):

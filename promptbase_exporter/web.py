@@ -97,6 +97,7 @@ class ExportRequest:
     min_sales: int | None = None
     min_rating: float | None = None
     csv_safe: bool = False
+    compare_csv_safe: bool = False
     compare_file: str = ""
     compare_path: Path | None = None
 
@@ -197,6 +198,9 @@ def build_request_config(
 
     compare_file = _single_value(form_data, "compare_file").strip()
     compare_path = _resolve_compare_path(compare_file, mode) if compare_file else None
+    compare_csv_safe = _as_bool(_single_value(form_data, "compare_csv_safe"))
+    if compare_csv_safe and (compare_path is None or compare_path.suffix.lower() != ".csv"):
+        raise WebInputError("The protected-catalog option needs a CSV comparison catalog.")
 
     return ExportRequest(
         profile_input=profile_input,
@@ -221,6 +225,7 @@ def build_request_config(
         min_sales=min_sales,
         min_rating=min_rating,
         csv_safe=csv_safe,
+        compare_csv_safe=compare_csv_safe,
         compare_file=compare_file,
         compare_path=compare_path,
     )
@@ -291,7 +296,9 @@ def run_export(
         # being compared against.
         if request.compare_path is not None:
             try:
-                previous = load_catalog(request.compare_path, csv_safe=request.csv_safe)
+                previous = load_catalog(
+                    request.compare_path, csv_safe=request.compare_csv_safe
+                )
             except (OSError, ValueError) as exc:
                 raise WebInputError(f"Could not load comparison catalog: {exc}") from exc
             diff = compare_catalogs(previous, filter_records(selected_records, modes[0]))
@@ -620,6 +627,11 @@ def render_form(
           <input type="checkbox" name="csv_safe" value="1"
             {_checked(request.csv_safe)}>
           CSV formula protection
+        </label>
+        <label class="checkline">
+          <input type="checkbox" name="compare_csv_safe" value="1"
+            {_checked(request.compare_csv_safe)}>
+          Comparison catalog is a protected CSV
         </label>
       </div>
       <div class="actions">

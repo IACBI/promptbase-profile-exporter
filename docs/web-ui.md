@@ -10,9 +10,10 @@ It can also compare the export with a catalog you already have: enter the
 catalog's path in "Compare with existing catalog" (a JSON, CSV, TXT, Markdown,
 or HTML file inside the folder the server runs in, with a mode other than
 `split`), and the result page shows the same added / removed / changed report
-as `--compare`. With "CSV formula protection" checked, a CSV comparison
-catalog is read as one written with it. The comparison is taken before any
-file is written, so it is
+as `--compare`. Tick "Comparison catalog is a protected CSV" when that catalog
+was written with CSV formula protection; this is independent of whether the
+new export is protected. The comparison is taken before any file is written,
+so it is
 accurate even when the export overwrites that catalog. Rewriting a catalog in
 place (`--update-file`), several profiles per run, and the preview options
 (`--dry-run`, `--list-domains`, `--list-types`) are command-line only. Like the

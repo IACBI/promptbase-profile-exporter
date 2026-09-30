@@ -146,9 +146,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Prefix CSV text cells that start with =, +, -, or @ with an apostrophe so "
-            "spreadsheet apps do not run them as formulas. Also reads a CSV --compare or "
-            "--update-file catalog as one written this way. Requires CSV output or a CSV "
-            "comparison catalog."
+            "spreadsheet apps do not run them as formulas. Requires --format csv."
+        ),
+    )
+    parser.add_argument(
+        "--compare-csv-safe",
+        action="store_true",
+        help=(
+            "Read the CSV --compare or --update-file catalog as one written with "
+            "--csv-safe, restoring its escaped cells. Independent of --csv-safe, which "
+            "only affects the file being written."
         ),
     )
     parser.add_argument(
@@ -375,7 +382,7 @@ def export_profile(
             args.diff_output or [],
             args.fail_on_diff,
             quiet=args.quiet,
-            csv_safe=args.csv_safe,
+            csv_safe=args.compare_csv_safe,
         )
         if diff_exit_code == EXIT_ERROR:
             # An operational failure (catalog load failed, or the requested diff
@@ -504,9 +511,13 @@ def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
         export_format = infer_format_from_path(output_file)
     else:
         export_format = args.format or "txt"
+    # Output escaping and input decoding are separate on purpose: a safe export
+    # may be compared with a plain catalog and vice versa.
+    if args.csv_safe and export_format != "csv":
+        raise ValueError("--csv-safe requires --format csv")
     compares_csv = compare_path is not None and compare_path.suffix.lower() == ".csv"
-    if args.csv_safe and export_format != "csv" and not compares_csv:
-        raise ValueError("--csv-safe requires CSV output or a CSV comparison catalog")
+    if args.compare_csv_safe and not compares_csv:
+        raise ValueError("--compare-csv-safe requires a CSV --compare or --update-file catalog")
 
     since_created = parse_datetime_ms(args.since, end_of_day=False) if args.since else None
     until_created = parse_datetime_ms(args.until, end_of_day=True) if args.until else None
@@ -607,9 +618,14 @@ def build_diff_parser() -> argparse.ArgumentParser:
         help="Exit with code 2 when the catalogs differ.",
     )
     parser.add_argument(
-        "--csv-safe",
+        "--previous-csv-safe",
         action="store_true",
-        help="Read CSV catalogs as written with --csv-safe and restore their escaped cells.",
+        help="The previous catalog is a CSV written with --csv-safe; restore its escaped cells.",
+    )
+    parser.add_argument(
+        "--current-csv-safe",
+        action="store_true",
+        help="The current catalog is a CSV written with --csv-safe; restore its escaped cells.",
     )
     parser.add_argument(
         "--quiet",
@@ -628,9 +644,12 @@ def diff_main(argv: list[str] | None = None) -> int:
     """Entry point for ``pb-diff``: compare two catalog files offline."""
     args = build_diff_parser().parse_args(argv)
     loaded: list[list[dict[str, Any]]] = []
-    for path in (args.previous, args.current):
+    for path, csv_safe in (
+        (args.previous, args.previous_csv_safe),
+        (args.current, args.current_csv_safe),
+    ):
         try:
-            loaded.append(load_catalog(path, csv_safe=args.csv_safe))
+            loaded.append(load_catalog(path, csv_safe=csv_safe))
         except (OSError, ValueError) as exc:
             print(f"error: could not load catalog {path}: {exc}", file=sys.stderr)
             return EXIT_ERROR
