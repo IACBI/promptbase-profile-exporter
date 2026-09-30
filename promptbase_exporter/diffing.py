@@ -336,7 +336,7 @@ def _title_key(record: dict[str, Any]) -> str:
 
 
 def _slug_from_url(url: str) -> str:
-    match = re.search(r"/prompt/([^/?#]+)", url)
+    match = re.search(r"/(?:prompt|bundle|app)/([^/?#]+)", url)
     return match.group(1) if match else ""
 
 

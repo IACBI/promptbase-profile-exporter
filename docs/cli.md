@@ -42,6 +42,33 @@ pb @acb @dreamydesigns emanema --format json
 `--output-file`, `--compare`, and `--update-file` each describe one catalog, so
 they take a single profile.
 
+## Prompts, bundles, and apps
+
+A profile lists more than prompts. `--item-type` picks the kind of listing to
+export:
+
+| `--item-type` | Exports | Filename | URL |
+| --- | --- | --- | --- |
+| `prompt` (default) | The profile's approved prompts | `acb_all_prompts.json` | `promptbase.com/prompt/<slug>` |
+| `bundle` | Its approved bundles | `acb_all_bundles.json` | `promptbase.com/bundle/<slug>` |
+| `app` | Its approved apps | `acb_all_apps.json` | `promptbase.com/app/<slug>` |
+
+Bundles and apps use the same columns as prompts, with descriptions from
+PromptBase's public bundle and app records, plus an `item_type` column (a
+prompt catalog keeps its original columns). Everything else works as it does
+for prompts: modes, formats, filters, `--extra-fields`, `--compare`, and
+`--update-file`.
+
+```bash
+pb @acb --item-type bundle --mode all --format csv
+pb @acb --item-type app --mode all --update-file exports/acb_all_apps.json
+```
+
+Two things to know. Apps are published alongside prompts, and a profile's apps
+are free and mirror its prompts; they have no `type`, and a few have no
+`domain`, so they appear in the `all` catalog only. Skills are not supported:
+PromptBase does not publish them for the profiles checked.
+
 ## Modes: which catalogs to write
 
 `--mode` decides which files are written. Prompts are grouped by their
@@ -54,7 +81,8 @@ PromptBase `domain`:
 | `text` | Prompts whose domain is `text` (alias: `text-only`) |
 | `image` | Prompts whose domain is `image` (alias: `image-only`) |
 
-Generated files are named `<username>_<mode>_prompts.<ext>` and written to
+Generated files are named `<username>_<mode>_prompts.<ext>` (`bundles` or `apps` for
+the other kinds) and written to
 `--output-dir` (default `exports/`). Add `--timestamp-filenames` to keep a
 history of runs side by side:
 
@@ -343,6 +371,7 @@ pb @acb --quiet          # print nothing except errors
 | `profile` (positional) | required | PromptBase profile URL (with or without `https://`), path, username, or `@username`. Repeat to export several profiles. |
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
+| `--item-type` | `prompt` | Kind of listing to export: `prompt`, `bundle`, or `app`. |
 | `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`; with `--update-file` it must match that extension. |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |
 | `--domain` | none | Comma-separated domain filter, e.g. `text,image,video`. |

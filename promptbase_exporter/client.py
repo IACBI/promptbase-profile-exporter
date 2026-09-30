@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from . import __version__
-from .models import EXTRA_FIELDS, Profile, PromptRecord
+from .models import EXTRA_FIELDS, ITEM_TYPES, Profile, PromptRecord
 
 FIRESTORE_RUN_QUERY = (
     "https://firestore.googleapis.com/v1/projects/"
@@ -73,6 +73,15 @@ EXTRA_FIELD_SOURCES = {
     "unique_sales": "uniqueSales",
 }
 assert tuple(EXTRA_FIELD_SOURCES) == EXTRA_FIELDS
+# The public collection that holds each kind's description. They all carry
+# slug, description, and created, and are joined to Items by slug (verified:
+# every Bundles and AppDetails document matches exactly one Items document).
+DETAIL_COLLECTIONS = {
+    "prompt": "PromptDetails",
+    "bundle": "Bundles",
+    "app": "AppDetails",
+}
+assert tuple(DETAIL_COLLECTIONS) == ITEM_TYPES
 
 
 class PromptBaseError(RuntimeError):
@@ -363,13 +372,14 @@ def _distinct_uid_for_username(docs: list[dict[str, Any]], username: str) -> str
 def fetch_prompt_items(
     profile: Profile,
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> list[dict[str, Any]]:
     docs = _run_query_all(
         "Items",
         [
             field_filter("status", "EQUAL", {"stringValue": "approved"}),
             field_filter("uid", "EQUAL", {"stringValue": profile.uid}),
-            field_filter("itemType", "EQUAL", {"stringValue": "prompt"}),
+            field_filter("itemType", "EQUAL", {"stringValue": item_type}),
         ],
         order_by=[
             _order_by("created", "DESCENDING"),
@@ -391,14 +401,18 @@ def fetch_prompt_items(
     return prompts
 
 
-def fetch_prompt_details(profile: Profile) -> dict[str, dict[str, Any]]:
+def fetch_prompt_details(
+    profile: Profile,
+    item_type: str = "prompt",
+) -> dict[str, dict[str, Any]]:
+    collection = DETAIL_COLLECTIONS[item_type]
     docs = _run_query_all(
-        "PromptDetails",
+        collection,
         [field_filter("uid", "EQUAL", {"stringValue": profile.uid})],
         order_by=[_order_by("__name__", "ASCENDING")],
         fields=PROMPT_DETAIL_FIELDS,
     )
-    _raise_if_schema_changed("PromptDetails", docs, PROMPT_DETAIL_SCHEMA_FIELDS)
+    _raise_if_schema_changed(collection, docs, PROMPT_DETAIL_SCHEMA_FIELDS)
 
     by_slug: dict[str, dict[str, Any]] = {}
     for doc in docs:
@@ -415,18 +429,22 @@ def fetch_prompt_details(profile: Profile) -> dict[str, dict[str, Any]]:
 def fetch_prompts(
     profile_input: str,
     extra_fields: Sequence[str] = (),
+    item_type: str = "prompt",
 ) -> tuple[Profile, list[PromptRecord]]:
-    """Fetch a profile's approved prompts.
+    """Fetch a profile's approved listings of one kind (prompts by default).
 
     ``extra_fields`` names optional record fields (see ``models.EXTRA_FIELDS``)
-    to download as well; the others keep their defaults.
+    to download as well; the others keep their defaults. ``item_type`` is one
+    of ``models.ITEM_TYPES``.
     """
     unknown = [name for name in extra_fields if name not in EXTRA_FIELD_SOURCES]
     if unknown:
         raise ValueError(f"Unknown extra field(s): {', '.join(unknown)}")
+    if item_type not in ITEM_TYPES:
+        raise ValueError(f"Unknown item type: {item_type}")
     profile = resolve_profile(profile_input)
-    items = fetch_prompt_items(profile, extra_fields)
-    details_by_slug = fetch_prompt_details(profile)
+    items = fetch_prompt_items(profile, extra_fields, item_type)
+    details_by_slug = fetch_prompt_details(profile, item_type)
 
     records: list[PromptRecord] = []
     for item in items:
@@ -455,6 +473,7 @@ def fetch_prompts(
                 updated=_optional_int_field(item, "updated"),
                 last_sale=_optional_int_field(item, "lastSale"),
                 unique_sales=_int_field(item, "uniqueSales"),
+                item_type=item_type,
             )
         )
 

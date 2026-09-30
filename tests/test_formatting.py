@@ -7,14 +7,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from promptbase_exporter.diffing import load_catalog
+from promptbase_exporter.diffing import compare_catalogs, load_catalog
 from promptbase_exporter.formatting import (
+    EXPORT_FORMATS,
     HTML_DATA_ELEMENT_ID,
     RECORD_FIELDS,
     UTF8_BOM,
     count_written_records,
     csv_escape_formula,
     csv_unescape_formula,
+    expected_filename,
+    expected_timestamped_filename,
     filter_records,
     filter_records_by_metadata,
     format_records,
@@ -32,7 +35,7 @@ from promptbase_exporter.formatting import (
     write_export,
     write_export_to_path,
 )
-from promptbase_exporter.models import EXTRA_FIELDS, PromptRecord
+from promptbase_exporter.models import EXTRA_FIELDS, ITEM_TYPES, PromptRecord
 
 
 def record(
@@ -646,6 +649,93 @@ class ExtraFieldsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "txt format cannot hold extra fields"):
             format_records([extras_record()], "txt", extra_fields=("tags",))
         self.assertIn("Title: Extras", format_records([extras_record()], "txt"))
+
+
+def kind_record(item_type, **overrides):
+    values = dict(
+        title="Kinds", description="d", slug="kinds", prompt_type="gpt", domain="text",
+        created=1_767_225_600_000, price=2.5, item_type=item_type,
+    )
+    values.update(overrides)
+    return PromptRecord(**values)
+
+
+class ItemTypeFormattingTests(unittest.TestCase):
+    def test_url_follows_the_item_type(self):
+        for item_type in ITEM_TYPES:
+            self.assertEqual(
+                kind_record(item_type).url, f"https://promptbase.com/{item_type}/kinds"
+            )
+
+    def test_filenames_name_the_kind(self):
+        self.assertEqual(expected_filename("acb", "all", "json"), "acb_all_prompts.json")
+        self.assertEqual(
+            expected_filename("acb", "text", "csv", "bundle"), "acb_text_bundles.csv"
+        )
+        self.assertEqual(
+            expected_timestamped_filename("acb", "all", "html", "20260101_000000", "app"),
+            "acb_all_apps_20260101_000000.html",
+        )
+
+    def test_prompt_catalogs_keep_their_columns(self):
+        self.assertEqual(tuple(record_to_dict(kind_record("prompt"))), RECORD_FIELDS)
+        header = format_records_as_csv([kind_record("prompt")]).splitlines()[0]
+        self.assertEqual(header, ",".join(RECORD_FIELDS))
+
+    def test_other_kinds_say_what_they_are(self):
+        for item_type in ("bundle", "app"):
+            data = record_to_dict(kind_record(item_type))
+            self.assertEqual(data["item_type"], item_type)
+            self.assertEqual(tuple(data)[: len(RECORD_FIELDS)], RECORD_FIELDS)
+            text = format_records_as_csv([kind_record(item_type)], item_type=item_type)
+            row = next(csv.DictReader(io.StringIO(text)))
+            self.assertEqual(row["item_type"], item_type)
+
+    def test_item_type_column_comes_before_the_extra_fields(self):
+        text = format_records_as_csv(
+            [kind_record("bundle")], extra_fields=("tags",), item_type="bundle"
+        )
+        columns = text.splitlines()[0].split(",")
+        self.assertEqual(columns[len(RECORD_FIELDS):], ["item_type", "tags"])
+
+    def test_headings_and_counts_use_the_kind(self):
+        records = [kind_record("bundle")]
+        self.assertTrue(
+            format_records_as_markdown(records, item_type="bundle").startswith(
+                "# PromptBase Bundle Export"
+            )
+        )
+        page = format_records_as_html(records, item_type="bundle")
+        self.assertIn("<title>PromptBase Bundle Export</title>", page)
+        self.assertIn('data-noun="bundles">1 bundles</p>', page)
+        self.assertIn('placeholder="Filter bundles"', page)
+        prompt_page = format_records_as_html([kind_record("prompt")])
+        self.assertIn("<title>PromptBase Prompt Export</title>", prompt_page)
+        self.assertIn('data-noun="prompts">1 prompts</p>', prompt_page)
+
+    def test_every_kind_round_trips_through_every_format(self):
+        for item_type in ("bundle", "app"):
+            records = [kind_record(item_type), kind_record(item_type, title="Two", slug="two")]
+            for export_format in EXPORT_FORMATS:
+                with self.subTest(item_type=item_type, format=export_format):
+                    with TemporaryDirectory() as directory:
+                        path = write_export(
+                            Path(directory), "acb", "all", records, export_format,
+                            item_type=item_type,
+                        )
+                        self.assertEqual(path.name.split("_")[2].split(".")[0], item_type + "s")
+                        self.assertEqual(count_written_records(path, export_format), 2)
+                        loaded = load_catalog(path)
+                        diff = compare_catalogs(loaded, records)
+                    self.assertFalse(diff.has_changes)
+
+    def test_markdown_slug_is_read_from_bundle_and_app_urls(self):
+        for item_type in ("bundle", "app"):
+            text = format_records_as_markdown([kind_record(item_type)], item_type=item_type)
+            with TemporaryDirectory() as directory:
+                path = Path(directory) / "catalog.md"
+                path.write_text(text, encoding="utf-8")
+                self.assertEqual(load_catalog(path)[0]["slug"], "kinds")
 
 
 if __name__ == "__main__":
