@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.12.1 - 2026-09-30
+
 ### Fixed
 
 - A CSV catalog is now read with its line breaks intact: a description or title
