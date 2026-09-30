@@ -77,6 +77,7 @@ git push -u origin fix/short-description
 promptbase_exporter/
   cli.py          # argument parsing, option validation, exit codes
   client.py       # public PromptBase/Firestore access, retries, schema checks
+  convert.py      # `pb-convert`: rewrite a saved catalog in another format
   dates.py        # shared date parsing
   diff.py         # `python -m promptbase_exporter.diff` entry point (pb-diff)
   diffing.py      # catalog loading, comparison, and Markdown/JSON diff reports
