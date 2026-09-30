@@ -54,6 +54,7 @@ DOWNLOAD_CONTENT_TYPES = {
     ".json": "application/json; charset=utf-8",
     ".csv": "text/csv; charset=utf-8",
     ".html": "text/html; charset=utf-8",
+    ".ndjson": "application/x-ndjson; charset=utf-8",
 }
 
 # Names that write_export actually produces:
@@ -63,7 +64,7 @@ DOWNLOAD_CONTENT_TYPES = {
 # directory, even when the server is exposed with --host 0.0.0.0.
 _EXPORT_FILENAME_RE = re.compile(
     r"^[A-Za-z0-9_.-]+_(?:all|text|image)_(?:prompts|bundles|apps)(?:_\d{8}_\d{6})?"
-    r"\.(?:txt|md|json|csv|html)$"
+    r"\.(?:txt|md|json|csv|html|ndjson)$"
 )
 
 
@@ -248,7 +249,7 @@ def build_request_config(
     except ValueError as exc:
         raise WebInputError(f"Extra fields: {exc}.") from exc
     if extra_fields and export_format == "txt":
-        raise WebInputError("Extra fields need the markdown, json, csv, or html format.")
+        raise WebInputError("Extra fields need the markdown, json, ndjson, csv, or html format.")
     compare_csv_safe = _as_bool(_single_value(form_data, "compare_csv_safe"))
     if compare_csv_safe and (compare_path is None or compare_path.suffix.lower() != ".csv"):
         raise WebInputError("The protected-catalog option needs a CSV comparison catalog.")

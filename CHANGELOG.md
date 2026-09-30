@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- A new `ndjson` format (`--format ndjson`, `.ndjson`; `.jsonl` is accepted on
+  input and inferred from `--output-file`): one compact JSON object per line
+  with the JSON format's fields and no enclosing array, for `jq -c`,
+  `pandas.read_json(lines=True)`, and warehouse loaders. U+2028, U+2029, and
+  U+0085, which `str.splitlines()` treats as line breaks, are escaped so a
+  record is always one physical line. It works with `--compare`,
+  `--update-file`, `pb-diff`, `pb-convert`, the web UI, and the Action, and
+  each line of a written file is checked.
+
 ## 0.10.0 - 2026-09-30
 
 ### Added

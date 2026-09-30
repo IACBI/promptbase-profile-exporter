@@ -704,7 +704,7 @@ class ExtraFieldsWebTests(unittest.TestCase):
             build_request_config(
                 {"profile": "acb", "format": "json", "extra_fields": ["tags", "bogus"]}
             )
-        with self.assertRaisesRegex(WebInputError, "markdown, json, csv, or html"):
+        with self.assertRaisesRegex(WebInputError, "markdown, json, ndjson, csv, or html"):
             build_request_config({"profile": "acb", "extra_fields": ["tags"]})
 
     def test_form_renders_one_checkbox_per_field_and_keeps_the_selection(self):

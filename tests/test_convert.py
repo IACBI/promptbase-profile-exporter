@@ -18,7 +18,7 @@ from promptbase_exporter.formatting import (
 )
 from promptbase_exporter.models import EXTRA_FIELDS, PromptRecord
 
-LOSSLESS = ("json", "csv", "html")
+LOSSLESS = ("json", "ndjson", "csv", "html")
 
 
 def sample_records(item_type="prompt"):
