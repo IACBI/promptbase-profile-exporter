@@ -123,6 +123,12 @@ inputs:
     description: Exit with code 2 when compare finds changes.
     required: false
     default: "false"
+  step-summary:
+    description: >-
+      With compare or update-file, show the diff report on the workflow run's
+      summary page. Use false to turn it off.
+    required: false
+    default: "true"
   timestamp-filenames:
     description: Append a YYYYMMDD_HHMMSS timestamp to generated filenames.
     required: false
@@ -278,6 +284,7 @@ runs:
         COMPARE: ${{ inputs.compare }}
         DIFF_OUTPUT: ${{ inputs.diff-output }}
         FAIL_ON_DIFF: ${{ inputs.fail-on-diff }}
+        STEP_SUMMARY: ${{ inputs.step-summary }}
         TIMESTAMP_FILENAMES: ${{ inputs.timestamp-filenames }}
         ALLOW_MISSING_DESCRIPTIONS: ${{ inputs.allow-missing-descriptions }}
       run: |
@@ -409,11 +416,31 @@ runs:
         add_flag compare-csv-safe "$COMPARE_CSV_SAFE" --compare-csv-safe
         add_flag dry-run "$DRY_RUN" --dry-run
 
-        # Always capture a machine-readable diff so its counts become outputs.
+        case "$(normalize_bool "$STEP_SUMMARY")" in
+          true|"")
+            step_summary=true
+            ;;
+          false)
+            step_summary=false
+            ;;
+          *)
+            echo "::error::step-summary must be true or false."
+            exit 1
+            ;;
+        esac
+
+        # Always capture a machine-readable diff so its counts become outputs,
+        # and a Markdown copy for the run's summary page.
         diff_json=""
+        diff_md=""
         if [[ -n "$COMPARE" || -n "$UPDATE_FILE" ]]; then
-          diff_json="$RUNNER_TEMP/promptbase-diff-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$$.json"
+          diff_base="$RUNNER_TEMP/promptbase-diff-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$$"
+          diff_json="$diff_base.json"
           args+=("--diff-output" "$diff_json")
+          if [[ "$step_summary" == "true" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            diff_md="$diff_base.md"
+            args+=("--diff-output" "$diff_md")
+          fi
         fi
 
         set +e
@@ -422,6 +449,17 @@ runs:
         set -e
 
         echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        if [[ -n "$diff_md" && -f "$diff_md" ]]; then
+          # A step summary is limited to 1 MiB; leave room for the notice.
+          if [[ "$(wc -c < "$diff_md")" -gt 900000 ]]; then
+            {
+              head -c 900000 "$diff_md"
+              printf '\n\n_Report truncated: see the diff-json output for the full diff._\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat "$diff_md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+        fi
         if [[ -n "$diff_json" && -f "$diff_json" ]]; then
           python - "$diff_json" >> "$GITHUB_OUTPUT" <<'PY'
         import json
