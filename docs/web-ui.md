@@ -64,7 +64,7 @@ using it:
   just the diff report (titles, slugs, and changed values).
 - **Downloads serve exports only.** `GET /download` returns a file only if it
   sits inside the working directory *and* its name matches the exporter's own
-  pattern, `<username>_<mode>_<prompts|bundles|apps>[_timestamp].{txt,md,json,csv,html}`. It
+  pattern, `<username>_<mode>_<prompts|bundles|apps>[_timestamp].{txt,md,json,csv,html,ndjson}`. It
   cannot be used to read other files, not even a stray `secrets.json` next to
   your exports. Downloads are always sent as attachments with
   `Content-Security-Policy: sandbox`, so an HTML export can never run script

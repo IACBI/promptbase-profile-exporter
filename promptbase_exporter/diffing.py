@@ -13,6 +13,7 @@ from .formatting import (
     UTF8_BOM,
     csv_unescape_formula,
     load_html_catalog_data,
+    load_ndjson_catalog_data,
     record_to_dict,
 )
 from .models import PromptRecord
@@ -20,7 +21,9 @@ from .models import PromptRecord
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
 # File extensions load_catalog can read.
-CATALOG_SUFFIXES = frozenset({".json", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"})
+CATALOG_SUFFIXES = frozenset(
+    {".json", ".ndjson", ".jsonl", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"}
+)
 
 # Whitespace collapse runs once per compared field of every changed-candidate
 # record, so compile it once rather than per call.
@@ -70,6 +73,12 @@ def load_catalog(
         if not isinstance(data, list):
             raise ValueError("JSON catalog must contain a list of records.")
         return _records(data, strict)
+    if suffix in {".ndjson", ".jsonl"}:
+        return [
+            _normalize_record(item)
+            for item in load_ndjson_catalog_data(text, strict=strict)
+            if isinstance(item, dict)
+        ]
     if suffix == ".csv":
         # Strip a BOM from any CSV (Excel adds one), or the first column name
         # would read as "\ufefftitle".

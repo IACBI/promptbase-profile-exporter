@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, PromptRecord, ms_to_iso_or_none
 
-EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html")
+EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html", "ndjson")
 SORT_OPTIONS = (
     "newest",
     "oldest",
@@ -61,6 +61,15 @@ FORMAT_EXTENSIONS = {
     "json": "json",
     "csv": "csv",
     "html": "html",
+    "ndjson": "ndjson",
+}
+# Characters that str.splitlines() (and many line readers) treat as a line
+# break although JSON leaves them raw inside a string. An NDJSON record must
+# stay on one physical line, so these are written as \u escapes.
+_NDJSON_LINE_BREAKS = {
+    " ": "\\u2028",
+    " ": "\\u2029",
+    "\u0085": "\\u0085",
 }
 # Spreadsheet apps evaluate a cell that starts with one of these as a formula
 # (CSV/formula injection). --csv-safe prefixes such text cells with "'".
@@ -301,6 +310,48 @@ def format_records_as_json(
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
+def format_records_as_ndjson(
+    records: list[PromptRecord],
+    extra_fields: Sequence[str] = (),
+) -> str:
+    """One compact JSON object per line (newline-delimited JSON), no enclosing array.
+
+    Unlike a JSON array it can be read and written one record at a time, which
+    suits ``jq -c``, ``pandas.read_json(lines=True)``, and warehouse loaders.
+    """
+    lines = []
+    for record in records:
+        line = json.dumps(
+            record_to_dict(record, extra_fields), ensure_ascii=False, separators=(",", ":")
+        )
+        for character, escape in _NDJSON_LINE_BREAKS.items():
+            line = line.replace(character, escape)
+        lines.append(line + "\n")
+    return "".join(lines)
+
+
+def load_ndjson_catalog_data(text: str, *, strict: bool = False) -> list[object]:
+    """Parse NDJSON text into its records; blank lines are ignored.
+
+    Splits on newline characters only, never ``splitlines()``. A line that is not valid
+    JSON raises ValueError naming the line; one that is valid but not an object
+    does too when ``strict`` is set, and is skipped otherwise.
+    """
+    records: list[object] = []
+    for number, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError as exc:
+            raise ValueError(f"line {number} is not valid JSON: {exc}") from exc
+        if isinstance(item, dict):
+            records.append(item)
+        elif strict:
+            raise ValueError(f"line {number} is not a record")
+    return records
+
+
 def format_records_as_csv(
     records: list[PromptRecord],
     *,
@@ -533,6 +584,8 @@ def format_records(
         )
     if export_format == "html":
         return format_records_as_html(records, extra_fields, item_type)
+    if export_format == "ndjson":
+        return format_records_as_ndjson(records, extra_fields)
     raise ValueError(f"Unsupported export format: {export_format}")
 
 
@@ -671,6 +724,8 @@ def infer_format_from_path(path: Path) -> str:
         return "csv"
     if extension in {".html", ".htm"}:
         return "html"
+    if extension in {".ndjson", ".jsonl"}:
+        return "ndjson"
     raise ValueError(f"Cannot infer export format from extension: {path.suffix}")
 
 
@@ -703,6 +758,8 @@ def count_written_records(path: Path, export_format: str) -> int:
                 f"HTML catalog lists {rendered} prompts but embeds {embedded} records"
             )
         return rendered
+    if export_format == "ndjson":
+        return len(load_ndjson_catalog_data(text, strict=True))
     raise ValueError(f"Unsupported export format: {export_format}")
 
 

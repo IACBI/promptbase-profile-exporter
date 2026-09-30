@@ -880,7 +880,9 @@ class ExtraFieldsCliTests(unittest.TestCase):
         for argv in (["--extra-fields", "tags"], ["--format", "txt", "--extra-fields", "all"]):
             exit_code, stderr = self._run_expecting_failure(["@acb", *argv])
             self.assertEqual(exit_code, EXIT_ERROR)
-            self.assertIn("--extra-fields needs --format markdown, json, csv, or html", stderr)
+            self.assertIn(
+                "--extra-fields needs --format markdown, json, ndjson, csv, or html", stderr
+            )
 
     def test_inferred_txt_output_file_fails_before_fetch(self):
         exit_code, stderr = self._run_expecting_failure(

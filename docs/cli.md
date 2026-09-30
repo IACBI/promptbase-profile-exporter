@@ -125,7 +125,7 @@ PromptBase `domain`:
 | `image` | Prompts whose domain is `image` (alias: `image-only`) |
 
 Generated files are named `<username>_<mode>_prompts.<ext>` (`bundles` or `apps` for
-the other kinds) and written to
+the other kinds; `.ndjson` for NDJSON) and written to
 `--output-dir` (default `exports/`). Add `--timestamp-filenames` to keep a
 history of runs side by side:
 
@@ -136,7 +136,7 @@ pb @acb --timestamp-filenames
 
 ## Output formats
 
-Choose with `--format`: `txt` (default), `markdown`, `json`, `csv`, or `html`.
+Choose with `--format`: `txt` (default), `markdown`, `json`, `ndjson`, `csv`, or `html`.
 
 **TXT** is a plain numbered list of titles and descriptions:
 
@@ -213,6 +213,20 @@ pb-diff old-safe.csv new-plain.csv --previous-csv-safe
 
 ```bash
 pb @acb --mode all --format csv --csv-safe
+```
+
+**NDJSON** (newline-delimited JSON, `.ndjson`; `.jsonl` is read too) is one
+compact JSON object per line, with the same fields as the JSON format and no
+enclosing array. It can be read and written a record at a time, which suits
+`jq -c`, `pandas.read_json(path, lines=True)`, and warehouse loaders, and it
+works with `--compare`, `--update-file`, `pb-diff`, and `pb-convert` like JSON.
+The characters U+2028, U+2029, and U+0085, which some line readers treat as
+line breaks, are written as `\u` escapes, so a record is always exactly one
+physical line.
+
+```bash
+pb @acb --mode all --format ndjson   # -> exports/acb_all_prompts.ndjson
+jq -c 'select(.sales > 0) | {slug, sales}' exports/acb_all_prompts.ndjson
 ```
 
 **HTML** is a single self-contained page: a readable catalog with a search box
@@ -454,7 +468,7 @@ pb @acb --quiet          # print nothing except errors
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
 | `--item-type` | `prompt` | Kind of listing to export: `prompt`, `bundle`, or `app`. |
-| `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`; with `--update-file` it must match that extension. |
+| `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`; with `--update-file` it must match that extension. |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |
 | `--domain` | none | Comma-separated domain filter, e.g. `text,image,video`. |
 | `--type` | none | Comma-separated PromptBase type filter, e.g. `gpt,claude`. |
