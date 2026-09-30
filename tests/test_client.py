@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from promptbase_exporter import __version__
 from promptbase_exporter.client import (
+    EXTRA_FIELD_SOURCES,
     MAX_RETRIES,
     PROMPT_DETAIL_FIELDS,
     PROMPT_DETAIL_SCHEMA_FIELDS,
@@ -20,11 +21,12 @@ from promptbase_exporter.client import (
     _raise_if_schema_changed,
     _run_query,
     _run_query_all,
+    fetch_prompt_items,
     fetch_prompts,
     field_filter,
     resolve_profile,
 )
-from promptbase_exporter.models import Profile
+from promptbase_exporter.models import EXTRA_FIELDS, Profile
 
 
 class PaginationTests(unittest.TestCase):
@@ -498,6 +500,65 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result, [{"document": 6}])
         self.assertEqual(urlopen.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
+
+
+class ExtraFieldsFetchTests(unittest.TestCase):
+    _profile = Profile(username="acb", uid="uid-1")
+
+    def _fetch_items(self, extra_fields):
+        with patch(
+            "promptbase_exporter.client._run_query_all", return_value=[]
+        ) as run_query_all:
+            fetch_prompt_items(self._profile, extra_fields)
+        return run_query_all.call_args.kwargs["fields"]
+
+    def test_default_projection_is_unchanged(self):
+        self.assertEqual(self._fetch_items(()), PROMPT_ITEM_FIELDS)
+
+    def test_requested_fields_are_added_under_their_firestore_names(self):
+        fields = self._fetch_items(("last_sale", "tags"))
+        self.assertEqual(fields, PROMPT_ITEM_FIELDS + ("lastSale", "tags"))
+
+    def test_every_extra_field_has_a_firestore_source(self):
+        self.assertEqual(tuple(EXTRA_FIELD_SOURCES), EXTRA_FIELDS)
+
+    def test_unknown_extra_field_fails_before_any_request(self):
+        with patch("promptbase_exporter.client.resolve_profile") as resolve:
+            with self.assertRaisesRegex(ValueError, "Unknown extra field.*bogus"):
+                fetch_prompts("@acb", extra_fields=("tags", "bogus"))
+        resolve.assert_not_called()
+
+    def test_records_carry_typed_extra_values(self):
+        item = {
+            "slug": "a", "title": "A", "type": "gpt", "domain": "text", "created": 5,
+            "tags": ["x", " ", "y "], "engine": " gpt-5 ", "nsfw": True, "featured": False,
+            "updated": 7, "lastSale": "9", "uniqueSales": 4,
+        }
+        bare = {"slug": "b", "title": "B", "type": "gpt", "domain": "text", "created": 4,
+                "tags": "not-a-list"}
+        with patch("promptbase_exporter.client.resolve_profile", return_value=self._profile), \
+                patch("promptbase_exporter.client.fetch_prompt_items", return_value=[item, bare]), \
+                patch("promptbase_exporter.client.fetch_prompt_details", return_value={}):
+            _profile, records = fetch_prompts("@acb", extra_fields=EXTRA_FIELDS)
+        first, second = records
+        self.assertEqual(first.tags, ("x", "y"))
+        self.assertEqual(first.engine, "gpt-5")
+        self.assertIs(first.nsfw, True)
+        self.assertEqual((first.updated, first.last_sale, first.unique_sales), (7, 9, 4))
+        # Missing values stay unknown (None) or empty instead of becoming a recorded zero.
+        self.assertEqual(second.tags, ())
+        self.assertIsNone(second.updated)
+        self.assertIsNone(second.last_sale)
+        self.assertEqual(second.unique_sales, 0)
+
+    def test_non_numeric_timestamp_is_reported(self):
+        item = {"slug": "a", "title": "A", "type": "gpt", "domain": "text", "created": 5,
+                "updated": "yesterday"}
+        with patch("promptbase_exporter.client.resolve_profile", return_value=self._profile), \
+                patch("promptbase_exporter.client.fetch_prompt_items", return_value=[item]), \
+                patch("promptbase_exporter.client.fetch_prompt_details", return_value={}):
+            with self.assertRaisesRegex(PromptBaseError, "numeric PromptBase field 'updated'"):
+                fetch_prompts("@acb", extra_fields=("updated",))
 
 
 if __name__ == "__main__":

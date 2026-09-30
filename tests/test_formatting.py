@@ -1,11 +1,13 @@
 import csv
 import io
+import json
 import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from promptbase_exporter.diffing import load_catalog
 from promptbase_exporter.formatting import (
     HTML_DATA_ELEMENT_ID,
     RECORD_FIELDS,
@@ -15,19 +17,22 @@ from promptbase_exporter.formatting import (
     csv_unescape_formula,
     filter_records,
     filter_records_by_metadata,
+    format_records,
     format_records_as_csv,
+    format_records_as_html,
     format_records_as_json,
     format_records_as_markdown,
     format_records_as_text,
     infer_format_from_path,
     load_html_catalog_data,
+    parse_extra_fields,
     record_to_dict,
     sort_records,
     sorted_newest_to_oldest,
     write_export,
     write_export_to_path,
 )
-from promptbase_exporter.models import PromptRecord
+from promptbase_exporter.models import EXTRA_FIELDS, PromptRecord
 
 
 def record(
@@ -509,6 +514,128 @@ class HtmlExportTests(unittest.TestCase):
     def test_infers_html_extensions(self):
         self.assertEqual(infer_format_from_path(Path("catalog.html")), "html")
         self.assertEqual(infer_format_from_path(Path("catalog.HTM")), "html")
+
+
+def extras_record(**overrides):
+    values = dict(
+        title="Extras", description="d", slug="extras", prompt_type="gpt", domain="text",
+        created=1_767_225_600_000, price=2.5,
+        tags=("poster", "icons"), engine="gpt-5.5", nsfw=False, featured=True,
+        updated=1_788_566_967_782, last_sale=None, unique_sales=3,
+    )
+    values.update(overrides)
+    return PromptRecord(**values)
+
+
+class ExtraFieldsTests(unittest.TestCase):
+    def test_parse_extra_fields(self):
+        self.assertEqual(parse_extra_fields(None), ())
+        self.assertEqual(parse_extra_fields(""), ())
+        self.assertEqual(parse_extra_fields("all"), EXTRA_FIELDS)
+        # Canonical order, whatever order was asked for; - and _ interchangeable.
+        self.assertEqual(
+            parse_extra_fields("unique-sales, TAGS,last_sale"),
+            ("tags", "last_sale", "unique_sales"),
+        )
+        with self.assertRaisesRegex(ValueError, "unknown extra field.*bogus"):
+            parse_extra_fields("tags,bogus")
+
+    def test_default_output_has_no_extra_keys(self):
+        self.assertEqual(tuple(record_to_dict(extras_record())), RECORD_FIELDS)
+        self.assertEqual(tuple(record_to_dict(extras_record(), ())), RECORD_FIELDS)
+
+    def test_extra_keys_follow_canonical_order_and_keep_unknown_as_null(self):
+        data = record_to_dict(extras_record(), ("unique_sales", "last_sale", "tags"))
+        self.assertEqual(
+            tuple(data)[len(RECORD_FIELDS):],
+            ("tags", "last_sale", "last_sale_iso", "unique_sales"),
+        )
+        self.assertEqual(data["tags"], ["poster", "icons"])
+        # Not recorded by PromptBase is null, not a recorded zero.
+        self.assertIsNone(data["last_sale"])
+        self.assertIsNone(data["last_sale_iso"])
+        self.assertEqual(data["unique_sales"], 3)
+        updated = record_to_dict(extras_record(), ("updated",))
+        self.assertEqual(updated["updated"], 1_788_566_967_782)
+        self.assertEqual(updated["updated_iso"], "2026-09-05T00:09:27.782000+00:00")
+
+    def test_json_carries_the_extra_fields(self):
+        data = json.loads(format_records_as_json([extras_record()], EXTRA_FIELDS))
+        self.assertEqual(data[0]["engine"], "gpt-5.5")
+        self.assertIs(data[0]["featured"], True)
+        self.assertIs(data[0]["nsfw"], False)
+
+    def test_csv_columns_and_cell_formats(self):
+        text = format_records_as_csv([extras_record()], extra_fields=EXTRA_FIELDS)
+        rows = list(csv.DictReader(io.StringIO(text)))
+        self.assertEqual(
+            list(rows[0])[len(RECORD_FIELDS):],
+            [
+                "tags", "engine", "nsfw", "featured", "updated", "updated_iso",
+                "last_sale", "last_sale_iso", "unique_sales",
+            ],
+        )
+        row = rows[0]
+        self.assertEqual(row["tags"], "poster, icons")
+        self.assertEqual((row["nsfw"], row["featured"]), ("false", "true"))
+        self.assertEqual((row["last_sale"], row["last_sale_iso"]), ("", ""))
+        self.assertEqual(row["unique_sales"], "3")
+
+    def test_csv_without_extras_is_unchanged(self):
+        header = format_records_as_csv([extras_record()]).splitlines()[0]
+        self.assertEqual(header, ",".join(RECORD_FIELDS))
+
+    def test_csv_safe_escapes_formula_text_in_extra_cells(self):
+        record = extras_record(engine="=cmd|' /C calc'!A0", tags=("@SUM(1)", "ok"))
+        text = format_records_as_csv([record], safe=True, extra_fields=("tags", "engine"))
+        row = next(csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM))))
+        self.assertEqual(row["engine"], "'=cmd|' /C calc'!A0")
+        self.assertEqual(row["tags"], "'@SUM(1), ok")
+
+    def test_markdown_lists_the_extra_fields(self):
+        text = format_records_as_markdown(
+            [extras_record(engine="", tags=("two\nlines", "b"))], ("tags", "engine", "nsfw")
+        )
+        self.assertIn("- Tags: two lines, b\n", text)
+        self.assertIn("- Engine:\n", text)  # empty stays empty
+        self.assertIn("- NSFW: false\n", text)
+        self.assertNotIn("Featured", text)
+
+    def test_markdown_with_extras_still_round_trips_through_the_diff_loader(self):
+        records = [extras_record(), extras_record(title="Second", slug="second")]
+        with TemporaryDirectory() as directory:
+            path = write_export_to_path(
+                Path(directory) / "catalog.md", records, "markdown",
+                overwrite=False, extra_fields=EXTRA_FIELDS,
+            )
+            self.assertEqual(count_written_records(path, "markdown"), 2)
+            loaded = load_catalog(path)
+        self.assertEqual([item["title"] for item in loaded], ["Extras", "Second"])
+        self.assertEqual(loaded[0]["slug"], "extras")
+
+    def test_html_shows_and_embeds_the_extra_fields(self):
+        page = format_records_as_html([extras_record(nsfw=True)], EXTRA_FIELDS)
+        for fact in ("engine gpt-5.5", "tags poster, icons", "nsfw", "featured",
+                     "updated 2026-09-05", "3 unique sales"):
+            self.assertIn(fact, page)
+        embedded = load_html_catalog_data(page)
+        self.assertEqual(embedded[0]["engine"], "gpt-5.5")
+        plain = format_records_as_html([extras_record()])
+        self.assertNotIn("engine gpt-5.5", plain)
+        self.assertNotIn('"engine"', plain)
+
+    def test_html_escapes_hostile_extra_values(self):
+        page = format_records_as_html(
+            [extras_record(engine="<script>alert(1)</script>", tags=("</script>",))],
+            ("engine", "tags"),
+        )
+        self.assertNotIn("<script>alert(1)</script>", page)
+        self.assertEqual(page.count("</script>"), 2)  # the two real script elements
+
+    def test_txt_refuses_extra_fields_instead_of_dropping_them(self):
+        with self.assertRaisesRegex(ValueError, "txt format cannot hold extra fields"):
+            format_records([extras_record()], "txt", extra_fields=("tags",))
+        self.assertIn("Title: Extras", format_records([extras_record()], "txt"))
 
 
 if __name__ == "__main__":

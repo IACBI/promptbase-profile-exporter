@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `--extra-fields` (Action input `extra-fields`, a checkbox group in the web
+  UI) adds `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, and
+  `unique_sales` to the markdown, JSON, CSV, and HTML exports. Only the fields
+  you ask for are requested from PromptBase, so a default export is
+  byte-identical to before and asking for all of them adds about 8 KB to a
+  243-prompt download. A time PromptBase does not record is `null` (empty in
+  CSV) rather than a zero, and `txt`, which cannot hold them, is an error.
+
 ## 0.9.3 - 2026-09-30
 
 ### Changed

@@ -27,12 +27,13 @@ from .formatting import (
     filter_records_by_metadata,
     infer_format_from_path,
     parse_csv_option,
+    parse_extra_fields,
     sort_records,
     sorted_newest_to_oldest,
     write_export,
     write_export_to_path,
 )
-from .models import PromptRecord
+from .models import EXTRA_FIELDS, PromptRecord
 
 MODE_ALIASES = {
     "text-only": "text",
@@ -140,6 +141,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-rating",
         type=float,
         help="Export prompts rated at or above this value.",
+    )
+    parser.add_argument(
+        "--extra-fields",
+        help=(
+            "Comma-separated extra fields to include, or 'all': "
+            f"{', '.join(EXTRA_FIELDS)}. Not available for --format txt."
+        ),
     )
     parser.add_argument(
         "--csv-safe",
@@ -284,7 +292,7 @@ def export_profile(
 ) -> int:
     """Fetch, filter, and write the exports for one profile; return its exit code."""
     try:
-        profile, records = fetch_prompts(profile_input)
+        profile, records = fetch_prompts(profile_input, extra_fields=options["extra_fields"])
     except PromptBaseError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -342,6 +350,8 @@ def export_profile(
             print(f"Output directory: {output_dir}")
             if options["output_file"]:
                 print(f"Output file: {options['output_file']}")
+            if options["extra_fields"]:
+                print(f"Extra fields: {', '.join(options['extra_fields'])}")
             if args.domain:
                 print(f"Domain filter: {args.domain}")
             if args.prompt_type:
@@ -405,6 +415,7 @@ def export_profile(
                 options["export_format"],
                 overwrite=options["overwrite_output"],
                 csv_safe=args.csv_safe,
+                extra_fields=options["extra_fields"],
             )
         except FileExistsError as exc:
             print(f"error: {exc}. Use --overwrite to replace it.", file=sys.stderr)
@@ -434,6 +445,7 @@ def export_profile(
                 options["export_format"],
                 timestamp=timestamp,
                 csv_safe=args.csv_safe,
+                extra_fields=options["extra_fields"],
             )
         except OSError as exc:
             print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
@@ -522,6 +534,12 @@ def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
     # may be compared with a plain catalog and vice versa.
     if args.csv_safe and export_format != "csv":
         raise ValueError("--csv-safe requires --format csv")
+    extra_fields = parse_extra_fields(args.extra_fields)
+    if extra_fields and export_format == "txt":
+        raise ValueError(
+            "--extra-fields needs --format markdown, json, csv, or html: txt holds only "
+            "a title and a description"
+        )
     compares_csv = compare_path is not None and compare_path.suffix.lower() == ".csv"
     if args.compare_csv_safe and not compares_csv:
         raise ValueError("--compare-csv-safe requires a CSV --compare or --update-file catalog")
@@ -539,6 +557,7 @@ def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
         "profiles": profiles,
         "compare_path": compare_path,
         "export_format": export_format,
+        "extra_fields": extra_fields,
         "output_file": output_file,
         "overwrite_output": overwrite_output,
         "since_created": since_created,

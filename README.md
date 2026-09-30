@@ -37,7 +37,8 @@ GitHub Action for scheduled exports.
 - Writes `txt`, `markdown`, `json`, `csv`, or a self-contained `html` page you
   can search in the browser, split into `all`, `text`, and `image` catalogs or
   as a single file. `--csv-safe` keeps CSV cells from running as spreadsheet
-  formulas.
+  formulas. `--extra-fields` adds tags, engine, update and last-sale times,
+  and unique sales on request.
 - Filters by domain, prompt type, free/paid, price range, creation date,
   sales, rating, and count; sorts by date, title, price, views, sales,
   downloads, favorites, or rating.
@@ -173,6 +174,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
   dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
   kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV
   hücrelerinin tablo programlarında formül olarak çalışmasını engeller.
+  `--extra-fields` istenirse etiketleri, motoru, güncelleme ve son satış
+  zamanlarını ve tekil satışları da ekler.
 - Alan (domain), prompt türü, ücretsiz/ücretli, fiyat aralığı, oluşturulma
   tarihi, satış, puan ve adet ile filtreler; tarih, başlık, fiyat,
   görüntülenme, satış, indirme, favori veya puana göre sıralar.

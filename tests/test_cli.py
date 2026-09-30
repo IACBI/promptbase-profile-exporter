@@ -598,7 +598,7 @@ class MultiProfileTests(unittest.TestCase):
         "@bob": (Profile(username="bob", uid="u2"), [record("B image", "image", "midjourney")]),
     }
 
-    def _fetch(self, profile_input):
+    def _fetch(self, profile_input, extra_fields=()):
         if profile_input not in self.PROFILES:
             raise PromptBaseError(f"Profile not found: {profile_input}")
         return self.PROFILES[profile_input]
@@ -864,6 +864,59 @@ class DiffCommandTests(unittest.TestCase):
 
         self.assertEqual(exit_code, EXIT_ERROR)
         self.assertIn("could not write diff report", stderr)
+
+
+class ExtraFieldsCliTests(unittest.TestCase):
+    _run_expecting_failure = ArgumentValidationTests._run_expecting_failure
+
+    def test_unknown_field_fails_before_fetch(self):
+        exit_code, stderr = self._run_expecting_failure(
+            ["@acb", "--format", "json", "--extra-fields", "tags,bogus"]
+        )
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("unknown extra field(s): bogus", stderr)
+
+    def test_txt_format_fails_before_fetch(self):
+        for argv in (["--extra-fields", "tags"], ["--format", "txt", "--extra-fields", "all"]):
+            exit_code, stderr = self._run_expecting_failure(["@acb", *argv])
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("--extra-fields needs --format markdown, json, csv, or html", stderr)
+
+    def test_inferred_txt_output_file_fails_before_fetch(self):
+        exit_code, stderr = self._run_expecting_failure(
+            ["@acb", "--mode", "all", "--output-file", "out.txt", "--extra-fields", "tags"]
+        )
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("--extra-fields needs", stderr)
+
+    def test_fields_are_fetched_and_written(self):
+        extra = PromptRecord(
+            "A", "d", "a", "gpt", "text", 1, 1.0, tags=("x",), engine="gpt-5", unique_sales=2
+        )
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [extra]),
+        ) as fetch:
+            output = Path(directory) / "out.json"
+            exit_code, _, _ = _quiet_main(
+                ["@acb", "--mode", "all", "--extra-fields", "unique-sales,tags",
+                 "--output-file", str(output)]
+            )
+            data = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(fetch.call_args.kwargs["extra_fields"], ("tags", "unique_sales"))
+        self.assertEqual(data[0]["tags"], ["x"])
+        self.assertEqual(data[0]["unique_sales"], 2)
+        self.assertNotIn("engine", data[0])
+
+    def test_default_run_requests_no_extra_fields(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [record("A", "text", "gpt")]),
+        ) as fetch:
+            exit_code, _, _ = _quiet_main(["@acb", "--mode", "all", "-o", directory])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(fetch.call_args.kwargs["extra_fields"], ())
 
 
 if __name__ == "__main__":

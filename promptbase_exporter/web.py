@@ -33,11 +33,12 @@ from .formatting import (
     filter_records,
     filter_records_by_metadata,
     parse_csv_option,
+    parse_extra_fields,
     sort_records,
     sorted_newest_to_oldest,
     write_export,
 )
-from .models import Profile, PromptRecord
+from .models import EXTRA_FIELDS, Profile, PromptRecord
 
 WEB_MODES = ("split", "all", "text", "image")
 PRICE_FILTERS = ("all", "free", "paid")
@@ -101,6 +102,7 @@ class ExportRequest:
     compare_csv_safe: bool = False
     compare_file: str = ""
     compare_path: Path | None = None
+    extra_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,12 @@ class WebExportResult:
     diff: CatalogDiff | None = None
 
 
-FetchPrompts = Callable[[str], tuple[Profile, list[PromptRecord]]]
+class FetchPrompts(Protocol):
+    def __call__(
+        self,
+        profile_input: str,
+        extra_fields: Sequence[str] = (),
+    ) -> tuple[Profile, list[PromptRecord]]: ...
 
 
 class WriteExport(Protocol):
@@ -137,6 +144,7 @@ class WriteExport(Protocol):
         overwrite: bool = True,
         *,
         csv_safe: bool = False,
+        extra_fields: Sequence[str] = (),
     ) -> Path: ...
 
 
@@ -199,6 +207,17 @@ def build_request_config(
 
     compare_file = _single_value(form_data, "compare_file").strip()
     compare_path = _resolve_compare_path(compare_file, mode) if compare_file else None
+    selected_extras = form_data.get("extra_fields", [])
+    try:
+        extra_fields = parse_extra_fields(
+            selected_extras
+            if isinstance(selected_extras, str)
+            else ",".join(selected_extras)
+        )
+    except ValueError as exc:
+        raise WebInputError(f"Extra fields: {exc}.") from exc
+    if extra_fields and export_format == "txt":
+        raise WebInputError("Extra fields need the markdown, json, csv, or html format.")
     compare_csv_safe = _as_bool(_single_value(form_data, "compare_csv_safe"))
     if compare_csv_safe and (compare_path is None or compare_path.suffix.lower() != ".csv"):
         raise WebInputError("The protected-catalog option needs a CSV comparison catalog.")
@@ -229,6 +248,7 @@ def build_request_config(
         compare_csv_safe=compare_csv_safe,
         compare_file=compare_file,
         compare_path=compare_path,
+        extra_fields=extra_fields,
     )
 
 
@@ -240,7 +260,7 @@ def run_export(
     counter: CountWrittenRecords = count_written_records,
 ) -> WebExportResult:
     """Fetch, filter, sort, write, and validate exports for one web request."""
-    profile, records = fetcher(request.profile_input)
+    profile, records = fetcher(request.profile_input, extra_fields=request.extra_fields)
     if not records:
         raise WebInputError(f"No approved prompts found for @{profile.username}.")
     if not sorted_newest_to_oldest(records):
@@ -313,6 +333,7 @@ def run_export(
                 request.export_format,
                 timestamp,
                 csv_safe=request.csv_safe,
+                extra_fields=request.extra_fields,
             )
             try:
                 written_count = counter(output_path, request.export_format)
@@ -461,6 +482,31 @@ def render_form(
       min-height: 42px;
     }}
     .checkline input {{
+      width: auto;
+    }}
+    fieldset {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin: 0;
+    }}
+    legend {{
+      font-weight: 650;
+      padding: 0 6px;
+    }}
+    .checks {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 18px;
+    }}
+    .checks label {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 400;
+      margin: 0;
+    }}
+    .checks input {{
       width: auto;
     }}
     .actions {{
@@ -614,6 +660,12 @@ def render_form(
           <input id="compare_file" name="compare_file" value="{_h(request.compare_file)}"
             placeholder="exports/acb_all_prompts.json">
         </div>
+        <fieldset class="full">
+          <legend>Extra fields (not for txt)</legend>
+          <div class="checks">
+            {_render_extra_field_checkboxes(request.extra_fields)}
+          </div>
+        </fieldset>
         <label class="checkline">
           <input type="checkbox" name="timestamp_filenames" value="1"
             {_checked(request.timestamp_filenames)}>
@@ -643,6 +695,14 @@ def render_form(
 </body>
 </html>
 """
+
+
+def _render_extra_field_checkboxes(selected: Sequence[str]) -> str:
+    return "\n".join(
+        f'<label><input type="checkbox" name="extra_fields" value="{_h(name)}" '
+        f'{_checked(name in selected)}> {_h(name)}</label>'
+        for name in EXTRA_FIELDS
+    )
 
 
 def _render_diff(diff: CatalogDiff | None) -> str:

@@ -8,9 +8,10 @@ import os
 import re
 import shutil
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 
-from .models import PromptRecord
+from .models import EXTRA_FIELDS, PromptRecord, ms_to_iso_or_none
 
 EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html")
 SORT_OPTIONS = (
@@ -43,6 +44,17 @@ RECORD_FIELDS = (
     "rating",
     "reviews",
 )
+# The output columns behind each extra field, in the order they are written.
+EXTRA_FIELD_COLUMNS = {
+    "tags": ("tags",),
+    "engine": ("engine",),
+    "nsfw": ("nsfw",),
+    "featured": ("featured",),
+    "updated": ("updated", "updated_iso"),
+    "last_sale": ("last_sale", "last_sale_iso"),
+    "unique_sales": ("unique_sales",),
+}
+assert tuple(EXTRA_FIELD_COLUMNS) == EXTRA_FIELDS
 FORMAT_EXTENSIONS = {
     "txt": "txt",
     "markdown": "md",
@@ -71,6 +83,23 @@ def parse_csv_option(value: str | None) -> set[str]:
     if not value:
         return set()
     return {part.strip().lower() for part in value.split(",") if part.strip()}
+
+
+def parse_extra_fields(value: str | None) -> tuple[str, ...]:
+    """Parse a comma-separated ``--extra-fields`` value into canonical order.
+
+    ``all`` selects every extra field; ``-`` and ``_`` are interchangeable.
+    """
+    requested = {name.replace("-", "_") for name in parse_csv_option(value)}
+    if "all" in requested:
+        return EXTRA_FIELDS
+    unknown = sorted(requested - set(EXTRA_FIELDS))
+    if unknown:
+        raise ValueError(
+            f"unknown extra field(s): {', '.join(unknown)}. "
+            f"Use all or any of: {', '.join(EXTRA_FIELDS)}"
+        )
+    return tuple(name for name in EXTRA_FIELDS if name in requested)
 
 
 def filter_records(records: list[PromptRecord], mode: str) -> list[PromptRecord]:
@@ -154,7 +183,10 @@ def format_records_as_text(records: list[PromptRecord]) -> str:
     return "\n".join(parts)
 
 
-def format_records_as_markdown(records: list[PromptRecord]) -> str:
+def format_records_as_markdown(
+    records: list[PromptRecord],
+    extra_fields: Sequence[str] = (),
+) -> str:
     parts = ["# PromptBase Prompt Export", ""]
     for index, record in enumerate(records, 1):
         description = record.description.replace("\r\n", "\n").replace("\r", "\n")
@@ -171,6 +203,7 @@ def format_records_as_markdown(records: list[PromptRecord]) -> str:
                 f"- Created: {record.created_iso or 'unknown'}",
                 f"- Views: {record.views}",
                 f"- Sales: {record.sales}",
+                *_markdown_extra_lines(record, extra_fields),
                 "",
                 description.strip(),
                 "",
@@ -179,14 +212,47 @@ def format_records_as_markdown(records: list[PromptRecord]) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
+def _markdown_extra_lines(record: PromptRecord, extra_fields: Sequence[str]) -> list[str]:
+    values = record_to_dict(record, extra_fields)
+    labels = {
+        "tags": "Tags",
+        "engine": "Engine",
+        "nsfw": "NSFW",
+        "featured": "Featured",
+        "updated_iso": "Updated",
+        "last_sale_iso": "Last sale",
+        "unique_sales": "Unique sales",
+    }
+    lines = []
+    for key, label in labels.items():
+        if key in values:
+            # Empty stays empty, like Domain and Type above.
+            lines.append(f"- {label}: {_single_line(_cell_text(values[key]))}".rstrip())
+    return lines
+
+
+def _cell_text(value: object) -> str:
+    """Plain text for a record value: lists joined, booleans as true/false, None empty."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
 def _single_line(value: str) -> str:
     # TXT and Markdown keep the title on one line; an embedded line break would
     # split the record header and break both validation and diff parsing.
     return " ".join(value.split())
 
 
-def record_to_dict(record: PromptRecord) -> dict[str, object]:
-    return {
+def record_to_dict(
+    record: PromptRecord,
+    extra_fields: Sequence[str] = (),
+) -> dict[str, object]:
+    data: dict[str, object] = {
         "title": record.title,
         "description": record.description,
         "slug": record.slug,
@@ -204,15 +270,45 @@ def record_to_dict(record: PromptRecord) -> dict[str, object]:
         "rating": record.rating,
         "reviews": record.reviews,
     }
+    extra_values: dict[str, dict[str, object]] = {
+        "tags": {"tags": list(record.tags)},
+        "engine": {"engine": record.engine},
+        "nsfw": {"nsfw": record.nsfw},
+        "featured": {"featured": record.featured},
+        "updated": {"updated": record.updated, "updated_iso": ms_to_iso_or_none(record.updated)},
+        "last_sale": {
+            "last_sale": record.last_sale,
+            "last_sale_iso": ms_to_iso_or_none(record.last_sale),
+        },
+        "unique_sales": {"unique_sales": record.unique_sales},
+    }
+    for name in EXTRA_FIELDS:  # canonical order, whatever order was requested
+        if name in extra_fields:
+            data.update(extra_values[name])
+    return data
 
 
-def format_records_as_json(records: list[PromptRecord]) -> str:
-    data = [record_to_dict(record) for record in records]
+def format_records_as_json(
+    records: list[PromptRecord],
+    extra_fields: Sequence[str] = (),
+) -> str:
+    data = [record_to_dict(record, extra_fields) for record in records]
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
-def format_records_as_csv(records: list[PromptRecord], *, safe: bool = False) -> str:
-    rows = [record_to_dict(record) for record in records]
+def format_records_as_csv(
+    records: list[PromptRecord],
+    *,
+    safe: bool = False,
+    extra_fields: Sequence[str] = (),
+) -> str:
+    columns = RECORD_FIELDS + tuple(
+        column
+        for name in EXTRA_FIELDS
+        if name in extra_fields
+        for column in EXTRA_FIELD_COLUMNS[name]
+    )
+    rows = [_csv_row(record_to_dict(record, extra_fields)) for record in records]
     if safe:
         rows = [
             {key: csv_escape_formula(value) for key, value in row.items()} for row in rows
@@ -220,10 +316,20 @@ def format_records_as_csv(records: list[PromptRecord], *, safe: bool = False) ->
     output = io.StringIO()
     if safe:
         output.write(UTF8_BOM)
-    writer = csv.DictWriter(output, fieldnames=RECORD_FIELDS, lineterminator="\n")
+    writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue()
+
+
+def _csv_row(row: dict[str, object]) -> dict[str, object]:
+    """Flatten the values a CSV cell cannot hold as-is (lists, booleans, None)."""
+    return {
+        key: _cell_text(value)
+        if isinstance(value, (list, tuple, bool)) or value is None
+        else value
+        for key, value in row.items()
+    }
 
 
 def csv_escape_formula(value: object) -> object:
@@ -292,7 +398,10 @@ _HTML_SCRIPT = """
 """
 
 
-def format_records_as_html(records: list[PromptRecord]) -> str:
+def format_records_as_html(
+    records: list[PromptRecord],
+    extra_fields: Sequence[str] = (),
+) -> str:
     """Render a self-contained, searchable HTML catalog.
 
     Every record value is HTML-escaped. The full records are also embedded as
@@ -310,6 +419,7 @@ def format_records_as_html(records: list[PromptRecord]) -> str:
                 record.created_iso[:10] if record.created_iso else "unknown date",
                 f"{record.views} views",
                 f"{record.sales} sales",
+                *_html_extra_facts(record, extra_fields),
             ]
         )
         items.append(
@@ -320,7 +430,7 @@ def format_records_as_html(records: list[PromptRecord]) -> str:
             "</article></li>"
         )
     data = json.dumps(
-        [record_to_dict(record) for record in records], ensure_ascii=False
+        [record_to_dict(record, extra_fields) for record in records], ensure_ascii=False
     ).replace("<", "\\u003c")
     count = len(records)
     return (
@@ -337,6 +447,26 @@ def format_records_as_html(records: list[PromptRecord]) -> str:
         f'<script type="application/json" id="{HTML_DATA_ELEMENT_ID}">{data}</script>\n'
         f"<script>{_HTML_SCRIPT}</script>\n</body>\n</html>\n"
     )
+
+
+def _html_extra_facts(record: PromptRecord, extra_fields: Sequence[str]) -> list[str]:
+    values = record_to_dict(record, extra_fields)
+    facts = []
+    if values.get("engine"):
+        facts.append(f"engine {values['engine']}")
+    if values.get("tags"):
+        facts.append(f"tags {_cell_text(values['tags'])}")
+    if values.get("nsfw"):
+        facts.append("nsfw")
+    if values.get("featured"):
+        facts.append("featured")
+    if values.get("updated_iso"):
+        facts.append(f"updated {str(values['updated_iso'])[:10]}")
+    if values.get("last_sale_iso"):
+        facts.append(f"last sale {str(values['last_sale_iso'])[:10]}")
+    if values.get("unique_sales"):
+        facts.append(f"{values['unique_sales']} unique sales")
+    return facts
 
 
 def load_html_catalog_data(text: str) -> list[object]:
@@ -359,17 +489,22 @@ def format_records(
     export_format: str,
     *,
     csv_safe: bool = False,
+    extra_fields: Sequence[str] = (),
 ) -> str:
     if export_format == "txt":
+        if extra_fields:
+            # TXT holds only a title and a description; dropping the fields
+            # silently would hide the mistake.
+            raise ValueError("The txt format cannot hold extra fields.")
         return format_records_as_text(records)
     if export_format == "markdown":
-        return format_records_as_markdown(records)
+        return format_records_as_markdown(records, extra_fields)
     if export_format == "json":
-        return format_records_as_json(records)
+        return format_records_as_json(records, extra_fields)
     if export_format == "csv":
-        return format_records_as_csv(records, safe=csv_safe)
+        return format_records_as_csv(records, safe=csv_safe, extra_fields=extra_fields)
     if export_format == "html":
-        return format_records_as_html(records)
+        return format_records_as_html(records, extra_fields)
     raise ValueError(f"Unsupported export format: {export_format}")
 
 
@@ -404,6 +539,7 @@ def write_export(
     overwrite: bool = True,
     *,
     csv_safe: bool = False,
+    extra_fields: Sequence[str] = (),
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / expected_timestamped_filename(
@@ -413,7 +549,12 @@ def write_export(
         timestamp,
     )
     write_export_to_path(
-        output_path, records, export_format, overwrite=overwrite, csv_safe=csv_safe
+        output_path,
+        records,
+        export_format,
+        overwrite=overwrite,
+        csv_safe=csv_safe,
+        extra_fields=extra_fields,
     )
     return output_path
 
@@ -425,8 +566,11 @@ def write_export_to_path(
     *,
     overwrite: bool,
     csv_safe: bool = False,
+    extra_fields: Sequence[str] = (),
 ) -> Path:
-    content = format_records(records, export_format, csv_safe=csv_safe)
+    content = format_records(
+        records, export_format, csv_safe=csv_safe, extra_fields=extra_fields
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if not overwrite:
         # Exclusive create: no window between an existence check and the write.
