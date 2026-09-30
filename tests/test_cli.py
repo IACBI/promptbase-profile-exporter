@@ -15,7 +15,7 @@ from promptbase_exporter.cli import (
     parse_datetime_ms,
 )
 from promptbase_exporter.client import PromptBaseError
-from promptbase_exporter.formatting import write_export
+from promptbase_exporter.formatting import write_export, write_export_to_path
 from promptbase_exporter.models import Profile, PromptRecord
 
 
@@ -542,6 +542,35 @@ class NewOptionValidationTests(unittest.TestCase):
         exit_code, stderr = self._run_expecting_failure(["  "])
         self.assertEqual(exit_code, EXIT_ERROR)
         self.assertIn("profile cannot be empty", stderr)
+
+    def test_update_file_rejects_a_format_that_disagrees_with_its_extension(self):
+        # JSON written into catalog.csv would be read back as CSV next run.
+        with TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "catalog.csv"
+            catalog.write_text("title\n", encoding="utf-8")
+            exit_code, stderr = self._run_expecting_failure(
+                ["@acb", "--mode", "all", "--update-file", str(catalog), "--format", "json"]
+            )
+            original = catalog.read_text(encoding="utf-8")
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("--format json does not match the --update-file extension .csv", stderr)
+        self.assertEqual(original, "title\n")
+
+    def test_update_file_accepts_a_matching_format(self):
+        with TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "catalog.md"
+            write_export_to_path(catalog, [record("A", "text", "gpt")], "markdown", overwrite=True)
+            stdout = io.StringIO()
+            with patch(
+                "promptbase_exporter.cli.fetch_prompts",
+                return_value=(Profile("acb", "uid"), [record("A", "text", "gpt")]),
+            ), redirect_stdout(stdout):
+                exit_code = main(
+                    ["@acb", "--mode", "all", "--update-file", str(catalog),
+                     "--format", "markdown"]
+                )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Unchanged: 1", stdout.getvalue())
 
 
 class MultiProfileTests(unittest.TestCase):

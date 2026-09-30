@@ -1,5 +1,6 @@
 import io
 import os
+import socket
 import unittest
 from contextlib import redirect_stderr
 from email.message import Message
@@ -15,6 +16,9 @@ from promptbase_exporter.web import (
     ExportRequest,
     PromptBaseWebHandler,
     WebInputError,
+    _ipv6_bind_address,
+    _make_server,
+    _url_host,
     _warn_if_exposed,
     build_request_config,
     render_form,
@@ -265,6 +269,53 @@ class RequestGuardTests(unittest.TestCase):
     def test_allows_non_browser_client_without_headers(self):
         handler = _make_handler({"Host": "127.0.0.1:8765"})
         self.assertIsNone(handler._reject_unsafe_request())
+
+    def test_ipv6_loopback_accepts_bracketed_host_and_origin(self):
+        handler = _make_handler(
+            {"Host": "[::1]:8765", "Origin": "http://[::1]:8765"},
+            address=("::1", 8765, 0, 0),
+        )
+        self.assertIsNone(handler._reject_unsafe_request())
+
+    def test_ipv6_bind_address_is_bracketed_in_authorities(self):
+        # Browsers always bracket an IPv6 literal in the Host header.
+        handler = _make_handler({}, address=("fe80::1", 8765, 0, 0))
+        authorities = handler._expected_authorities()
+        self.assertIn("[fe80::1]:8765", authorities)
+        self.assertNotIn("fe80::1", authorities)
+
+
+class ServerBindTests(unittest.TestCase):
+    def test_url_host_brackets_ipv6_only(self):
+        self.assertEqual(_url_host("127.0.0.1"), "127.0.0.1")
+        self.assertEqual(_url_host("localhost"), "localhost")
+        self.assertEqual(_url_host("::1"), "[::1]")
+
+    def test_ipv6_bind_address_keeps_the_scope_id(self):
+        # A (host, port) pair would bind with scope id 0, which the kernel
+        # rejects for a link-local address.
+        self.assertEqual(_ipv6_bind_address("::1", 8765), ("::1", 8765, 0, 0))
+        try:
+            address = _ipv6_bind_address("fe80::1%1", 8765)
+        except socket.gaierror as exc:
+            self.skipTest(f"numeric IPv6 scope ids are not supported: {exc}")
+        self.assertEqual(address, ("fe80::1", 8765, 0, 1))
+
+    def test_binds_ipv4_loopback(self):
+        with _make_server("127.0.0.1", 0) as server:
+            self.assertEqual(server.address_family, socket.AF_INET)
+
+    def test_binds_ipv6_loopback(self):
+        # Probe with a raw socket: the bug under test also raises an OSError
+        # (gaierror), so it must not be what decides to skip.
+        try:
+            with socket.socket(socket.AF_INET6) as probe:
+                probe.bind(("::1", 0))
+        except OSError as exc:
+            self.skipTest(f"IPv6 loopback is not available: {exc}")
+        with _make_server("::1", 0) as server:
+            self.assertEqual(server.address_family, socket.AF_INET6)
+            self.assertEqual(server.server_address[0], "::1")
 
 
 class ReadFormTests(unittest.TestCase):

@@ -431,10 +431,23 @@ def write_export_to_path(
     if not overwrite:
         # Exclusive create: no window between an existence check and the write.
         try:
-            with output_path.open("x", encoding="utf-8", newline="\n") as handle:
-                handle.write(content)
+            handle = output_path.open("x", encoding="utf-8", newline="\n")
         except FileExistsError:
             raise FileExistsError(f"Output file already exists: {output_path}") from None
+        created = os.fstat(handle.fileno())
+        try:
+            with handle:
+                handle.write(content)
+        except BaseException:
+            # A truncated leftover would make every retry fail with "already
+            # exists". Remove it only if the path is still the file created
+            # above, not one another writer has since swapped in.
+            try:
+                if os.path.samestat(created, os.stat(output_path)):
+                    output_path.unlink()
+            except FileNotFoundError:
+                pass
+            raise
         return output_path
     _atomic_write_text(output_path, content)
     return output_path

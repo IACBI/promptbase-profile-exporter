@@ -24,6 +24,7 @@ The only required argument is the profile. All of these are equivalent:
 
 ```bash
 pb https://promptbase.com/profile/acb
+pb promptbase.com/profile/acb
 pb profile/acb
 pb acb
 pb @acb
@@ -260,7 +261,9 @@ pb @acb --mode all --compare exports/acb_all_prompts.json \
 ```
 
 `--update-file` compares against an existing catalog and then rewrites it with
-the current prompts, keeping its format:
+the current prompts, keeping its format. The format comes from the file's
+extension; an explicit `--format` must agree with it, because the next run
+reads the catalog back by that extension:
 
 ```bash
 pb @acb --mode all --update-file exports/acb_all_prompts.json
@@ -306,10 +309,10 @@ pb @acb --quiet          # print nothing except errors
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `profile` (positional) | required | PromptBase profile URL, path, username, or `@username`. Repeat to export several profiles. |
+| `profile` (positional) | required | PromptBase profile URL (with or without `https://`), path, username, or `@username`. Repeat to export several profiles. |
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
-| `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`. |
+| `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`; with `--update-file` it must match that extension. |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |
 | `--domain` | none | Comma-separated domain filter, e.g. `text,image,video`. |
 | `--type` | none | Comma-separated PromptBase type filter, e.g. `gpt,claude`. |
