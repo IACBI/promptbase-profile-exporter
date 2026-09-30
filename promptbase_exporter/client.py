@@ -207,8 +207,7 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
     last_error: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            # The URL is always an https:// Firestore endpoint built in this module.
-            with urllib.request.urlopen(request, timeout=90) as response:  # noqa: S310
+            with urllib.request.urlopen(request, timeout=90) as response:
                 return _read_json(response)
         except urllib.error.HTTPError as exc:
             # The error doubles as the open HTTP response; release its socket.

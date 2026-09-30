@@ -86,6 +86,9 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "S"]
 [tool.ruff.lint.per-file-ignores]
 # "0.0.0.0" appears in web.py only as a value to recognise, never as an address to bind.
 "promptbase_exporter/web.py" = ["S104"]
+# Every URL client.py opens is the https:// Firestore endpoint defined in that module; ruff
+# reports S310 on the Request or the urlopen line depending on its version.
+"promptbase_exporter/client.py" = ["S310"]
 # Tests assert, run the tool's own subprocess, open local test servers, bind test sockets,
 # nest `with` blocks for readability, and use a seeded PRNG to fuzz (not for secrets).
 "tests/*" = ["S101", "S104", "S310", "S311", "S603", "SIM117", "RUF012"]
