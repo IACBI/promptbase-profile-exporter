@@ -39,6 +39,9 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `diffing.py` — catalog loading and comparison (`--compare`/`--update-file`,
   `pb-diff`) and the Markdown/JSON diff reports.
 - `diff.py` — `python -m promptbase_exporter.diff` entry point for `pb-diff`.
+- `convert.py` — `pb-convert`: rewrite a saved JSON/CSV/HTML catalog in another
+  format offline. It must match a direct export byte for byte and never invent
+  missing values (TXT/Markdown sources are refused).
 - `web.py` — stdlib `http.server` UI; mirrors CLI options as a form.
 - `__main__.py` — `python -m promptbase_exporter` entry point.
 

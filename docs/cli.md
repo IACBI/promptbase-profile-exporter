@@ -199,8 +199,9 @@ downloaded, so a default run transfers exactly what it did before.
 | `unique_sales` | The `uniqueSales` count. |
 
 A time PromptBase does not record is `null` in JSON and an empty cell in CSV,
-not a zero. In CSV a list is joined with `, ` and a flag is `true` or `false`;
-`--csv-safe` protects these cells like the others. Markdown adds one metadata
+not a zero. In CSV the tags are joined with `, ` (or, if a tag itself contains a
+comma, written as a JSON array so the cell can always be read back) and a flag
+is `true` or `false`; `--csv-safe` protects these cells like the others. Markdown adds one metadata
 line per field, and HTML shows them next to each prompt and embeds them in its
 JSON. TXT holds only a title and a description, so `--extra-fields` with
 `txt` is an error rather than a silent omission.
@@ -353,6 +354,43 @@ options and uses the same exit codes, plus `--previous-csv-safe` and
 pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.html
 pb-diff old.json new.json --fail-on-diff --quiet --diff-output diff.json
 ```
+
+## Converting a catalog offline
+
+`pb-convert` (`promptbase-convert`, or `python -m promptbase_exporter.convert`
+without installing) rewrites a catalog you already have in another format, with
+no network access. Give it the format to write, or an output path whose
+extension says so; without `--output-file` the new file is written next to the
+source with the new extension.
+
+```bash
+pb-convert exports/acb_all_prompts.json --format csv      # -> exports/acb_all_prompts.csv
+pb-convert exports/acb_all_prompts.json -o site/catalog.html
+pb-convert exports/acb_all_prompts.csv --from-csv-safe --format json
+```
+
+The result is the file a direct export would have written: a converted catalog
+matches an exported one byte for byte, including extra fields and bundle or
+app catalogs.
+
+- **Sources:** JSON, CSV, and HTML catalogs, which keep every field. A TXT or
+  Markdown catalog is refused: it lacks columns such as downloads and rating,
+  and filling them in would mean inventing values. Export again from
+  PromptBase instead. Converting *to* TXT or Markdown is fine; TXT keeps only a
+  title and a description, so it drops every other field.
+- **Extra fields** in the source (see `--extra-fields`) are carried over when
+  the target format can hold them. Once a source has an extra field, every record
+  must have it; a missing or empty value stops the conversion.
+- **No guessing:** a missing column, an empty number, a value of the wrong type
+  (a boolean where a number belongs), an entry that is not a record, or an
+  unreadable value stops the conversion with the record's position, and nothing
+  is written.
+- **Safety:** it never overwrites the source, and it refuses to replace another
+  existing file unless you pass `--overwrite`; the write is atomic. The result is
+  rendered and its record count checked in a scratch file first, so a file that
+  would fail the check never replaces the one you have.
+- `--csv-safe` protects the CSV being written; `--from-csv-safe` says the CSV
+  being read was written with `--csv-safe`, so its escaped cells are restored.
 
 ## Inspecting without writing
 

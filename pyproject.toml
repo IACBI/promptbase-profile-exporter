@@ -38,10 +38,12 @@ Changelog = "https://github.com/IACBI/promptbase-profile-exporter/blob/main/CHAN
 promptbase-export = "promptbase_exporter.cli:main"
 promptbase-export-web = "promptbase_exporter.web:main"
 promptbase-diff = "promptbase_exporter.cli:diff_main"
+promptbase-convert = "promptbase_exporter.convert:main"
 # Short aliases for the same entry points (e.g. `uv tool install .` then `pb`).
 pb = "promptbase_exporter.cli:main"
 pb-web = "promptbase_exporter.web:main"
 pb-diff = "promptbase_exporter.cli:diff_main"
+pb-convert = "promptbase_exporter.convert:main"
 
 [project.optional-dependencies]
 dev = ["build", "coverage", "mypy", "ruff", "twine"]

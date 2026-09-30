@@ -46,7 +46,8 @@ GitHub Action for scheduled exports.
 - Compares a fresh export against a previous catalog, showing old and new
   values, as Markdown or JSON; rewrites it in place atomically; and can fail a
   CI job when the catalog drifts. `pb-diff` compares two saved catalogs
-  offline, even across formats.
+  offline, even across formats, and `pb-convert` rewrites a saved catalog in
+  another format, matching a fresh export byte for byte.
 - Checks every written file against the expected record count, and stops with
   a clear error if PromptBase changes its public data model instead of
   writing a misleading catalog.
@@ -64,9 +65,10 @@ cd promptbase-profile-exporter
 uv tool install .            # or: python -m pip install -e .
 ```
 
-This puts three commands on your `PATH`: `pb` for exports, `pb-web` for the
-web UI, and `pb-diff` to compare two catalog files (long forms:
-`promptbase-export`, `promptbase-export-web`, and `promptbase-diff`). Without
+This puts four commands on your `PATH`: `pb` for exports, `pb-web` for the
+web UI, `pb-diff` to compare two catalog files, and `pb-convert` to rewrite a
+catalog in another format (long forms: `promptbase-export`,
+`promptbase-export-web`, `promptbase-diff`, and `promptbase-convert`). Without
 installing, run `python -m promptbase_exporter` from the project folder
 instead of `pb`.
 
@@ -80,6 +82,7 @@ pb @acb --type claude --paid-only --sort views --limit 25
 pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a catalog in place
 pb @acb @dreamydesigns --mode all --format html                 # searchable HTML, two profiles
 pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.json    # compare two saved catalogs
+pb-convert exports/acb_all_prompts.json --format csv            # rewrite a catalog, offline
 ```
 
 The default run creates three files:
@@ -186,7 +189,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
   Markdown ya da JSON olarak raporlar, dosyayı yerinde ve yarım kalma riski
   olmadan günceller, katalog değiştiğinde CI işini başarısız sayabilir.
   `pb-diff` ise kayıtlı iki kataloğu, biçimleri farklı olsa bile, internete
-  bağlanmadan karşılaştırır.
+  bağlanmadan karşılaştırır; `pb-convert` kayıtlı bir kataloğu başka bir
+  biçimde yeniden yazar ve sonuç taze bir dışa aktarımla bayt bayt aynıdır.
 - Yazılan her dosyadaki kayıt sayısını doğrular. PromptBase herkese açık veri
   yapısını değiştirirse yanıltıcı bir katalog yazmak yerine açık bir hatayla
   durur.
@@ -204,9 +208,11 @@ cd promptbase-profile-exporter
 uv tool install .            # or: python -m pip install -e .
 ```
 
-Bu, `PATH`'inize üç komut ekler: dışa aktarım için `pb`, web arayüzü için
-`pb-web`, iki katalog dosyasını karşılaştırmak için `pb-diff` (uzun adları:
-`promptbase-export`, `promptbase-export-web` ve `promptbase-diff`).
+Bu, `PATH`'inize dört komut ekler: dışa aktarım için `pb`, web arayüzü için
+`pb-web`, iki katalog dosyasını karşılaştırmak için `pb-diff`, bir kataloğu
+başka bir biçimde yeniden yazmak için `pb-convert` (uzun adları:
+`promptbase-export`, `promptbase-export-web`, `promptbase-diff` ve
+`promptbase-convert`).
 Kurulum yapmadan kullanmak isterseniz proje klasöründe `pb` yerine
 `python -m promptbase_exporter` çalıştırın.
 
@@ -220,6 +226,7 @@ pb @acb --type claude --paid-only --sort views --limit 25
 pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a catalog in place
 pb @acb @dreamydesigns --mode all --format html                 # searchable HTML, two profiles
 pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.json    # compare two saved catalogs
+pb-convert exports/acb_all_prompts.json --format csv            # rewrite a catalog, offline
 ```
 
 Varsayılan çalıştırma üç dosya oluşturur:

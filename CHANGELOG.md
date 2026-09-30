@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `pb-convert` (`promptbase-convert`, or `python -m promptbase_exporter.convert`)
+  rewrites a saved catalog in another format without fetching anything. Its
+  result is the file a direct export would have written, byte for byte, extra
+  fields and bundle or app catalogs included. It reads JSON, CSV, and HTML
+  catalogs and refuses TXT and Markdown, which lack columns and would need
+  invented values; it stops on a missing column, an empty number, or an
+  unreadable value instead of guessing, and never overwrites its source.
+  `--csv-safe` and `--from-csv-safe` cover protected CSVs.
 - `--item-type` (Action input `item-type`, a "Kind" list in the web UI) exports
   a profile's `bundle`s or `app`s as well as its `prompt`s (the default).
   Bundles and apps take their descriptions from PromptBase's public `Bundles`
@@ -22,7 +30,9 @@ All notable changes to this project will be documented in this file.
   you ask for are requested from PromptBase, so a default export is
   byte-identical to before and asking for all of them adds about 8 KB to a
   243-prompt download. A time PromptBase does not record is `null` (empty in
-  CSV) rather than a zero, and `txt`, which cannot hold them, is an error.
+  CSV) rather than a zero, and `txt`, which cannot hold them, is an error. In
+  CSV the tags are joined with `, `, or written as a JSON array if a tag
+  contains a comma, so the cell can always be read back.
 
 ## 0.9.3 - 2026-09-30
 

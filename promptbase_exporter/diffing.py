@@ -46,13 +46,22 @@ class CatalogDiff:
         return bool(self.added or self.removed or self.changed)
 
 
-def load_catalog(path: Path, *, csv_safe: bool = False) -> list[dict[str, Any]]:
+def load_catalog(
+    path: Path,
+    *,
+    csv_safe: bool = False,
+    strict: bool = False,
+) -> list[dict[str, Any]]:
     """Load a catalog file into normalized record dicts.
 
     ``csv_safe`` says a CSV catalog was written with ``--csv-safe``, so its
     escaped cells are restored exactly. Nothing inside a CSV can say so
     reliably, which is why it comes from the caller and defaults to reading
     every cell verbatim.
+
+    A JSON or HTML catalog entry that is not a record (a number, ``null``) is
+    skipped, unless ``strict`` is set: then it raises ValueError, so a caller
+    that must not lose data notices.
     """
     text = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
@@ -60,7 +69,7 @@ def load_catalog(path: Path, *, csv_safe: bool = False) -> list[dict[str, Any]]:
         data = json.loads(text)
         if not isinstance(data, list):
             raise ValueError("JSON catalog must contain a list of records.")
-        return [_normalize_record(item) for item in data if isinstance(item, dict)]
+        return _records(data, strict)
     if suffix == ".csv":
         # Strip a BOM from any CSV (Excel adds one), or the first column name
         # would read as "\ufefftitle".
@@ -75,16 +84,20 @@ def load_catalog(path: Path, *, csv_safe: bool = False) -> list[dict[str, Any]]:
             for row in rows
         ]
     if suffix in {".html", ".htm"}:
-        return [
-            _normalize_record(item)
-            for item in load_html_catalog_data(text)
-            if isinstance(item, dict)
-        ]
+        return _records(load_html_catalog_data(text), strict)
     if suffix == ".txt":
         return [_normalize_record(item) for item in _parse_text_catalog(text)]
     if suffix in {".md", ".markdown"}:
         return [_normalize_record(item) for item in _parse_markdown_catalog(text)]
     raise ValueError(f"Unsupported catalog file extension: {path.suffix}")
+
+
+def _records(data: list[Any], strict: bool) -> list[dict[str, Any]]:
+    if strict:
+        for number, item in enumerate(data, 1):
+            if not isinstance(item, dict):
+                raise ValueError(f"entry {number} of the catalog is not a record")
+    return [_normalize_record(item) for item in data if isinstance(item, dict)]
 
 
 def compare_catalogs(
