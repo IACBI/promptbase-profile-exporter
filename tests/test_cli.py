@@ -1,4 +1,5 @@
 import io
+import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -9,9 +10,12 @@ from promptbase_exporter.cli import (
     EXIT_DIFF,
     EXIT_ERROR,
     count_by,
+    diff_main,
     main,
     parse_datetime_ms,
 )
+from promptbase_exporter.client import PromptBaseError
+from promptbase_exporter.formatting import write_export
 from promptbase_exporter.models import Profile, PromptRecord
 
 
@@ -359,6 +363,12 @@ class ArgumentValidationTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("--min-price cannot be greater than --max-price", stderr)
 
+    def test_non_finite_price_fails_before_fetch(self):
+        for flag in ("--min-price", "--max-price"):
+            exit_code, stderr = self._run_expecting_failure(["@acb", flag, "nan"])
+            self.assertEqual(exit_code, 1)
+            self.assertIn(f"{flag} must be a finite number", stderr)
+
     def test_non_positive_limit_fails_before_fetch(self):
         exit_code, stderr = self._run_expecting_failure(["@acb", "--limit", "0"])
         self.assertEqual(exit_code, 1)
@@ -472,6 +482,257 @@ class UpdateFileDiffFailureTests(unittest.TestCase):
             self.assertNotEqual(exit_code, EXIT_ERROR)
             self.assertNotIn("could not write", stderr.getvalue())
             self.assertIn("Title: New", catalog.read_text(encoding="utf-8"))
+
+
+def _quiet_main(argv):
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        exit_code = main(argv)
+    return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+class NewOptionValidationTests(unittest.TestCase):
+    _run_expecting_failure = ArgumentValidationTests._run_expecting_failure
+
+    def test_negative_min_sales_fails_before_fetch(self):
+        exit_code, stderr = self._run_expecting_failure(["@acb", "--min-sales", "-1"])
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("--min-sales cannot be negative", stderr)
+
+    def test_invalid_min_rating_fails_before_fetch(self):
+        for value, message in (
+            ("nan", "--min-rating must be a finite number"),
+            ("-0.5", "--min-rating cannot be negative"),
+        ):
+            exit_code, stderr = self._run_expecting_failure(["@acb", "--min-rating", value])
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn(message, stderr)
+
+    def test_csv_safe_requires_csv_format(self):
+        exit_code, stderr = self._run_expecting_failure(
+            ["@acb", "--csv-safe", "--format", "json"]
+        )
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("--csv-safe requires --format csv", stderr)
+
+    def test_csv_safe_rejects_inferred_non_csv_output_file(self):
+        exit_code, stderr = self._run_expecting_failure(
+            ["@acb", "--mode", "all", "--csv-safe", "--output-file", "out.json"]
+        )
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("--csv-safe requires --format csv", stderr)
+
+    def test_single_catalog_options_reject_several_profiles(self):
+        for option in (["--compare", "a.json"], ["--output-file", "a.json"]):
+            exit_code, stderr = self._run_expecting_failure(
+                ["@acb", "@other", "--mode", "all", *option]
+            )
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("take a single profile", stderr)
+
+    def test_blank_profile_is_rejected(self):
+        exit_code, stderr = self._run_expecting_failure(["  "])
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("profile cannot be empty", stderr)
+
+
+class MultiProfileTests(unittest.TestCase):
+    PROFILES = {
+        "@acb": (Profile(username="acb", uid="u1"), [record("A text", "text", "gpt")]),
+        "@bob": (Profile(username="bob", uid="u2"), [record("B image", "image", "midjourney")]),
+    }
+
+    def _fetch(self, profile_input):
+        if profile_input not in self.PROFILES:
+            raise PromptBaseError(f"Profile not found: {profile_input}")
+        return self.PROFILES[profile_input]
+
+    def test_exports_every_profile_with_one_timestamp(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts", side_effect=self._fetch
+        ) as fetch:
+            exit_code, stdout, _ = _quiet_main(
+                ["@acb", "@bob", "@acb", "-o", directory, "--mode", "all",
+                 "--timestamp-filenames"]
+            )
+            names = sorted(path.name for path in Path(directory).iterdir())
+
+        self.assertEqual(exit_code, 0)
+        # The duplicate @acb is fetched once.
+        self.assertEqual([call.args[0] for call in fetch.call_args_list], ["@acb", "@bob"])
+        self.assertEqual(len(names), 2)
+        self.assertTrue(names[0].startswith("acb_all_prompts_"))
+        self.assertTrue(names[1].startswith("bob_all_prompts_"))
+        self.assertEqual(names[0].removeprefix("acb"), names[1].removeprefix("bob"))
+        self.assertIn("Profile: @acb", stdout)
+        self.assertIn("Profile: @bob", stdout)
+
+    def test_failed_profile_does_not_stop_the_others(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts", side_effect=self._fetch
+        ):
+            exit_code, _, stderr = _quiet_main(
+                ["@missing", "@bob", "-o", directory, "--mode", "all"]
+            )
+            written = [path.name for path in Path(directory).iterdir()]
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("Profile not found: @missing", stderr)
+        self.assertEqual(written, ["bob_all_prompts.txt"])
+
+
+class NewOptionBehaviourTests(unittest.TestCase):
+    def test_min_sales_and_min_rating_filter_the_export(self):
+        records = [
+            PromptRecord("Popular", "d", "popular", "gpt", "text", 3, 1.0, sales=9, rating=4.8),
+            PromptRecord("Unsold", "d", "unsold", "gpt", "text", 2, 1.0, sales=0, rating=0.0),
+            PromptRecord("Mediocre", "d", "meh", "gpt", "text", 1, 1.0, sales=9, rating=3.0),
+        ]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), records),
+        ):
+            output = Path(directory) / "out.json"
+            exit_code, _, _ = _quiet_main(
+                ["@acb", "--mode", "all", "--min-sales", "1", "--min-rating", "4",
+                 "--output-file", str(output)]
+            )
+            slugs = [item["slug"] for item in json.loads(output.read_text(encoding="utf-8"))]
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(slugs, ["popular"])
+
+    def test_csv_safe_output_file(self):
+        records = [PromptRecord("=cmd", "d", "x", "gpt", "text", 1, 0.0)]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), records),
+        ):
+            output = Path(directory) / "out.csv"
+            exit_code, _, _ = _quiet_main(
+                ["@acb", "--mode", "all", "--csv-safe", "--output-file", str(output)]
+            )
+            text = output.read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("'=cmd", text)
+
+    def test_repeated_diff_output_writes_markdown_and_json(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [record("New", "text", "gpt")]),
+        ):
+            catalog = Path(directory) / "catalog.txt"
+            catalog.write_text("1.\nTitle: Old\nDescription:\nOld\n", encoding="utf-8")
+            markdown = Path(directory) / "diff.md"
+            report = Path(directory) / "diff.json"
+            exit_code, stdout, _ = _quiet_main(
+                ["@acb", "--mode", "all", "--compare", str(catalog),
+                 "--diff-output", str(markdown), "--diff-output", str(report)]
+            )
+            data = json.loads(report.read_text(encoding="utf-8"))
+            markdown_text = markdown.read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["summary"], {"added": 1, "removed": 1, "changed": 0, "unchanged": 0})
+        self.assertIn("- Added: 1", markdown_text)
+        self.assertEqual(stdout.count("Wrote diff report"), 2)
+
+    def test_html_export_validates(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [record("A", "text", "gpt")]),
+        ):
+            exit_code, stdout, _ = _quiet_main(["@acb", "-o", directory, "--format", "html"])
+            written = sorted(path.name for path in Path(directory).iterdir())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            written,
+            ["acb_all_prompts.html", "acb_image_prompts.html", "acb_text_prompts.html"],
+        )
+        self.assertIn("Wrote  text:    1 prompts", stdout)
+
+    def test_unreadable_written_file_is_a_validation_error(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [record("A", "text", "gpt")]),
+        ), patch(
+            "promptbase_exporter.cli.count_written_records",
+            side_effect=ValueError("HTML catalog lists 0 prompts but embeds 1 records"),
+        ):
+            exit_code, _, stderr = _quiet_main(["@acb", "-o", directory, "--mode", "all"])
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("validation failed", stderr)
+        self.assertIn("embeds 1 records", stderr)
+
+
+class DiffCommandTests(unittest.TestCase):
+    def _catalogs(self, directory, previous, current):
+        records_a = [PromptRecord(t, "d", t.lower(), "gpt", "text", 1, p) for t, p in previous]
+        records_b = [PromptRecord(t, "d", t.lower(), "gpt", "text", 1, p) for t, p in current]
+        old = write_export(Path(directory) / "old", "acb", "all", records_a, "csv")
+        new = write_export(Path(directory) / "new", "acb", "all", records_b, "html")
+        return old, new
+
+    def _run(self, argv):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = diff_main(argv)
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
+    def test_identical_catalogs_across_formats(self):
+        with TemporaryDirectory() as directory:
+            old, new = self._catalogs(directory, [("A", 2.0)], [("A", 2.0)])
+            exit_code, stdout, _ = self._run([str(old), str(new), "--fail-on-diff"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("- Unchanged: 1", stdout)
+
+    def test_changes_exit_two_with_fail_on_diff_and_write_json(self):
+        with TemporaryDirectory() as directory:
+            old, new = self._catalogs(directory, [("A", 2.0), ("B", 1.0)], [("A", 3.0)])
+            report = Path(directory) / "diff.json"
+            exit_code, stdout, _ = self._run(
+                [str(old), str(new), "--fail-on-diff", "--quiet", "--diff-output", str(report)]
+            )
+            data = json.loads(report.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, EXIT_DIFF)
+        self.assertEqual(stdout, "")
+        self.assertEqual(data["summary"]["removed"], 1)
+        self.assertEqual(data["changed"][0]["fields"]["price"], {"previous": 2.0, "current": 3.0})
+
+    def test_changes_without_fail_on_diff_exit_zero(self):
+        with TemporaryDirectory() as directory:
+            old, new = self._catalogs(directory, [("A", 2.0)], [("B", 2.0)])
+            exit_code, stdout, _ = self._run([str(old), str(new)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("- Added: 1", stdout)
+
+    def test_missing_catalog_is_an_error(self):
+        with TemporaryDirectory() as directory:
+            exit_code, _, stderr = self._run(
+                [str(Path(directory) / "none.json"), str(Path(directory) / "none2.json")]
+            )
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("could not load catalog", stderr)
+
+    def test_report_write_failure_is_an_error(self):
+        with TemporaryDirectory() as directory:
+            old, new = self._catalogs(directory, [("A", 2.0)], [("A", 2.0)])
+            with patch(
+                "promptbase_exporter.cli.write_diff_report", side_effect=OSError("read-only")
+            ):
+                exit_code, _, stderr = self._run(
+                    [str(old), str(new), "--diff-output", str(Path(directory) / "d.md")]
+                )
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("could not write diff report", stderr)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 <a id="top"></a>
 # PromptBase Profile Exporter
 
-Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, or CSV catalogs.
+Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, CSV, or searchable HTML catalogs.
 
 [![tests](https://github.com/IACBI/promptbase-profile-exporter/actions/workflows/tests.yml/badge.svg)](https://github.com/IACBI/promptbase-profile-exporter/actions/workflows/tests.yml)
 [![release](https://img.shields.io/github/v/release/IACBI/promptbase-profile-exporter)](https://github.com/IACBI/promptbase-profile-exporter/releases/latest)
@@ -31,14 +31,19 @@ GitHub Action for scheduled exports.
 
 ### Features
 
-- Accepts a profile URL, a `profile/<name>` path, a username, or `@username`.
-- Writes `txt`, `markdown`, `json`, or `csv`, split into `all`, `text`, and
-  `image` catalogs or as a single file.
-- Filters by domain, prompt type, free/paid, price range, creation date, and
-  count; sorts by date, title, price, views, sales, downloads, favorites, or
-  rating.
-- Compares a fresh export against a previous catalog, rewrites it in place,
-  and can fail a CI job when the catalog drifts.
+- Accepts a profile URL, a `profile/<name>` path, a username, or `@username`,
+  and exports several profiles in one run.
+- Writes `txt`, `markdown`, `json`, `csv`, or a self-contained `html` page you
+  can search in the browser, split into `all`, `text`, and `image` catalogs or
+  as a single file. `--csv-safe` keeps CSV cells from running as spreadsheet
+  formulas.
+- Filters by domain, prompt type, free/paid, price range, creation date,
+  sales, rating, and count; sorts by date, title, price, views, sales,
+  downloads, favorites, or rating.
+- Compares a fresh export against a previous catalog, showing old and new
+  values, as Markdown or JSON; rewrites it in place atomically; and can fail a
+  CI job when the catalog drifts. `pb-diff` compares two saved catalogs
+  offline, even across formats.
 - Checks every written file against the expected record count, and stops with
   a clear error if PromptBase changes its public data model instead of
   writing a misleading catalog.
@@ -56,8 +61,9 @@ cd promptbase-profile-exporter
 uv tool install .            # or: python -m pip install -e .
 ```
 
-This puts two commands on your `PATH`: `pb` for exports and `pb-web` for the
-web UI (long forms: `promptbase-export` and `promptbase-export-web`). Without
+This puts three commands on your `PATH`: `pb` for exports, `pb-web` for the
+web UI, and `pb-diff` to compare two catalog files (long forms:
+`promptbase-export`, `promptbase-export-web`, and `promptbase-diff`). Without
 installing, run `python -m promptbase_exporter` from the project folder
 instead of `pb`.
 
@@ -69,6 +75,8 @@ pb @acb --dry-run                         # show what would be written, write no
 pb @acb --mode all --format json          # one JSON catalog with full metadata
 pb @acb --type claude --paid-only --sort views --limit 25
 pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a catalog in place
+pb @acb @dreamydesigns --mode all --format html                 # searchable HTML, two profiles
+pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.json    # compare two saved catalogs
 ```
 
 The default run creates three files:
@@ -108,11 +116,12 @@ The ones you will reach for most:
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text`, or `image` |
-| `--format` | `txt` | `txt`, `markdown`, `json`, or `csv` |
+| `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html` |
 | `--output-dir` | `exports` | Where generated files go |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, `rating` |
 | `--domain`, `--type` | none | Comma-separated filters, e.g. `--type gpt,claude` |
 | `--since`, `--until` | none | Creation-date range, `YYYY-MM-DD` or ISO datetime (UTC) |
+| `--min-sales`, `--min-rating` | none | Keep prompts with at least this many sales / this rating |
 
 The command exits with `0` on success, `1` on any error, and `2` when
 `--fail-on-diff` finds catalog changes. The
@@ -158,14 +167,19 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 ### Özellikler
 
 - Profil adresi, `profile/<ad>` yolu, kullanıcı adı ya da `@kullanıcıadı`
-  kabul eder.
-- `txt`, `markdown`, `json` veya `csv` yazar; çıktıyı `all`, `text` ve `image`
-  kataloglarına ayırabilir ya da tek dosya üretebilir.
+  kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
+- `txt`, `markdown`, `json`, `csv` ya da tarayıcıda arama yapılabilen, tek
+  dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
+  kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV
+  hücrelerinin tablo programlarında formül olarak çalışmasını engeller.
 - Alan (domain), prompt türü, ücretsiz/ücretli, fiyat aralığı, oluşturulma
-  tarihi ve adet ile filtreler; tarih, başlık, fiyat, görüntülenme, satış,
-  indirme, favori veya puana göre sıralar.
-- Yeni dışa aktarımı önceki bir katalogla karşılaştırır, dosyayı yerinde
-  günceller ve katalog değiştiğinde CI işini başarısız sayabilir.
+  tarihi, satış, puan ve adet ile filtreler; tarih, başlık, fiyat,
+  görüntülenme, satış, indirme, favori veya puana göre sıralar.
+- Yeni dışa aktarımı önceki bir katalogla karşılaştırıp eski ve yeni değerleri
+  Markdown ya da JSON olarak raporlar, dosyayı yerinde ve yarım kalma riski
+  olmadan günceller, katalog değiştiğinde CI işini başarısız sayabilir.
+  `pb-diff` ise kayıtlı iki kataloğu, biçimleri farklı olsa bile, internete
+  bağlanmadan karşılaştırır.
 - Yazılan her dosyadaki kayıt sayısını doğrular. PromptBase herkese açık veri
   yapısını değiştirirse yanıltıcı bir katalog yazmak yerine açık bir hatayla
   durur.
@@ -183,8 +197,9 @@ cd promptbase-profile-exporter
 uv tool install .            # or: python -m pip install -e .
 ```
 
-Bu, `PATH`'inize iki komut ekler: dışa aktarım için `pb`, web arayüzü için
-`pb-web` (uzun adları: `promptbase-export` ve `promptbase-export-web`).
+Bu, `PATH`'inize üç komut ekler: dışa aktarım için `pb`, web arayüzü için
+`pb-web`, iki katalog dosyasını karşılaştırmak için `pb-diff` (uzun adları:
+`promptbase-export`, `promptbase-export-web` ve `promptbase-diff`).
 Kurulum yapmadan kullanmak isterseniz proje klasöründe `pb` yerine
 `python -m promptbase_exporter` çalıştırın.
 
@@ -196,6 +211,8 @@ pb @acb --dry-run                         # show what would be written, write no
 pb @acb --mode all --format json          # one JSON catalog with full metadata
 pb @acb --type claude --paid-only --sort views --limit 25
 pb @acb --mode all --update-file exports/acb_all_prompts.json   # refresh a catalog in place
+pb @acb @dreamydesigns --mode all --format html                 # searchable HTML, two profiles
+pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.json    # compare two saved catalogs
 ```
 
 Varsayılan çalıştırma üç dosya oluşturur:
@@ -237,11 +254,12 @@ yapılandırma dosyası yoktur. En sık kullanacaklarınız:
 | Seçenek | Varsayılan | Amaç |
 | --- | --- | --- |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text` veya `image` |
-| `--format` | `txt` | `txt`, `markdown`, `json` veya `csv` |
+| `--format` | `txt` | `txt`, `markdown`, `json`, `csv` veya `html` |
 | `--output-dir` | `exports` | Üretilen dosyaların yazılacağı klasör |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, `rating` |
 | `--domain`, `--type` | yok | Virgülle ayrılmış filtreler, ör. `--type gpt,claude` |
 | `--since`, `--until` | yok | Oluşturulma tarihi aralığı, `YYYY-MM-DD` ya da ISO tarih-saat (UTC) |
+| `--min-sales`, `--min-rating` | yok | En az bu kadar satışı / bu puanı olan prompt'ları tutar |
 
 Komut başarılı olduğunda `0`, herhangi bir hatada `1`, `--fail-on-diff`
 katalogda değişiklik bulduğunda ise `2` koduyla çıkar. Tüm seçenekler

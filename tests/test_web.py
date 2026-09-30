@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from promptbase_exporter.models import Profile, PromptRecord
 from promptbase_exporter.web import (
+    _EXPORT_LOCK,
     MAX_FORM_BYTES,
     ExportRequest,
     PromptBaseWebHandler,
@@ -119,6 +120,12 @@ class WebTests(unittest.TestCase):
                 }
             )
 
+    def test_build_request_config_rejects_non_finite_prices(self):
+        for field in ("min_price", "max_price"):
+            for value in ("nan", "inf", "-inf"):
+                with self.assertRaises(WebInputError):
+                    build_request_config({"profile": "acb", field: value})
+
     def test_build_request_config_rejects_invalid_dates(self):
         for field in ("since", "until"):
             with self.assertRaises(WebInputError):
@@ -208,15 +215,17 @@ class WebTests(unittest.TestCase):
 
 class ExposureWarningTests(unittest.TestCase):
     def test_no_warning_for_loopback(self):
-        for host in ("127.0.0.1", "localhost", "::1", ""):
+        for host in ("127.0.0.1", "localhost", "::1"):
             with redirect_stderr(io.StringIO()) as err:
                 _warn_if_exposed(host)
             self.assertEqual(err.getvalue(), "")
 
     def test_warns_for_non_loopback(self):
-        with redirect_stderr(io.StringIO()) as err:
-            _warn_if_exposed("0.0.0.0")
-        self.assertIn("WARNING", err.getvalue())
+        # "" binds INADDR_ANY (every interface), so it must warn like 0.0.0.0.
+        for host in ("0.0.0.0", ""):
+            with redirect_stderr(io.StringIO()) as err:
+                _warn_if_exposed(host)
+            self.assertIn("WARNING", err.getvalue())
 
 
 class RequestGuardTests(unittest.TestCase):
@@ -390,6 +399,199 @@ class DownloadTests(unittest.TestCase):
         handler._handle_download()
         handler._send_download.assert_not_called()
         self.assertEqual(self._status(handler._send_text), 403)
+
+    def test_serves_html_export(self):
+        with _in_directory():
+            Path("exports").mkdir()
+            Path("exports/acb_all_prompts.html").write_text("<!doctype html>", encoding="utf-8")
+            handler = self._handler("/download?file=exports/acb_all_prompts.html")
+            handler._handle_download()
+
+        _, filename, content_type = handler._send_download.call_args.args
+        self.assertEqual(filename, "acb_all_prompts.html")
+        self.assertEqual(content_type, "text/html; charset=utf-8")
+
+
+class _in_directory:
+    """Run a block with a fresh temporary directory as the working directory."""
+
+    def __enter__(self):
+        self._tmp = TemporaryDirectory()
+        self._previous = os.getcwd()
+        os.chdir(self._tmp.name)
+        return Path(self._tmp.name)
+
+    def __exit__(self, *exc):
+        os.chdir(self._previous)
+        self._tmp.cleanup()
+
+
+class DownloadHeaderTests(unittest.TestCase):
+    def test_download_is_attachment_with_sandbox_csp(self):
+        handler = _make_handler({"Host": "127.0.0.1:8765"})
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = io.BytesIO()
+
+        handler._send_download(b"<p>x</p>", "acb_all_prompts.html", "text/html; charset=utf-8")
+
+        headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
+        self.assertEqual(headers["Content-Security-Policy"], "sandbox")
+        self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(handler.wfile.getvalue(), b"<p>x</p>")
+
+
+class NewWebOptionTests(unittest.TestCase):
+    def test_parses_min_sales_min_rating_and_csv_safe(self):
+        request = build_request_config(
+            {
+                "profile": "acb",
+                "format": "csv",
+                "min_sales": "0",
+                "min_rating": "4.5",
+                "csv_safe": "1",
+            }
+        )
+        self.assertEqual(request.min_sales, 0)
+        self.assertEqual(request.min_rating, 4.5)
+        self.assertTrue(request.csv_safe)
+
+    def test_rejects_invalid_min_sales_and_rating(self):
+        for field, value in (
+            ("min_sales", "-1"),
+            ("min_sales", "1.5"),
+            ("min_rating", "-1"),
+            ("min_rating", "nan"),
+            ("min_rating", "abc"),
+        ):
+            with self.assertRaises(WebInputError, msg=f"{field}={value}"):
+                build_request_config({"profile": "acb", field: value})
+
+    def test_limit_still_rejects_zero(self):
+        with self.assertRaisesRegex(WebInputError, "greater than zero"):
+            build_request_config({"profile": "acb", "limit": "0"})
+
+    def test_csv_safe_requires_csv_format(self):
+        with self.assertRaisesRegex(WebInputError, "csv format"):
+            build_request_config({"profile": "acb", "format": "json", "csv_safe": "1"})
+
+    def test_render_form_contains_new_controls(self):
+        html = render_form()
+        for name in ("min_sales", "min_rating", "compare_file", "csv_safe"):
+            self.assertIn(f'name="{name}"', html)
+        self.assertIn('<option value="html">html</option>', html)
+
+
+class CompareFileTests(unittest.TestCase):
+    def test_accepts_catalog_inside_working_directory(self):
+        with _in_directory() as root:
+            Path("catalog.json").write_text("[]", encoding="utf-8")
+            request = build_request_config(
+                {"profile": "acb", "mode": "all", "compare_file": "catalog.json"}
+            )
+            resolved_root = root.resolve()
+
+        self.assertEqual(request.compare_path, resolved_root / "catalog.json")
+        self.assertEqual(request.compare_file, "catalog.json")
+
+    def test_rejects_invalid_compare_files(self):
+        cases = [
+            ({"mode": "split", "compare_file": "catalog.json"}, "mode all, text, or image"),
+            ({"mode": "all", "compare_file": "../catalog.json"}, "working directory"),
+            ({"mode": "all", "compare_file": "//attacker.example/share/x.json"},
+             "working directory"),
+            ({"mode": "all", "compare_file": "notes.yaml"}, "JSON, CSV, TXT"),
+            ({"mode": "all", "compare_file": "missing.json"}, "not found"),
+        ]
+        with _in_directory():
+            Path("notes.yaml").write_text("x", encoding="utf-8")
+            for form, message in cases:
+                with self.assertRaisesRegex(WebInputError, message, msg=str(form)):
+                    build_request_config({"profile": "acb", **form})
+
+    def test_run_export_compares_before_overwriting_the_same_file(self):
+        records = [record("Fresh", "text", "gpt", created=2, price=2.0)]
+
+        def fetcher(_profile_input):
+            return Profile(username="acb", uid="uid-1"), records
+
+        with _in_directory() as root:
+            exports = root / "exports"
+            exports.mkdir()
+            catalog = exports / "acb_all_prompts.json"
+            catalog.write_text(
+                '[{"title": "Stale", "slug": "stale", "description": "old"}]', encoding="utf-8"
+            )
+            request = build_request_config(
+                {
+                    "profile": "acb",
+                    "mode": "all",
+                    "format": "json",
+                    "compare_file": "exports/acb_all_prompts.json",
+                }
+            )
+
+            result = run_export(request, fetcher=fetcher)
+            written = catalog.read_text(encoding="utf-8")
+
+        self.assertIsNotNone(result.diff)
+        self.assertEqual([item["slug"] for item in result.diff.removed], ["stale"])
+        self.assertEqual([item["slug"] for item in result.diff.added], ["fresh"])
+        self.assertIn('"slug": "fresh"', written)
+        page = render_form(request, result=result)
+        self.assertIn("<h3>Comparison</h3>", page)
+        self.assertIn("- Removed: 1", page)
+
+    def test_unreadable_compare_catalog_is_a_400_error(self):
+        def fetcher(_profile_input):
+            return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
+
+        with _in_directory() as root:
+            (root / "broken.json").write_text("{not json", encoding="utf-8")
+            request = build_request_config(
+                {"profile": "acb", "mode": "all", "compare_file": "broken.json"}
+            )
+            with self.assertRaisesRegex(WebInputError, "Could not load comparison catalog"):
+                run_export(request, fetcher=fetcher)
+            self.assertFalse((root / "exports").exists())
+
+
+class ExportLockTests(unittest.TestCase):
+    def test_writes_happen_while_holding_the_export_lock(self):
+        observed = []
+
+        def writer(output_dir, username, mode, records, export_format, timestamp=None,
+                   overwrite=True, *, csv_safe=False):
+            observed.append((_EXPORT_LOCK.locked(), csv_safe))
+            path = output_dir / f"{username}_{mode}_prompts.txt"
+            path.write_text("", encoding="utf-8")
+            return path
+
+        def fetcher(_profile_input):
+            self.assertFalse(_EXPORT_LOCK.locked())
+            return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
+
+        with TemporaryDirectory() as directory:
+            request = ExportRequest(
+                profile_input="@acb", output_dir=Path(directory), mode="all", csv_safe=True
+            )
+            run_export(request, fetcher=fetcher, writer=writer, counter=lambda _p, _f: 1)
+
+        self.assertEqual(observed, [(True, True)])
+        self.assertFalse(_EXPORT_LOCK.locked())
+
+    def test_lock_is_released_when_validation_fails(self):
+        def fetcher(_profile_input):
+            return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
+
+        with TemporaryDirectory() as directory:
+            request = ExportRequest(profile_input="@acb", output_dir=Path(directory), mode="all")
+            with self.assertRaisesRegex(WebInputError, "Validation failed"):
+                run_export(request, fetcher=fetcher, counter=lambda _p, _f: 0)
+
+        self.assertFalse(_EXPORT_LOCK.locked())
 
 
 if __name__ == "__main__":

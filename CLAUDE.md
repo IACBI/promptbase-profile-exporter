@@ -33,9 +33,12 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `dates.py` — shared `parse_datetime_ms` (used by both `cli.py` and `web.py`).
 - `models.py` — `Profile` and `PromptRecord` (frozen dataclasses + derived
   properties like `url`, `created_iso`, `is_text`/`is_image`/`is_free`).
-- `formatting.py` — filtering, sorting, the per-format writers, and
+- `formatting.py` — filtering, sorting, the per-format writers (txt,
+  markdown, json, csv with optional `--csv-safe`, html), atomic writes, and
   `count_written_records` (post-write validation).
-- `diffing.py` — catalog comparison (`--compare`/`--update-file`) and reports.
+- `diffing.py` — catalog loading and comparison (`--compare`/`--update-file`,
+  `pb-diff`) and the Markdown/JSON diff reports.
+- `diff.py` — `python -m promptbase_exporter.diff` entry point for `pb-diff`.
 - `web.py` — stdlib `http.server` UI; mirrors CLI options as a form.
 - `__main__.py` — `python -m promptbase_exporter` entry point.
 
@@ -56,6 +59,7 @@ python -m coverage report      # must stay >= 70%
 
 Run the tool: `python -m promptbase_exporter @acb --dry-run`
 Run the web UI: `python -m promptbase_exporter.web`
+Compare two catalogs offline: `python -m promptbase_exporter.diff OLD NEW`
 
 A `PostToolUse` hook lints edited `.py` files with ruff automatically; it skips
 silently if ruff is not installed.
@@ -97,8 +101,13 @@ These touch several files; the `.claude/skills/` skills encode the full steps:
   absolute paths, no `..`). Route user-supplied paths through
   `_confine_to_cwd`, which checks containment lexically *before* `resolve()`:
   on Windows, resolving a UNC path (`//host/share`) contacts that host over SMB.
+- The optional comparison catalog is confined the same way
+  (`_resolve_compare_path`), must have a catalog extension, and is only read.
 - `GET /download` only serves files inside that directory whose names match the
   exporter's own pattern (`_EXPORT_FILENAME_RE`) — it must not become an
-  arbitrary file read.
+  arbitrary file read. Downloads are attachments with
+  `Content-Security-Policy: sandbox`, because HTML exports are served too.
+- The compare/write/validate phase of an export runs under `_EXPORT_LOCK` so
+  concurrent requests cannot interleave writes to the same files.
 - Every response carries the security headers in `_send`. New endpoints must
   keep equivalent protections.

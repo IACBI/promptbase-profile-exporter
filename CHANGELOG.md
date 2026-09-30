@@ -4,8 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- HTML export (`--format html`): one self-contained, searchable catalog page
+  that works offline and in light or dark mode. Every value is HTML-escaped,
+  and the page embeds the full records as JSON, so HTML catalogs work with
+  `--compare`, `--update-file`, and `pb-diff`.
+- `pb-diff` (`promptbase-diff`, `python -m promptbase_exporter.diff`): compare
+  two saved catalogs without fetching anything, across formats, with the same
+  `--diff-output`, `--fail-on-diff`, and exit codes as the main command.
+- Several profiles per run: `pb @acb @other ...` exports each profile, shares
+  one timestamp, reports a failing profile without stopping the others, and
+  exits with `1` if any failed.
+- `--min-sales` and `--min-rating` filters, in the CLI, web UI, and Action.
+- `--csv-safe`: prefix CSV text cells that start with `=`, `+`, `-`, or `@`
+  with an apostrophe so spreadsheet apps do not run them as formulas (CSV
+  injection). Catalog loading strips the prefix again, so safe and plain
+  catalogs compare equal.
+- JSON diff reports: `--diff-output` writes JSON for a `.json` path and can be
+  repeated to write Markdown and JSON together. The Markdown report now shows
+  the old and new value of each changed field.
+- Web UI: an optional "Compare with existing catalog" field that shows the
+  diff report on the result page, plus minimum sales, minimum rating, and CSV
+  formula protection fields.
+- GitHub Action: `output-file`, `overwrite`, `update-file`, `csv-safe`,
+  `dry-run`, `min-sales`, and `min-rating` inputs; `profile-url` accepts
+  several profiles; new `exit-code`, `has-changes`, `added`, `removed`,
+  `changed`, `unchanged`, and `diff-json` outputs. CI now runs the action end
+  to end against live data, and tests Python 3.14.
+
 ### Changed
 
+- Requests to PromptBase now identify the tool
+  (`promptbase-profile-exporter/<version>`) instead of posing as a desktop
+  Chrome browser.
+- The Action's `format` input defaults to empty, so `output-file` and
+  `update-file` infer the format from the file extension as the CLI does.
+  Leaving it empty still means `txt` for directory exports.
+- `--limit` help and docs spell out that the limit applies before `--mode`
+  splits prompts into text and image files.
+- A diff no longer reports a field as changed when the new catalog lacks it
+  (for example comparing a JSON catalog against a TXT one).
 - Reorganize the documentation. The README is now a concise English and
   Türkçe guide; the full command-line reference, the web UI guide with its
   security model, and the GitHub Action guide live in `docs/`. The Action
@@ -16,6 +55,35 @@ All notable changes to this project will be documented in this file.
   the issue and pull request templates.
 - Use the ASCII author name `A.C.B` in `pyproject.toml` and `LICENSE`, and add
   documentation, changelog, and `Typing :: Typed` metadata to the package.
+
+### Fixed
+
+- Failed HTTP responses from PromptBase are closed instead of leaking their
+  socket until garbage collection.
+- Web UI: two exports of the same profile running at once can no longer
+  interleave their writes; the compare/write/validate step is serialized.
+  Downloads carry `Content-Security-Policy: sandbox`, so a downloaded HTML
+  export can never run script on the UI's origin.
+- `--compare` and `--update-file` against a CSV catalog no longer report every
+  free or whole-number price as changed. CSV stores `2.0` as the text `2.0`,
+  which was compared against `2`, so `--fail-on-diff` always exited with 2.
+- A prompt title containing a line break no longer breaks TXT and Markdown
+  exports; the title is written on one line, and post-write validation and
+  diff parsing count the record correctly.
+- Rewriting a catalog (`--update-file`, `--output-file --overwrite`, and
+  directory exports) is now atomic: the new file is written beside the old one
+  and swapped in, so a failed write can no longer leave a truncated catalog.
+  `--output-file` without `--overwrite` creates the file exclusively.
+- `--min-price`/`--max-price` and the web UI price fields reject `nan` and
+  `inf`, which previously passed validation and silently filtered out every
+  prompt.
+- Web UI: starting the server with an empty `--host ""` now prints the
+  non-loopback exposure warning; an empty host binds every interface.
+- Web UI: a connection that stalls while sending its request is closed after
+  60 seconds instead of holding a server thread indefinitely, and a failure to
+  write the export is reported as a clear error.
+- A malformed PromptBase response (not a list of rows, or a row without a
+  document name) now fails with a clear error instead of a Python traceback.
 
 ## 0.8.0 - 2026-09-28
 

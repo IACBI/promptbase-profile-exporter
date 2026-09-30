@@ -8,16 +8,20 @@ branding:
 
 inputs:
   profile-url:
-    description: PromptBase profile URL, path, username, or @username.
+    description: >-
+      PromptBase profile URL, path, username, or @username. Separate several
+      profiles with commas, spaces, or new lines to export each of them.
     required: true
   mode:
     description: Export mode. Use split, all, text, image, text-only, or image-only.
     required: false
     default: split
   format:
-    description: Output format. Use txt, markdown, json, or csv.
+    description: >-
+      Output format: txt, markdown, json, csv, or html. Empty means txt, or the
+      format inferred from output-file / update-file.
     required: false
-    default: txt
+    default: ""
   output-dir:
     description: Directory where export files will be written.
     required: false
@@ -58,12 +62,44 @@ inputs:
     description: Optional inclusive created-date filter, for example 2026-12-31.
     required: false
     default: ""
+  min-sales:
+    description: Optional minimum number of sales.
+    required: false
+    default: ""
+  min-rating:
+    description: Optional minimum rating.
+    required: false
+    default: ""
+  output-file:
+    description: Optional exact path for a single catalog. Requires mode all, text, or image.
+    required: false
+    default: ""
+  overwrite:
+    description: Allow output-file to replace an existing file.
+    required: false
+    default: "false"
+  update-file:
+    description: >-
+      Optional existing catalog to compare against and rewrite in place.
+      Requires mode all, text, or image.
+    required: false
+    default: ""
+  csv-safe:
+    description: Protect CSV text cells from spreadsheet formula injection. Requires csv output.
+    required: false
+    default: "false"
+  dry-run:
+    description: Fetch, filter, and validate without writing files. Skips the artifact upload.
+    required: false
+    default: "false"
   compare:
     description: Optional existing catalog path to compare against.
     required: false
     default: ""
   diff-output:
-    description: Optional path where the comparison report should be written.
+    description: >-
+      Optional path where the comparison report should be written (JSON for a
+      .json path, Markdown otherwise).
     required: false
     default: ""
   fail-on-diff:
@@ -102,6 +138,27 @@ outputs:
   artifact-name:
     description: Uploaded artifact name when upload-artifact is true.
     value: ${{ inputs.artifact-name }}
+  exit-code:
+    description: Exit code of the exporter (0 ok, 1 error, 2 fail-on-diff found changes).
+    value: ${{ steps.export.outputs.exit-code }}
+  has-changes:
+    description: With compare or update-file, "true" when the catalog changed, else "false".
+    value: ${{ steps.export.outputs.has-changes }}
+  added:
+    description: With compare or update-file, the number of added prompts.
+    value: ${{ steps.export.outputs.added }}
+  removed:
+    description: With compare or update-file, the number of removed prompts.
+    value: ${{ steps.export.outputs.removed }}
+  changed:
+    description: With compare or update-file, the number of changed prompts.
+    value: ${{ steps.export.outputs.changed }}
+  unchanged:
+    description: With compare or update-file, the number of unchanged prompts.
+    value: ${{ steps.export.outputs.unchanged }}
+  diff-json:
+    description: With compare or update-file, path of the machine-readable JSON diff report.
+    value: ${{ steps.export.outputs.diff-json }}
 
 runs:
   using: composite
@@ -123,8 +180,11 @@ runs:
       shell: bash
       env:
         UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
+        DRY_RUN: ${{ inputs.dry-run }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        UPDATE_FILE: ${{ inputs.update-file }}
       run: |
         set -euo pipefail
 
@@ -134,10 +194,10 @@ runs:
 
         case "$(normalize_bool "$UPLOAD_ARTIFACT")" in
           true|"")
-            echo "upload_artifact=true" >> "$GITHUB_OUTPUT"
+            upload_artifact=true
             ;;
           false)
-            echo "upload_artifact=false" >> "$GITHUB_OUTPUT"
+            upload_artifact=false
             ;;
           *)
             echo "::error::upload-artifact must be true or false."
@@ -145,17 +205,33 @@ runs:
             ;;
         esac
 
-        if [[ "$OUTPUT_DIR" = /* ]]; then
-          artifact_path="$OUTPUT_DIR"
-        elif [[ "$WORKING_DIRECTORY" = "." || -z "$WORKING_DIRECTORY" ]]; then
-          artifact_path="$OUTPUT_DIR"
+        # A dry run writes nothing, so there is nothing to upload.
+        if [[ "$(normalize_bool "$DRY_RUN")" == "true" ]]; then
+          upload_artifact=false
+        fi
+        echo "upload_artifact=$upload_artifact" >> "$GITHUB_OUTPUT"
+
+        # Single-file modes write outside output-dir; upload what was written.
+        if [[ -n "$UPDATE_FILE" ]]; then
+          target="$UPDATE_FILE"
+        elif [[ -n "$OUTPUT_FILE" ]]; then
+          target="$OUTPUT_FILE"
         else
-          artifact_path="${WORKING_DIRECTORY%/}/${OUTPUT_DIR#./}"
+          target="$OUTPUT_DIR"
+        fi
+
+        if [[ "$target" = /* ]]; then
+          artifact_path="$target"
+        elif [[ "$WORKING_DIRECTORY" = "." || -z "$WORKING_DIRECTORY" ]]; then
+          artifact_path="$target"
+        else
+          artifact_path="${WORKING_DIRECTORY%/}/${target#./}"
         fi
 
         echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
 
     - name: Export PromptBase profile
+      id: export
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -169,6 +245,13 @@ runs:
         PRICE_MODE: ${{ inputs.price-mode }}
         MIN_PRICE: ${{ inputs.min-price }}
         MAX_PRICE: ${{ inputs.max-price }}
+        MIN_SALES: ${{ inputs.min-sales }}
+        MIN_RATING: ${{ inputs.min-rating }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        OVERWRITE: ${{ inputs.overwrite }}
+        UPDATE_FILE: ${{ inputs.update-file }}
+        CSV_SAFE: ${{ inputs.csv-safe }}
+        DRY_RUN: ${{ inputs.dry-run }}
         LIMIT: ${{ inputs.limit }}
         SINCE: ${{ inputs.since }}
         UNTIL: ${{ inputs.until }}
@@ -184,13 +267,39 @@ runs:
           printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
         }
 
+        add_flag() {
+          # add_flag <input-name> <value> <cli-flag>
+          case "$(normalize_bool "$2")" in
+            true)
+              args+=("$3")
+              ;;
+            false|"")
+              ;;
+            *)
+              echo "::error::$1 must be true or false."
+              exit 1
+              ;;
+          esac
+        }
+
+        mapfile -t profiles < <(
+          printf '%s\n' "$PROFILE_URL" | tr ',' '\n' | tr -s '[:space:]' '\n' | sed '/^$/d'
+        )
+        if [[ ${#profiles[@]} -eq 0 ]]; then
+          echo "::error::profile-url is required."
+          exit 1
+        fi
+
         args=(
-          "$PROFILE_URL"
+          "${profiles[@]}"
           "--mode" "$MODE"
-          "--format" "$FORMAT"
           "--output-dir" "$OUTPUT_DIR"
           "--sort" "$SORT"
         )
+
+        if [[ -n "$FORMAT" ]]; then
+          args+=("--format" "$FORMAT")
+        fi
 
         if [[ -n "$DOMAIN" ]]; then
           args+=("--domain" "$DOMAIN")
@@ -223,8 +332,24 @@ runs:
           args+=("--max-price" "$MAX_PRICE")
         fi
 
+        if [[ -n "$MIN_SALES" ]]; then
+          args+=("--min-sales" "$MIN_SALES")
+        fi
+
+        if [[ -n "$MIN_RATING" ]]; then
+          args+=("--min-rating" "$MIN_RATING")
+        fi
+
         if [[ -n "$LIMIT" ]]; then
           args+=("--limit" "$LIMIT")
+        fi
+
+        if [[ -n "$OUTPUT_FILE" ]]; then
+          args+=("--output-file" "$OUTPUT_FILE")
+        fi
+
+        if [[ -n "$UPDATE_FILE" ]]; then
+          args+=("--update-file" "$UPDATE_FILE")
         fi
 
         if [[ -n "$SINCE" ]]; then
@@ -243,43 +368,41 @@ runs:
           args+=("--diff-output" "$DIFF_OUTPUT")
         fi
 
-        case "$(normalize_bool "$FAIL_ON_DIFF")" in
-          true)
-            args+=("--fail-on-diff")
-            ;;
-          false|"")
-            ;;
-          *)
-            echo "::error::fail-on-diff must be true or false."
-            exit 1
-            ;;
-        esac
+        add_flag fail-on-diff "$FAIL_ON_DIFF" --fail-on-diff
+        add_flag timestamp-filenames "$TIMESTAMP_FILENAMES" --timestamp-filenames
+        add_flag allow-missing-descriptions "$ALLOW_MISSING_DESCRIPTIONS" \
+          --allow-missing-descriptions
+        add_flag overwrite "$OVERWRITE" --overwrite
+        add_flag csv-safe "$CSV_SAFE" --csv-safe
+        add_flag dry-run "$DRY_RUN" --dry-run
 
-        case "$(normalize_bool "$TIMESTAMP_FILENAMES")" in
-          true)
-            args+=("--timestamp-filenames")
-            ;;
-          false|"")
-            ;;
-          *)
-            echo "::error::timestamp-filenames must be true or false."
-            exit 1
-            ;;
-        esac
+        # Always capture a machine-readable diff so its counts become outputs.
+        diff_json=""
+        if [[ -n "$COMPARE" || -n "$UPDATE_FILE" ]]; then
+          diff_json="$RUNNER_TEMP/promptbase-diff-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$$.json"
+          args+=("--diff-output" "$diff_json")
+        fi
 
-        case "$(normalize_bool "$ALLOW_MISSING_DESCRIPTIONS")" in
-          true)
-            args+=("--allow-missing-descriptions")
-            ;;
-          false|"")
-            ;;
-          *)
-            echo "::error::allow-missing-descriptions must be true or false."
-            exit 1
-            ;;
-        esac
-
+        set +e
         promptbase-export "${args[@]}"
+        status=$?
+        set -e
+
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        if [[ -n "$diff_json" && -f "$diff_json" ]]; then
+          python - "$diff_json" >> "$GITHUB_OUTPUT" <<'PY'
+        import json
+        import sys
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            report = json.load(handle)
+        print(f"has-changes={'true' if report['has_changes'] else 'false'}")
+        for key, value in report["summary"].items():
+            print(f"{key}={value}")
+        print(f"diff-json={sys.argv[1]}")
+        PY
+        fi
+        exit "$status"
 
     - name: Upload exports
       if: ${{ steps.action-inputs.outputs.upload_artifact == 'true' }}

@@ -8,10 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .formatting import record_to_dict
+from .formatting import csv_unescape_formula, load_html_catalog_data, record_to_dict
 from .models import PromptRecord
 
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
+NUMERIC_COMPARE_FIELDS = frozenset({"price"})
+# File extensions load_catalog can read.
+CATALOG_SUFFIXES = frozenset({".json", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"})
 
 # Whitespace collapse runs once per compared field of every changed-candidate
 # record, so compile it once rather than per call.
@@ -46,7 +49,18 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
             raise ValueError("JSON catalog must contain a list of records.")
         return [_normalize_record(item) for item in data if isinstance(item, dict)]
     if suffix == ".csv":
-        return [_normalize_record(row) for row in csv.DictReader(io.StringIO(text))]
+        return [
+            _normalize_record(
+                {key: csv_unescape_formula(value or "") for key, value in row.items()}
+            )
+            for row in csv.DictReader(io.StringIO(text))
+        ]
+    if suffix in {".html", ".htm"}:
+        return [
+            _normalize_record(item)
+            for item in load_html_catalog_data(text)
+            if isinstance(item, dict)
+        ]
     if suffix == ".txt":
         return [_normalize_record(item) for item in _parse_text_catalog(text)]
     if suffix in {".md", ".markdown"}:
@@ -58,7 +72,17 @@ def compare_catalogs(
     previous: list[dict[str, Any]],
     current_records: list[PromptRecord],
 ) -> CatalogDiff:
-    current = [record_to_dict(record) for record in current_records]
+    """Compare a loaded catalog against freshly fetched prompt records."""
+    return compare_catalog_records(
+        previous, [record_to_dict(record) for record in current_records]
+    )
+
+
+def compare_catalog_records(
+    previous: list[dict[str, Any]],
+    current: list[dict[str, Any]],
+) -> CatalogDiff:
+    """Compare two catalogs of record dicts, e.g. two files from load_catalog."""
     previous_by_slug = {
         _slug_key(record): index
         for index, record in enumerate(previous)
@@ -126,9 +150,46 @@ def format_diff_report(diff: CatalogDiff) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def diff_to_dict(diff: CatalogDiff) -> dict[str, Any]:
+    """Return a JSON-serializable form of ``diff`` for automation."""
+    return {
+        "has_changes": diff.has_changes,
+        "summary": {
+            "added": len(diff.added),
+            "removed": len(diff.removed),
+            "changed": len(diff.changed),
+            "unchanged": diff.unchanged,
+        },
+        "added": [_record_ref(record) for record in diff.added],
+        "removed": [_record_ref(record) for record in diff.removed],
+        "changed": [
+            {
+                **_record_ref(item.current),
+                "fields": {
+                    field: {
+                        "previous": _json_value(field, item.previous.get(field)),
+                        "current": _json_value(field, item.current.get(field)),
+                    }
+                    for field in item.fields
+                },
+            }
+            for item in diff.changed
+        ],
+    }
+
+
+def format_diff_json(diff: CatalogDiff) -> str:
+    return json.dumps(diff_to_dict(diff), ensure_ascii=False, indent=2) + "\n"
+
+
 def write_diff_report(path: Path, diff: CatalogDiff) -> Path:
+    """Write the report as JSON for a ``.json`` path, otherwise as Markdown."""
+    if path.suffix.lower() == ".json":
+        content = format_diff_json(diff)
+    else:
+        content = format_diff_report(diff)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(format_diff_report(diff), encoding="utf-8", newline="\n")
+    path.write_text(content, encoding="utf-8", newline="\n")
     return path
 
 
@@ -205,12 +266,15 @@ def _match_previous(
 def _changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
     changed: list[str] = []
     for field in COMPARE_FIELDS:
-        if field not in previous and field not in {"title", "description"}:
+        # TXT catalogs carry no metadata. A field one side does not record is
+        # unknown, not changed, whichever side it is missing from.
+        if field not in {"title", "description"} and (
+            _metadata_missing(previous.get(field)) or _metadata_missing(current.get(field))
+        ):
             continue
-        if field not in {"title", "description"} and _metadata_missing(previous.get(field)):
-            continue
-        previous_value = _comparable_value(previous.get(field))
-        current_value = _comparable_value(current.get(field))
+        normalize = _comparable_number if field in NUMERIC_COMPARE_FIELDS else _comparable_value
+        previous_value = normalize(previous.get(field))
+        current_value = normalize(current.get(field))
         if previous_value != current_value:
             changed.append(field)
     return changed
@@ -223,6 +287,15 @@ def _comparable_value(value: Any) -> str:
         return f"{value:g}"
     normalized = str(value).replace("\r\n", "\n").replace("\r", "\n")
     return _WHITESPACE_RE.sub(" ", normalized).strip()
+
+
+def _comparable_number(value: Any) -> str:
+    # A CSV catalog stores 2.0 as the text "2.0" while JSON loads it as a
+    # float, so compare numerically rather than by spelling.
+    try:
+        return f"{float(value):g}"
+    except (TypeError, ValueError):
+        return _comparable_value(value)
 
 
 def _metadata_missing(value: Any) -> bool:
@@ -262,7 +335,45 @@ def _append_changed_section(lines: list[str], records: tuple[ChangedRecord, ...]
     for record in records:
         lines.append(f"- {_record_label(record.current)}")
         lines.append(f"  Changed fields: {', '.join(record.fields)}")
+        for field in record.fields:
+            change = _describe_change(
+                field, record.previous.get(field), record.current.get(field)
+            )
+            lines.append(f"  - {field}: {change}")
     lines.append("")
+
+
+def _describe_change(field: str, previous: Any, current: Any) -> str:
+    if field == "description":
+        # Descriptions are long; the size change is enough to spot the edit.
+        before = len(_comparable_value(previous))
+        after = len(_comparable_value(current))
+        return f"{before} -> {after} characters"
+    if field in NUMERIC_COMPARE_FIELDS:
+        return f"{_comparable_number(previous)} -> {_comparable_number(current)}"
+    return f"{_quoted(previous)} -> {_quoted(current)}"
+
+
+def _quoted(value: Any) -> str:
+    text = _comparable_value(value)
+    return f'"{text}"' if text else "(empty)"
+
+
+def _json_value(field: str, value: Any) -> Any:
+    if field in NUMERIC_COMPARE_FIELDS:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return "" if value is None else str(value)
+
+
+def _record_ref(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "title": str(record.get("title") or "").strip(),
+        "slug": str(record.get("slug") or "").strip(),
+        "url": str(record.get("url") or "").strip(),
+    }
 
 
 def _record_label(record: dict[str, Any]) -> str:

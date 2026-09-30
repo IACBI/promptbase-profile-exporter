@@ -11,6 +11,7 @@ list for your version.
 - [Filtering and sorting](#filtering-and-sorting)
 - [Writing to an exact path](#writing-to-an-exact-path)
 - [Comparing and updating catalogs](#comparing-and-updating-catalogs)
+- [Comparing two files offline](#comparing-two-files-offline)
 - [Inspecting without writing](#inspecting-without-writing)
 - [Options](#options)
 - [Exit codes](#exit-codes)
@@ -27,6 +28,18 @@ pb profile/acb
 pb acb
 pb @acb
 ```
+
+Pass several profiles to export each of them in one run. Each profile gets its
+own files, `--timestamp-filenames` stamps them all with the same time, and a
+profile that fails is reported without stopping the others (the run then exits
+with `1`). Duplicates are exported once.
+
+```bash
+pb @acb @dreamydesigns emanema --format json
+```
+
+`--output-file`, `--compare`, and `--update-file` each describe one catalog, so
+they take a single profile.
 
 ## Modes: which catalogs to write
 
@@ -51,7 +64,7 @@ pb @acb --timestamp-filenames
 
 ## Output formats
 
-Choose with `--format`: `txt` (default), `markdown`, `json`, or `csv`.
+Choose with `--format`: `txt` (default), `markdown`, `json`, `csv`, or `html`.
 
 **TXT** is a plain numbered list of titles and descriptions:
 
@@ -91,6 +104,31 @@ discount, views, sales, downloads, favorites, rating, reviews
 `created` is milliseconds since the Unix epoch; `created_iso` is the same
 moment as an ISO 8601 UTC timestamp.
 
+**CSV and spreadsheets.** A cell that starts with `=`, `+`, `-`, or `@` is run
+as a formula when the file is opened in Excel, LibreOffice, or Google Sheets.
+Prompt titles and descriptions are written by whoever owns the profile, so if
+you open CSV exports of other people's profiles in a spreadsheet, add
+`--csv-safe`: such cells get a leading apostrophe, which spreadsheets display
+as plain text. Numeric columns are never changed. It is off by default so the
+CSV stays byte-for-byte faithful for scripts that parse it. `--compare`,
+`--update-file`, and `pb-diff` strip the apostrophe again when they read a
+catalog, so safe and plain catalogs compare equal. When you refresh a safe
+catalog with `--update-file`, pass `--csv-safe` again to keep it safe.
+
+```bash
+pb @acb --mode all --format csv --csv-safe
+```
+
+**HTML** is a single self-contained page: a readable catalog with a search box
+that filters prompts as you type, in light or dark mode, with no external
+files or network requests. Every value is HTML-escaped, and the page also
+embeds the full records as JSON, so it works with `--compare`,
+`--update-file`, and `pb-diff` like the JSON and CSV formats.
+
+```bash
+pb @acb --mode all --format html    # -> exports/acb_all_prompts.html
+```
+
 ## Filtering and sorting
 
 Filters narrow the prompt set first; `--mode` then splits what remains, and
@@ -101,6 +139,7 @@ pb @acb --type claude --mode text               # only Claude text prompts
 pb @acb --paid-only --min-price 2 --max-price 6
 pb @acb --since 2026-01-01 --until 2026-12-31
 pb @acb --sort views --limit 25                 # the 25 most-viewed prompts
+pb @acb --min-sales 1 --min-rating 4.5          # proven, well-rated prompts
 pb @acb --mode all --format json --type gpt --paid-only
 ```
 
@@ -108,7 +147,13 @@ pb @acb --mode all --format json --type gpt --paid-only
 - `--free-only` and `--paid-only` cannot be combined.
 - `--since` and `--until` accept `YYYY-MM-DD` or an ISO datetime. A bare date
   is read as UTC, and `--until` includes the whole day.
-- `--limit` keeps the first N prompts *after* sorting.
+- `--min-sales` and `--min-rating` keep prompts at or above the value. A
+  prompt without reviews has a rating of `0`.
+- `--limit` keeps the first N prompts *after* sorting, and before `--mode`
+  splits them into files. With the default `split` mode, `--limit 10` writes
+  the 10 newest prompts to the `all` file and, of those 10, the text ones to
+  the `text` file and the image ones to the `image` file. For "10 of each",
+  run `--mode text --limit 10` and `--mode image --limit 10`.
 
 Sort keys: `newest` (default), `oldest`, `title`, `price`, `views`, `sales`,
 `downloads`, `favorites`, `rating`. Numeric sorts put the highest first.
@@ -126,8 +171,8 @@ pb @acb --mode text --output-file catalogs/text-prompts.csv
 ## Comparing and updating catalogs
 
 `--compare` checks the current profile against a catalog you exported earlier
-and reports what was added, removed, or changed. It reads JSON, CSV, TXT, and
-Markdown catalogs. Records are matched by slug, falling back to title for
+and reports what was added, removed, or changed. It reads JSON, CSV, TXT,
+Markdown, and HTML catalogs. Records are matched by slug, falling back to title for
 formats that do not store one.
 
 ```bash
@@ -151,10 +196,43 @@ Summary:
 
 - Minimalist Logo Designer (minimalist-logo-designer)
   Changed fields: description, price
+  - description: 412 -> 468 characters
+  - price: 3.99 -> 4.99
 
 ## Removed
 
 - Old prompt (old-prompt)
+```
+
+Title, type, domain, and price changes show the old and new value; a
+description change shows its length before and after. A field that one of the
+catalogs does not record (TXT stores no price, for example) is never reported
+as changed.
+
+`--diff-output` writes the report as JSON when the path ends in `.json` and as
+Markdown otherwise, and can be repeated to write both. The JSON form is meant
+for scripts:
+
+```json
+{
+  "has_changes": true,
+  "summary": {"added": 0, "removed": 1, "changed": 1, "unchanged": 0},
+  "added": [],
+  "removed": [{"title": "Old prompt", "slug": "old-prompt", "url": "https://promptbase.com/prompt/old-prompt"}],
+  "changed": [
+    {
+      "title": "Minimalist Logo Designer",
+      "slug": "minimalist-logo-designer",
+      "url": "https://promptbase.com/prompt/minimalist-logo-designer",
+      "fields": {"price": {"previous": 3.99, "current": 4.99}}
+    }
+  ]
+}
+```
+
+```bash
+pb @acb --mode all --compare exports/acb_all_prompts.json \
+  --diff-output reports/diff.md --diff-output reports/diff.json
 ```
 
 `--update-file` compares against an existing catalog and then rewrites it with
@@ -172,7 +250,22 @@ before the command exits with `2`.
 catalog, so they need `--mode all`, `text`, or `image` rather than `split`.
 If an `--update-file` run cannot load the old catalog or write its
 `--diff-output` report, it stops with exit code `1` and leaves the existing
-catalog untouched.
+catalog untouched. The rewrite itself is atomic: the new catalog is written
+next to the old one and swapped in, so an interrupted run never leaves a
+truncated file.
+
+## Comparing two files offline
+
+`pb-diff` (`promptbase-diff`, or `python -m promptbase_exporter.diff` without
+installing) compares two catalogs you already have, with no network access. The
+two files may be in different formats, for example last month's CSV and
+today's HTML export. It takes the same `--diff-output` and `--fail-on-diff`
+options and uses the same exit codes.
+
+```bash
+pb-diff old/acb_all_prompts.csv exports/acb_all_prompts.html
+pb-diff old.json new.json --fail-on-diff --quiet --diff-output diff.json
+```
 
 ## Inspecting without writing
 
@@ -188,10 +281,10 @@ pb @acb --quiet          # print nothing except errors
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `profile` (positional) | required | PromptBase profile URL, path, username, or `@username`. |
+| `profile` (positional) | required | PromptBase profile URL, path, username, or `@username`. Repeat to export several profiles. |
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
-| `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, or `csv`. Inferred from the extension with `--output-file`/`--update-file`. |
+| `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`. |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |
 | `--domain` | none | Comma-separated domain filter, e.g. `text,image,video`. |
 | `--type` | none | Comma-separated PromptBase type filter, e.g. `gpt,claude`. |
@@ -201,15 +294,18 @@ pb @acb --quiet          # print nothing except errors
 | `--max-price` | none | Keep prompts priced at or below this amount. |
 | `--since` | none | Keep prompts created on or after this date or ISO datetime. |
 | `--until` | none | Keep prompts created on or before this date or ISO datetime. |
-| `--limit` | none | Keep only the first N prompts after filtering and sorting. |
+| `--min-sales` | none | Keep prompts with at least this many sales. |
+| `--min-rating` | none | Keep prompts rated at or above this value. |
+| `--limit` | none | Keep only the first N prompts after filtering and sorting, before `--mode` splits them. |
+| `--csv-safe` | off | Prefix CSV text cells starting with `=`, `+`, `-`, or `@` with `'` so spreadsheets do not run them. Needs CSV output. |
 | `--allow-missing-descriptions` | off | Write files even if some prompt descriptions are missing. |
 | `--timestamp-filenames` | off | Append `_YYYYMMDD_HHMMSS` to generated filenames. |
 | `--output-file` | none | Write a single catalog to this exact path. Needs `--mode all`, `text`, or `image`. |
 | `--overwrite` | off | Allow `--output-file` to replace an existing file. |
 | `--compare` | none | Compare against an existing JSON, CSV, TXT, or Markdown catalog. |
-| `--diff-output` | none | Also write the comparison report to this path. Needs `--compare` or `--update-file`. |
+| `--diff-output` | none | Also write the comparison report to this path: JSON for `.json`, Markdown otherwise. Repeatable. Needs `--compare` or `--update-file`. |
 | `--fail-on-diff` | off | Exit with code `2` when the comparison finds changes. |
-| `--update-file` | none | Compare against an existing catalog and rewrite it in place. Needs `--mode all`, `text`, or `image`. |
+| `--update-file` | none | Compare against an existing catalog and rewrite it in place. The rewrite is atomic, so a failed write leaves the old catalog intact. Needs `--mode all`, `text`, or `image`. |
 | `--dry-run` | off | Fetch, filter, and validate without writing files. |
 | `--list-domains` | off | Print domain counts after filters, then exit. |
 | `--list-types` | off | Print PromptBase type counts after filters, then exit. |
@@ -226,12 +322,13 @@ The web UI command, `pb-web` (`promptbase-export-web`), is described in
 | Code | Meaning |
 | --- | --- |
 | `0` | Success, including a comparison that found no differences. |
-| `1` | Error: invalid options, profile not found, no matching prompts, missing descriptions (without `--allow-missing-descriptions`), a network failure, or a write/validation failure. |
+| `1` | Error (for a multi-profile run: in any of the profiles): invalid options, profile not found, no matching prompts, missing descriptions (without `--allow-missing-descriptions`), a network failure, or a write/validation failure. |
 | `2` | `--fail-on-diff` was set and the comparison found added, removed, or changed prompts. |
 
 Codes `1` and `2` never overlap: an operational failure is never reported as
 drift, so a pipeline can treat `2` as "catalog changed" with confidence. The
-GitHub Action exposes this through its `fail-on-diff` input.
+GitHub Action exposes this through its `fail-on-diff` input and its
+`exit-code` and `has-changes` outputs. `pb-diff` uses the same codes.
 
 ## Validation and safety checks
 

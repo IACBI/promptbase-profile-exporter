@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from . import __version__
 from .models import Profile, PromptRecord
 
 FIRESTORE_RUN_QUERY = (
@@ -15,9 +16,11 @@ FIRESTORE_RUN_QUERY = (
     "promptbase/databases/(default)/documents:runQuery"
 )
 
+# Identify the tool honestly rather than posing as a browser, so the operator
+# of the public endpoint can see (and contact) what is making these requests.
 USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    f"promptbase-profile-exporter/{__version__} "
+    "(+https://github.com/IACBI/promptbase-profile-exporter)"
 )
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
@@ -123,28 +126,32 @@ def _run_query(
     )
 
     rows = _open_json_with_retry(request)
+    if not isinstance(rows, list):
+        raise PromptBaseError("PromptBase query returned an unexpected response shape.")
 
     docs: list[dict[str, Any]] = []
     for row in rows:
-        document = row.get("document")
+        document = row.get("document") if isinstance(row, dict) else None
         if not document:
             continue
         fields = {
             key: firestore_value(item)
             for key, item in document.get("fields", {}).items()
         }
-        fields["_doc_name"] = document["name"]
+        fields["_doc_name"] = document.get("name", "")
         docs.append(fields)
     return docs
 
 
-def _open_json_with_retry(request: urllib.request.Request) -> list[dict[str, Any]]:
+def _open_json_with_retry(request: urllib.request.Request) -> Any:
     last_error: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
+            # The error doubles as the open HTTP response; release its socket.
+            exc.close()
             last_error = exc
             if exc.code not in TRANSIENT_HTTP_STATUS_CODES or attempt == MAX_RETRIES:
                 break
@@ -328,8 +335,8 @@ def fetch_prompt_details(profile: Profile) -> dict[str, dict[str, Any]]:
         slug = str(doc.get("slug") or "").strip()
         if not slug:
             continue
-        if slug not in by_slug or int(doc.get("created") or 0) >= int(
-            by_slug[slug].get("created") or 0
+        if slug not in by_slug or _int_field(doc, "created") >= _int_field(
+            by_slug[slug], "created"
         ):
             by_slug[slug] = doc
     return by_slug
