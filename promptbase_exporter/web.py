@@ -37,6 +37,7 @@ from .formatting import (
     sorted_newest_to_oldest,
     write_export,
 )
+from .layout import LAYOUTS, count_files, unique_names, write_markdown_files
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, Profile, PromptRecord
 from .pipeline import Selection, split_modes, without_description
 
@@ -105,6 +106,7 @@ class ExportRequest:
     compare_path: Path | None = None
     extra_fields: tuple[str, ...] = ()
     item_type: str = "prompt"
+    layout: str = "catalog"
 
     def selection(self) -> Selection:
         """The record selection this request asks for."""
@@ -177,6 +179,8 @@ class WriteExport(Protocol):
 
 
 CountWrittenRecords = Callable[[Path, str], int]
+# Writes one Markdown file per record into a folder and returns the folder.
+FilesWriter = Callable[..., Path]
 
 
 def default_request() -> ExportRequest:
@@ -202,6 +206,10 @@ def build_request_config(
     item_type = _single_value(form_data, "item_type", "prompt")
     if item_type not in ITEM_TYPES:
         raise WebInputError(f"Unsupported item type: {item_type}.")
+
+    layout = _single_value(form_data, "layout", "catalog")
+    if layout not in LAYOUTS:
+        raise WebInputError(f"Unsupported layout: {layout}.")
 
     sort = _single_value(form_data, "sort", "newest")
     if sort not in SORT_OPTIONS:
@@ -237,7 +245,12 @@ def build_request_config(
     if csv_safe and export_format != "csv":
         raise WebInputError("CSV formula protection requires the csv format.")
 
+    if layout == "files" and export_format != "markdown":
+        raise WebInputError("The files layout writes Markdown: choose the markdown format.")
+
     compare_file = _single_value(form_data, "compare_file").strip()
+    if layout == "files" and compare_file:
+        raise WebInputError("The files layout writes a folder, so it cannot be compared.")
     compare_path = _resolve_compare_path(compare_file, mode) if compare_file else None
     selected_extras = form_data.get("extra_fields", [])
     try:
@@ -282,6 +295,7 @@ def build_request_config(
         compare_path=compare_path,
         extra_fields=extra_fields,
         item_type=item_type,
+        layout=layout,
     )
 
 
@@ -291,6 +305,7 @@ def run_export(
     fetcher: FetchPrompts = fetch_prompts,
     writer: WriteExport = write_export,
     counter: CountWrittenRecords = count_written_records,
+    files_writer: FilesWriter = write_markdown_files,
 ) -> WebExportResult:
     """Fetch, filter, sort, write, and validate exports for one web request."""
     profile, records = fetcher(
@@ -338,6 +353,24 @@ def run_export(
             diff = compare_catalogs(previous, filter_records(selected_records, modes[0]))
         for mode in modes:
             filtered = filter_records(selected_records, mode)
+            if request.layout == "files":
+                folder = files_writer(
+                    request.output_dir,
+                    profile.username,
+                    mode,
+                    filtered,
+                    extra_fields=request.extra_fields,
+                    item_type=request.item_type,
+                    timestamp=timestamp,
+                )
+                present = count_files(folder, unique_names(filtered))
+                if present != len(filtered):
+                    raise WebInputError(
+                        f"Validation failed for {folder}: "
+                        f"expected {len(filtered)}, wrote {present}."
+                    )
+                exported_files.append(ExportedFile(mode=mode, path=folder, count=present))
+                continue
             output_path = writer(
                 request.output_dir,
                 profile.username,
@@ -609,6 +642,10 @@ def render_form(
         <div>
           <label for="item_type">Kind</label>
           {render_select("item_type", ITEM_TYPES, request.item_type)}
+        </div>
+        <div>
+          <label for="layout">Layout</label>
+          {render_select("layout", LAYOUTS, request.layout)}
         </div>
         <div>
           <label for="mode">Mode</label>
@@ -1160,7 +1197,13 @@ def _content_disposition_name(filename: str) -> str:
 
 
 def _download_href(path: Path) -> str | None:
-    """Build a /download link for a path inside the working directory."""
+    """Build a /download link for a file inside the working directory.
+
+    A folder (the files layout) has no download: it is on disk in the output
+    directory, and /download serves single export files only.
+    """
+    if path.is_dir():
+        return None
     try:
         relative = path.resolve().relative_to(Path.cwd().resolve())
     except ValueError:

@@ -89,6 +89,12 @@ inputs:
       Requires mode all, text, or image.
     required: false
     default: ""
+  layout:
+    description: >-
+      Use files to write one Markdown file per prompt, with YAML front matter,
+      into a folder per catalog. Empty means one file per catalog.
+    required: false
+    default: ""
   extra-fields:
     description: >-
       Optional comma-separated extra fields to include, or all: tags, engine,
@@ -274,6 +280,7 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
         OVERWRITE: ${{ inputs.overwrite }}
         UPDATE_FILE: ${{ inputs.update-file }}
+        LAYOUT: ${{ inputs.layout }}
         EXTRA_FIELDS: ${{ inputs.extra-fields }}
         CSV_SAFE: ${{ inputs.csv-safe }}
         COMPARE_CSV_SAFE: ${{ inputs.compare-csv-safe }}
@@ -377,6 +384,10 @@ runs:
 
         if [[ -n "$LIMIT" ]]; then
           args+=("--limit" "$LIMIT")
+        fi
+
+        if [[ -n "$LAYOUT" ]]; then
+          args+=("--layout" "$LAYOUT")
         fi
 
         if [[ -n "$EXTRA_FIELDS" ]]; then

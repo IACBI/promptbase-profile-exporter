@@ -35,6 +35,7 @@ from .formatting import (
     write_export,
     write_export_to_path,
 )
+from .layout import LAYOUTS, count_files, unique_names, write_markdown_files
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
 from .pipeline import Selection, split_modes, without_description
 
@@ -64,6 +65,7 @@ class RunOptions:
     output_file: Path | None
     compare_path: Path | None
     overwrite_output: bool
+    layout: str = "catalog"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -119,6 +121,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Which kind of listing to export: prompts (default), bundles, or apps. "
             "Filenames say which (for example acb_all_bundles.json)."
+        ),
+    )
+    parser.add_argument(
+        "--layout",
+        choices=LAYOUTS,
+        default="catalog",
+        help=(
+            "'catalog' (default) writes one file per catalog. 'files' writes one Markdown "
+            "file per prompt, with YAML front matter, into a folder per catalog."
         ),
     )
     parser.add_argument(
@@ -389,6 +400,8 @@ def export_profile(
             if args.item_type != "prompt":
                 print(f"Item type: {args.item_type}")
             print(f"Format: {options.export_format}")
+            if options.layout != "catalog":
+                print(f"Layout: {options.layout}")
             print(f"Sort: {args.sort}")
             print(f"Output directory: {output_dir}")
             if options.output_file:
@@ -480,6 +493,13 @@ def export_profile(
 
     for mode in modes:
         filtered = filter_records(selected_records, mode)
+        if options.layout == "files":
+            written_count = write_files_for_mode(
+                output_dir, profile.username, mode, filtered, options, args, timestamp
+            )
+            if written_count is None:
+                return EXIT_ERROR
+            continue
         try:
             output_path = write_export(
                 output_dir,
@@ -506,12 +526,53 @@ def export_profile(
     return EXIT_SUCCESS
 
 
+def write_files_for_mode(
+    output_dir: Path,
+    username: str,
+    mode: str,
+    records: list[PromptRecord],
+    options: RunOptions,
+    args: argparse.Namespace,
+    timestamp: str | None,
+) -> int | None:
+    """Write one mode's per-prompt files and check them; return the count, or None on error."""
+    try:
+        directory = write_markdown_files(
+            output_dir,
+            username,
+            mode,
+            records,
+            extra_fields=options.extra_fields,
+            item_type=args.item_type,
+            timestamp=timestamp,
+        )
+    except OSError as exc:
+        print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
+        return None
+    written = count_files(directory, unique_names(records))
+    if written != len(records):
+        print(
+            f"error: validation failed for {directory}: expected {len(records)}, wrote {written}",
+            file=sys.stderr,
+        )
+        return None
+    if not args.quiet:
+        print(f"Wrote {mode:>5}: {written:>4} {ITEM_TYPE_PLURALS[args.item_type]} -> {directory}")
+    return written
+
+
 def normalize_options(args: argparse.Namespace) -> RunOptions:
     # Order-preserving de-duplication: the same profile twice would only
     # rewrite the same files.
     profiles = list(dict.fromkeys(profile.strip() for profile in args.profiles))
     if not all(profiles):
         raise ValueError("profile cannot be empty")
+    if args.layout == "files" and (args.output_file or args.compare or args.update_file):
+        # First, so this is the error named rather than one about --mode or a missing file.
+        raise ValueError(
+            "--layout files writes a folder of files, so it cannot be used with "
+            "--output-file, --compare, or --update-file"
+        )
     if len(profiles) > 1 and (args.output_file or args.update_file or args.compare):
         raise ValueError(
             "--output-file, --compare, and --update-file take a single profile"
@@ -575,6 +636,12 @@ def normalize_options(args: argparse.Namespace) -> RunOptions:
         export_format = infer_format_from_path(output_file)
     else:
         export_format = args.format or "txt"
+    if args.layout == "files":
+        if args.format not in (None, "markdown"):
+            raise ValueError(
+                "--layout files writes Markdown: use --format markdown or omit --format"
+            )
+        export_format = "markdown"
     # Output escaping and input decoding are separate on purpose: a safe export
     # may be compared with a plain catalog and vice versa.
     if args.csv_safe and export_format != "csv":
@@ -618,6 +685,7 @@ def normalize_options(args: argparse.Namespace) -> RunOptions:
         output_file=output_file,
         compare_path=compare_path,
         overwrite_output=overwrite_output,
+        layout=args.layout,
     )
 
 

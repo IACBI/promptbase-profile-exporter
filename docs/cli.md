@@ -240,6 +240,56 @@ embeds the full records as JSON, so it works with `--compare`,
 pb @acb --mode all --format html    # -> exports/acb_all_prompts.html
 ```
 
+### One file per prompt
+
+`--layout files` writes one Markdown file per prompt instead of one file per
+catalog, which suits note tools that index front matter (Obsidian, a Git-based
+wiki, a Notion import). Each catalog gets its own folder, named like the catalog
+file without the extension:
+
+```bash
+pb @acb --layout files --mode all --extra-fields tags
+# -> exports/acb_all_prompts/3d-clay-ui-icons-2.md, exports/acb_all_prompts/...
+```
+
+```markdown
+---
+title: "3D Clay UI Icons"
+slug: "3d-clay-ui-icons-2"
+url: "https://promptbase.com/prompt/3d-clay-ui-icons-2"
+price: 4.99
+tags: ["3d", "icons", "cute"]
+---
+
+# 3D Clay UI Icons
+
+Transform your digital interfaces with ...
+```
+
+- The front matter holds every field of the JSON format except the description,
+  which is the body. Values are written as JSON scalars, which are valid YAML, so
+  every string is quoted and escaped: a title such as `yes` or `2026-01-01` is
+  never read back as a boolean or a date.
+- **File names** come from the prompt's slug alone, made safe: a lowercase slug
+  that is already plain (every real one) is its own file name. Any other slug
+  keeps a safe form (anything but letters, digits, `.`, `_`, and `-` becomes `_`,
+  a leading dot is dropped, a name Windows reserves such as `CON` or `NUL` gets a
+  `_`) plus a short digest of the original, for example `a_b-3f2a1c8d.md`. Two
+  slugs that sanitise alike, or differ only by case, therefore never share a
+  name, a slug can never write outside its folder, and a prompt's file does not
+  change when a later run selects or sorts other prompts.
+- **Front matter** escapes the characters a YAML reader would alter or refuse:
+  U+0085 and the U+007F to U+009F controls, U+2028, U+2029, and U+FEFF are written
+  as `\uXXXX`, so the values read back exactly.
+- **Nothing is deleted.** A run replaces the files it writes (each atomically) and
+  leaves the rest, including files of your own and files for prompts that have
+  since been removed.
+- It needs Markdown (`--format` may be left out) and cannot be combined with
+  `--output-file`, `--compare`, or `--update-file`, which work on a single
+  catalog file. The web UI offers it as "Layout" (it needs the markdown format and
+  has no download link for a folder). `--timestamp-filenames` adds the timestamp
+  to the folder name.
+
 ### Extra fields
 
 `--extra-fields` adds PromptBase values that the default export leaves out.
@@ -468,6 +518,7 @@ pb @acb --quiet          # print nothing except errors
 | `--config` | none | Read options from a `.json` or `.toml` file; the command line overrides it. See [Configuration file](#configuration-file). |
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
+| `--layout` | `catalog` | `catalog` writes one file per catalog; `files` writes one Markdown file per prompt into a folder per catalog. See [One file per prompt](#one-file-per-prompt). |
 | `--item-type` | `prompt` | Kind of listing to export: `prompt`, `bundle`, or `app`. |
 | `-f`, `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html`. Inferred from the extension with `--output-file`/`--update-file`; with `--update-file` it must match that extension. |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |

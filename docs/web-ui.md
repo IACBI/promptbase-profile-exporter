@@ -2,7 +2,8 @@
 
 A small built-in web interface for running exports from the browser. Its form
 covers the export options of the [command line](cli.md): kind (prompts,
-bundles, or apps), mode, format
+bundles, or apps), layout (one file per catalog, or one Markdown file per
+prompt), mode, format
 (including the searchable HTML catalog), sort, filters (among them minimum
 sales and rating), limit, extra fields, timestamped filenames, partial
 exports, and CSV formula protection. It adds a download link for each file it writes.
