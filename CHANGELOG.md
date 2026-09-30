@@ -21,7 +21,8 @@ All notable changes to this project will be documented in this file.
   anything typed on the command line overrides them. A problem in the file stops
   the run before anything is fetched and names the file. The `profile` argument
   is now optional when the file lists `profiles`; with neither, the usual usage
-  error (exit code 2) is shown.
+  error (exit code 2) is shown. Profiles and options may now alternate on the
+  command line (`pb @a --mode all @b`), which used to be rejected.
 
 ## 0.10.0 - 2026-09-30
 

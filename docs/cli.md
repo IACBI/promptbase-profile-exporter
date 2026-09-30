@@ -65,10 +65,11 @@ quiet = true
 pb --config promptbase.toml                 # the file alone
 pb --config promptbase.toml --limit 10      # the command line wins
 pb @other --config promptbase.toml          # profiles given here replace the file's
+pb @a --config promptbase.toml @b           # profiles and options may alternate
 ```
 
 - **Values** are text, numbers, or `true`/`false` for on/off options such as
-  `dry_run`. The comma-separated options (`domain`, `type`, `extra_fields`) also
+  `dry_run`, and may start with a hyphen (a folder called `-exports`). The comma-separated options (`domain`, `type`, `extra_fields`) also
   accept a list, and so does `diff_output`. `null` is ignored. Nested tables are
   not supported.
 - **Precedence:** the file supplies defaults and anything on the command line

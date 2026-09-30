@@ -108,8 +108,7 @@ class SplitConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             arguments,
-            ["--mode", "all", "--output-dir", "out", "--limit", "5", "--min-price", "2.5",
-             "--dry-run"],
+            ["--mode=all", "--output-dir=out", "--limit=5", "--min-price=2.5", "--dry-run"],
         )
         self.assertEqual(profiles, [])
 
@@ -122,20 +121,31 @@ class SplitConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             arguments,
-            ["--domain", "text,image", "--type", "gpt", "--extra-fields", "tags,engine"],
+            ["--domain=text,image", "--type=gpt", "--extra-fields=tags,engine"],
         )
 
     def test_a_repeatable_option_takes_one_value_or_several(self):
-        self.assertEqual(self.split({"diff_output": "a.md"})[0], ["--diff-output", "a.md"])
+        self.assertEqual(self.split({"diff_output": "a.md"})[0], ["--diff-output=a.md"])
         self.assertEqual(
             self.split({"diff_output": ["a.md", "b.json"]})[0],
-            ["--diff-output", "a.md", "--diff-output", "b.json"],
+            ["--diff-output=a.md", "--diff-output=b.json"],
         )
 
     def test_profiles_are_returned_separately(self):
         self.assertEqual(self.split({"profiles": "@acb"}), ([], ["@acb"]))
         self.assertEqual(self.split({"profiles": ["@a", "@b"], "mode": "all"}),
-                         (["--mode", "all"], ["@a", "@b"]))
+                         (["--mode=all"], ["@a", "@b"]))
+
+    def test_null_profiles_leave_them_unset(self):
+        self.assertEqual(self.split({"profiles": None, "mode": "all"}), (["--mode=all"], []))
+
+    def test_a_value_may_start_with_a_hyphen_or_hold_an_equals_sign(self):
+        arguments, _ = self.split({"output_dir": "-exports", "since": "a=b", "domain": ["-x"]})
+        self.assertEqual(arguments, ["--output-dir=-exports", "--since=a=b", "--domain=-x"])
+        parsed = build_parser().parse_intermixed_args([*arguments, "@acb"])
+        self.assertEqual(
+            (parsed.output_dir, parsed.since, parsed.domain), ("-exports", "a=b", "-x")
+        )
 
     def test_unusable_settings_are_named(self):
         cases = {
@@ -292,6 +302,45 @@ class ConfigInTheCommandTests(unittest.TestCase):
             code, _, _ = run(["--config", str(config)])
             written = sorted(p.name for p in (Path(directory) / "out").iterdir())
         self.assertEqual((code, written), (0, ["acb_all_prompts.csv"]))
+
+    def test_a_file_value_starting_with_a_hyphen_reaches_the_command(self):
+        with TemporaryDirectory() as directory, self.fetch():
+            config = write_config(directory, "c.json", {
+                "profiles": ["@acb"], "mode": "all", "output_dir": "-exports", "dry_run": True,
+                "quiet": True,
+            })
+            code, _, stderr = run(["--config", str(config)])
+        self.assertEqual((code, stderr), (0, ""))
+
+    def test_null_profiles_do_not_stop_the_command_line_from_supplying_them(self):
+        with TemporaryDirectory() as directory, self.fetch() as fetch:
+            config = write_config(directory, "c.json", {"profiles": None, "dry_run": True})
+            code, _, _ = run(["@acb", "--config", str(config), "--quiet"])
+            no_profile, _, stderr = run(["--config", str(config)])
+        self.assertEqual(code, 0)
+        self.assertEqual(fetch.call_args.args[0], "@acb")
+        self.assertEqual(no_profile, 2)
+        self.assertIn("required: profile", stderr)
+
+    def test_profiles_and_options_may_alternate(self):
+        with TemporaryDirectory() as directory, self.fetch() as fetch:
+            config = write_config(directory, "c.json", {"mode": "all", "quiet": True})
+            code, _, _ = run(["@a", "--config", str(config), "@b", "--dry-run", "@c"])
+        self.assertEqual(code, 0)
+        self.assertEqual([call.args[0] for call in fetch.call_args_list], ["@a", "@b", "@c"])
+
+    def test_alternating_works_without_a_config_file_too(self):
+        with self.fetch() as fetch:
+            code, _, _ = run(["@a", "--mode", "all", "@b", "--dry-run", "--quiet"])
+        self.assertEqual(code, 0)
+        self.assertEqual([call.args[0] for call in fetch.call_args_list], ["@a", "@b"])
+
+    def test_exclusive_options_are_still_enforced_when_intermixed(self):
+        with self.fetch() as fetch:
+            code, _, stderr = run(["@a", "--free-only", "@b", "--paid-only"])
+        self.assertEqual(code, 2)
+        self.assertIn("not allowed with argument", stderr)
+        fetch.assert_not_called()
 
     def test_an_abbreviated_option_does_not_silently_drop_the_file(self):
         # The file says quiet; if --conf were not recognised as --config, the run

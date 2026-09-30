@@ -302,8 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    # The file's options come first, so the command line overrides them.
-    args = parser.parse_args([*config_arguments, *raw_argv])
+    # The file's options come first, so the command line overrides them. Intermixed
+    # parsing lets profiles and options alternate: `pb @a --mode all @b`.
+    args = parser.parse_intermixed_args([*config_arguments, *raw_argv])
     if not args.profiles:
         if not config_profiles:
             parser.error("the following arguments are required: profile")

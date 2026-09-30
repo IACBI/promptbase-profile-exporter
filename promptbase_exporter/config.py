@@ -87,6 +87,8 @@ def split_config(
 
 
 def _profiles(value: Any) -> list[str]:
+    if value is None:  # like every other setting, null leaves it unset
+        return []
     items = [value] if isinstance(value, str) else value
     if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
         raise ConfigError("'profiles' must be a profile or a list of profiles")
@@ -101,12 +103,14 @@ def _tokens(key: str, option: str, action: argparse.Action, value: Any) -> list[
         if not isinstance(value, bool):
             raise ConfigError(f"{key!r} must be true or false")
         return [flag] if value else []
+    # The --option=value form, not two tokens: a value that starts with a hyphen
+    # (a directory called "-exports") would otherwise be read as another option.
     if isinstance(action, argparse._AppendAction):  # noqa: SLF001
         values = value if isinstance(value, list) else [value]
-        return [token for item in values for token in (flag, _scalar(key, item))]
+        return [f"{flag}={_scalar(key, item)}" for item in values]
     if isinstance(value, list) and option in COMMA_LIST_OPTIONS:
-        return [flag, ",".join(_scalar(key, item) for item in value)]
-    return [flag, _scalar(key, value)]
+        return [f"{flag}={','.join(_scalar(key, item) for item in value)}"]
+    return [f"{flag}={_scalar(key, value)}"]
 
 
 def _scalar(key: str, value: Any) -> str:
@@ -142,6 +146,6 @@ def find_config_path(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Pa
     is found too; a separate finder that disagreed would leave the file unread
     without a word.
     """
-    known, _ = parser.parse_known_args(list(argv))
+    known, _ = parser.parse_known_intermixed_args(list(argv))
     config = known.config
     return config if isinstance(config, Path) else None
