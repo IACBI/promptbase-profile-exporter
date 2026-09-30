@@ -4,8 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-30
+
 ### Added
 
+- `--config FILE` reads options from a `.json` or `.toml` file (TOML needs
+  Python 3.11 or newer), with the long option names as keys plus `profiles`, so
+  a recurring export is one short command. The file's entries become command-line
+  arguments in front of the real ones, so they go through the same validation and
+  anything typed on the command line overrides them. A problem in the file stops
+  the run before anything is fetched and names the file. The `profile` argument
+  is now optional when the file lists `profiles`; with neither, the usual usage
+  error (exit code 2) is shown. Profiles and options may now alternate on the
+  command line (`pb @a --mode all @b`), which used to be rejected.
+- A new `ndjson` format (`--format ndjson`, `.ndjson`; `.jsonl` is accepted on
+  input and inferred from `--output-file`): one compact JSON object per line
+  with the JSON format's fields and no enclosing array, for `jq -c`,
+  `pandas.read_json(lines=True)`, and warehouse loaders. U+2028, U+2029, and
+  U+0085, which `str.splitlines()` treats as line breaks, are escaped so a
+  record is always one physical line. It works with `--compare`,
+  `--update-file`, `pb-diff`, `pb-convert`, the web UI, and the Action, and
+  each line of a written file is checked.
 - `--layout files` (Action input `layout`) writes one Markdown file per prompt
   instead of one file per catalog, into a folder per catalog
   (`exports/acb_all_prompts/<slug>.md`), for note tools that index front matter.
@@ -19,23 +38,6 @@ All notable changes to this project will be documented in this file.
   matter so a YAML reader reads every value back exactly. It needs Markdown and
   cannot be combined with `--output-file`, `--compare`, or `--update-file`. The web
   UI has a "Layout" list for it.
-- A new `ndjson` format (`--format ndjson`, `.ndjson`; `.jsonl` is accepted on
-  input and inferred from `--output-file`): one compact JSON object per line
-  with the JSON format's fields and no enclosing array, for `jq -c`,
-  `pandas.read_json(lines=True)`, and warehouse loaders. U+2028, U+2029, and
-  U+0085, which `str.splitlines()` treats as line breaks, are escaped so a
-  record is always one physical line. It works with `--compare`,
-  `--update-file`, `pb-diff`, `pb-convert`, the web UI, and the Action, and
-  each line of a written file is checked.
-- `--config FILE` reads options from a `.json` or `.toml` file (TOML needs
-  Python 3.11 or newer), with the long option names as keys plus `profiles`, so
-  a recurring export is one short command. The file's entries become command-line
-  arguments in front of the real ones, so they go through the same validation and
-  anything typed on the command line overrides them. A problem in the file stops
-  the run before anything is fetched and names the file. The `profile` argument
-  is now optional when the file lists `profiles`; with neither, the usual usage
-  error (exit code 2) is shown. Profiles and options may now alternate on the
-  command line (`pb @a --mode all @b`), which used to be rejected.
 
 ## 0.10.0 - 2026-09-30
 
