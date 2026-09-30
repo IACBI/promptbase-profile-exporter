@@ -32,6 +32,8 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `client.py` — public PromptBase/Firestore access: profile resolution,
   paginated queries, retry/backoff, and schema-drift detection.
 - `dates.py` — shared `parse_datetime_ms` (used by both `cli.py` and `web.py`).
+- `config.py` — `--config`: turns a JSON/TOML file into argv (validated by argparse itself,
+  put in front of the real arguments so the command line wins); errors name the file.
 - `layout.py` — `--layout files`: one Markdown file per prompt with JSON-scalar (valid YAML)
   front matter; `safe_stem` turns a remote slug into a safe file name. Never deletes files.
 - `console.py` — `make_output_safe()`, called first thing by every entry point, so a

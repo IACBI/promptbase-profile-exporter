@@ -23,6 +23,15 @@ All notable changes to this project will be documented in this file.
   record is always one physical line. It works with `--compare`,
   `--update-file`, `pb-diff`, `pb-convert`, the web UI, and the Action, and
   each line of a written file is checked.
+- `--config FILE` reads options from a `.json` or `.toml` file (TOML needs
+  Python 3.11 or newer), with the long option names as keys plus `profiles`, so
+  a recurring export is one short command. The file's entries become command-line
+  arguments in front of the real ones, so they go through the same validation and
+  anything typed on the command line overrides them. A problem in the file stops
+  the run before anything is fetched and names the file. The `profile` argument
+  is now optional when the file lists `profiles`; with neither, the usual usage
+  error (exit code 2) is shown. Profiles and options may now alternate on the
+  command line (`pb @a --mode all @b`), which used to be rejected.
 
 ## 0.10.0 - 2026-09-30
 

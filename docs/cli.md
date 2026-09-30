@@ -42,6 +42,50 @@ pb @acb @dreamydesigns emanema --format json
 `--output-file`, `--compare`, and `--update-file` each describe one catalog, so
 they take a single profile.
 
+## Configuration file
+
+`--config FILE` reads options from a `.json` or `.toml` file, so a recurring
+export is one short command. TOML needs Python 3.11 or newer, which is where the
+standard library can read it; on Python 3.10 use JSON. The keys are the long
+option names without the leading dashes (`-` or `_`, as you prefer), plus
+`profiles`:
+
+```toml
+# promptbase.toml
+profiles = ["@acb", "@dreamydesigns"]
+mode = "all"
+format = "json"
+output_dir = "catalogs"
+extra_fields = ["tags", "unique_sales"]
+sort = "sales"
+quiet = true
+```
+
+```bash
+pb --config promptbase.toml                 # the file alone
+pb --config promptbase.toml --limit 10      # the command line wins
+pb @other --config promptbase.toml          # profiles given here replace the file's
+pb @a --config promptbase.toml @b           # profiles and options may alternate
+```
+
+- **Values** are text, numbers, or `true`/`false` for on/off options such as
+  `dry_run`, and may start with a hyphen (a folder called `-exports`). The comma-separated options (`domain`, `type`, `extra_fields`) also
+  accept a list, and so does `diff_output`. `null` is ignored. Nested tables are
+  not supported.
+- **Precedence:** the file supplies defaults and anything on the command line
+  overrides it. `diff_output` is repeatable, so the command line adds to the
+  file's reports rather than replacing them. An on/off option set in the file
+  cannot be switched off from the command line, and two options that exclude each
+  other (`free_only` and `--paid-only`) conflict; edit the file or use another.
+- **Paths** in the file are relative to the directory you run `pb` from, as they
+  are on the command line, not to the file.
+- **Validation:** the file goes through the same checks as the command line
+  (choices, number types, exclusive options), and a problem stops the run before
+  anything is fetched, with an error that names the file, for example
+  `error: promptbase.toml: argument -f/--format: invalid choice: 'yaml'`.
+- Only `pb` reads it. The Action has its own inputs, and `pb-web`, `pb-diff`, and
+  `pb-convert` take their options on the command line.
+
 ## Prompts, bundles, and apps
 
 A profile lists more than prompts. `--item-type` picks the kind of listing to
@@ -462,7 +506,8 @@ pb @acb --quiet          # print nothing except errors
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `profile` (positional) | required | PromptBase profile URL (with or without `https://`), path, username, or `@username`. Repeat to export several profiles. |
+| `profile` (positional) | required, unless `--config` lists `profiles` | PromptBase profile URL (with or without `https://`), path, username, or `@username`. Repeat to export several profiles. |
+| `--config` | none | Read options from a `.json` or `.toml` file; the command line overrides it. See [Configuration file](#configuration-file). |
 | `-m`, `--mode` | `split` | `split`, `all`, `text`, or `image`. Aliases: `text-only`, `image-only`. |
 | `-o`, `--output-dir` | `exports` | Directory for generated files. |
 | `--layout` | `catalog` | `catalog` writes one file per catalog; `files` writes one Markdown file per prompt into a folder per catalog. See [One file per prompt](#one-file-per-prompt). |
