@@ -127,13 +127,9 @@ class DiffingTests(unittest.TestCase):
             html_loaded = load_catalog(html_path)
             csv_loaded = load_catalog(csv_path)
 
-        self.assertEqual([item["title"] for item in html_loaded], [r.title for r in records])
-        # CSV cells are kept exactly as stored; the comparison, not the loader,
-        # knows that "'=Formula title" is the safe spelling of "=Formula title".
-        self.assertEqual(
-            [item["title"] for item in csv_loaded], ["'=Formula title", "<b>Markup</b>"]
-        )
+        # The safe CSV's BOM tells the loader to undo the escape exactly.
         for loaded in (html_loaded, csv_loaded):
+            self.assertEqual([item["title"] for item in loaded], [r.title for r in records])
             self.assertFalse(compare_catalogs(loaded, records).has_changes)
 
     def test_load_catalog_rejects_unknown_extension(self):
@@ -315,6 +311,67 @@ class CsvApostropheTests(unittest.TestCase):
         # Outside CSV an apostrophe is always data.
         diff = compare_catalog_records([row("'=x", slug="a")], [row("=x", slug="a")])
         self.assertEqual(diff.changed[0].fields, ("title",))
+
+    def test_removed_real_apostrophe_is_reported_against_plain_csv(self):
+        # Codex: an older "'=x" and a newer plain-CSV "=x" must not look equal.
+        with TemporaryDirectory() as directory:
+            plain = write_export(Path(directory), "a", "all", self._records(["=x"]), "csv")
+            current = load_catalog(plain)
+
+        diff = compare_catalog_records([row("'=x", slug="s0", description="d")], current)
+        self.assertEqual(diff.changed[0].fields, ("title",))
+
+    def test_plain_csv_is_read_verbatim(self):
+        with TemporaryDirectory() as directory:
+            path = write_export(Path(directory), "a", "all", self._records(["'=x"]), "csv")
+            self.assertEqual(load_catalog(path)[0]["title"], "'=x")
+
+    def test_safe_csv_matches_slugless_txt_by_title(self):
+        # Codex: TXT has no slug, so records are matched by title; the safe
+        # CSV's escaped title must still match.
+        records = self._records(["=Formula", "normal"])
+        with TemporaryDirectory() as directory:
+            safe = load_catalog(
+                write_export(Path(directory) / "s", "a", "all", records, "csv", csv_safe=True)
+            )
+            txt = load_catalog(write_export(Path(directory) / "t", "a", "all", records, "txt"))
+
+        for previous, current in ((safe, txt), (txt, safe)):
+            diff = compare_catalog_records(previous, current)
+            self.assertFalse(diff.has_changes)
+            self.assertEqual(diff.unchanged, 2)
+
+
+class MarkdownPlaceholderTests(unittest.TestCase):
+    def test_unknown_placeholder_is_missing_metadata(self):
+        # Codex: Markdown writes empty type/domain as "unknown".
+        records = [PromptRecord("A", "d", "a", "", "", 1, 2.0)]
+        with TemporaryDirectory() as directory:
+            markdown = load_catalog(
+                write_export(Path(directory), "x", "all", records, "markdown")
+            )
+            rich = load_catalog(write_export(Path(directory), "x", "all", records, "json"))
+
+        self.assertEqual((markdown[0]["type"], markdown[0]["domain"]), ("", ""))
+        self.assertFalse(compare_catalog_records(markdown, rich).has_changes)
+        self.assertFalse(compare_catalog_records(rich, markdown).has_changes)
+
+    def test_markdown_type_that_is_cleared_is_reported(self):
+        with TemporaryDirectory() as directory:
+            before = load_catalog(
+                write_export(
+                    Path(directory) / "b", "x", "all",
+                    [PromptRecord("A", "d", "a", "gpt", "text", 1, 2.0)], "markdown",
+                )
+            )
+            after = load_catalog(
+                write_export(
+                    Path(directory) / "a", "x", "all",
+                    [PromptRecord("A", "d", "a", "", "text", 1, 2.0)], "markdown",
+                )
+            )
+
+        self.assertEqual(compare_catalog_records(before, after).changed[0].fields, ("type",))
 
 
 class DiffReportTests(unittest.TestCase):

@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from promptbase_exporter.formatting import (
+    CSV_SAFE_MARKER,
     HTML_DATA_ELEMENT_ID,
     RECORD_FIELDS,
     count_written_records,
@@ -325,7 +326,9 @@ class CsvSafeTests(unittest.TestCase):
             ],
             safe=True,
         )
-        row = next(csv.DictReader(io.StringIO(text)))
+        # The BOM marks the file as --csv-safe (and helps Excel pick UTF-8).
+        self.assertTrue(text.startswith(CSV_SAFE_MARKER))
+        row = next(csv.DictReader(io.StringIO(text.removeprefix(CSV_SAFE_MARKER))))
 
         self.assertEqual(row["title"], '\'=HYPERLINK("http://evil.example","x")')
         self.assertEqual(row["description"], "'@SUM(A1:A2)")
@@ -345,6 +348,7 @@ class CsvSafeTests(unittest.TestCase):
 
     def test_without_safe_flag_cells_are_verbatim(self):
         text = format_records_as_csv([hostile_record("=1+1", "d")])
+        self.assertFalse(text.startswith(CSV_SAFE_MARKER))
         self.assertEqual(next(csv.DictReader(io.StringIO(text)))["title"], "=1+1")
 
     def test_unescape_reverses_escape_only_for_formula_prefixes(self):

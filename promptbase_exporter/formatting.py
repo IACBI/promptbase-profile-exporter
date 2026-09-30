@@ -53,6 +53,10 @@ FORMAT_EXTENSIONS = {
 # Spreadsheet apps evaluate a cell that starts with one of these as a formula
 # (CSV/formula injection). --csv-safe prefixes such text cells with "'".
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+# A --csv-safe CSV starts with a UTF-8 byte order mark. It is the marker that
+# lets the loader undo the escaping exactly (a plain CSV is read verbatim), and
+# it is also what makes Excel open a UTF-8 CSV with the right encoding.
+CSV_SAFE_MARKER = "\ufeff"
 # The HTML export embeds the full records as JSON in this element so the
 # catalog can be loaded back for --compare/--update-file.
 HTML_DATA_ELEMENT_ID = "promptbase-catalog-data"
@@ -211,6 +215,8 @@ def format_records_as_csv(records: list[PromptRecord], *, safe: bool = False) ->
             {key: csv_escape_formula(value) for key, value in row.items()} for row in rows
         ]
     output = io.StringIO()
+    if safe:
+        output.write(CSV_SAFE_MARKER)
     writer = csv.DictWriter(output, fieldnames=RECORD_FIELDS, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
@@ -482,7 +488,7 @@ def count_written_records(path: Path, export_format: str) -> int:
     if export_format == "json":
         return len(json.loads(text))
     if export_format == "csv":
-        return sum(1 for _ in csv.DictReader(io.StringIO(text)))
+        return sum(1 for _ in csv.DictReader(io.StringIO(text.removeprefix(CSV_SAFE_MARKER))))
     if export_format == "html":
         # Descriptions are HTML-escaped, so this marker only ever comes from
         # the writer itself. The rendered list and the embedded data must agree.
