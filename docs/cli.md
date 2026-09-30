@@ -302,7 +302,7 @@ pb @acb --quiet          # print nothing except errors
 | `--timestamp-filenames` | off | Append `_YYYYMMDD_HHMMSS` to generated filenames. |
 | `--output-file` | none | Write a single catalog to this exact path. Needs `--mode all`, `text`, or `image`. |
 | `--overwrite` | off | Allow `--output-file` to replace an existing file. |
-| `--compare` | none | Compare against an existing JSON, CSV, TXT, or Markdown catalog. |
+| `--compare` | none | Compare against an existing JSON, CSV, TXT, Markdown, or HTML catalog. |
 | `--diff-output` | none | Also write the comparison report to this path: JSON for `.json`, Markdown otherwise. Repeatable. Needs `--compare` or `--update-file`. |
 | `--fail-on-diff` | off | Exit with code `2` when the comparison finds changes. |
 | `--update-file` | none | Compare against an existing catalog and rewrite it in place. The rewrite is atomic, so a failed write leaves the old catalog intact. Needs `--mode all`, `text`, or `image`. |

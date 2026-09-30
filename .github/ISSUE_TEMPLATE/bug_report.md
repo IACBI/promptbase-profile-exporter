@@ -27,7 +27,7 @@ What happened instead?
 ## Environment
 
 - OS:
-- Surface (CLI, web UI, or GitHub Action):
+- Surface (CLI, pb-diff, web UI, or GitHub Action):
 - Python version:
 - Exporter version (`pb --version`):
 
