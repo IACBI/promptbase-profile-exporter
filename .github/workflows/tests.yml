@@ -31,6 +31,9 @@ jobs:
       - run: python -m mypy
       - run: python -m coverage run -m unittest discover -s tests
       - run: python -m coverage report
+      # The default output directory is relative; a test that forgets to set one
+      # would leave it in the checkout. Every module that runs a command has a guard.
+      - run: test ! -e exports
       - run: python -m promptbase_exporter --version
       - run: python -m promptbase_exporter --help
       - run: promptbase-export-web --version

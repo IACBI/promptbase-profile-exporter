@@ -19,11 +19,16 @@ from promptbase_exporter.layout import (
     write_markdown_files,
 )
 from promptbase_exporter.models import EXTRA_FIELDS, Profile, PromptRecord
+from tests.scratch import use_scratch_working_directory
 
 try:
     yaml = importlib.import_module("yaml")
 except ModuleNotFoundError:
     yaml = None
+
+
+def setUpModule():
+    use_scratch_working_directory()
 
 
 def make(slug="one", **overrides):

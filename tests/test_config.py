@@ -16,12 +16,17 @@ from promptbase_exporter.config import (
     split_config,
 )
 from promptbase_exporter.models import Profile, PromptRecord
+from tests.scratch import use_scratch_working_directory
 
 try:
     importlib.import_module("tomllib")
     HAS_TOML = True
 except ModuleNotFoundError:
     HAS_TOML = False
+
+
+def setUpModule():
+    use_scratch_working_directory()
 
 
 def record(slug="a", **overrides):
@@ -283,12 +288,15 @@ class ConfigInTheCommandTests(unittest.TestCase):
             config = write_config(directory, "c.json", {
                 "profiles": ["@acb"], "mode": "all", "compare": str(catalog),
                 "diff_output": str(Path(directory) / "from-file.md"), "quiet": True,
+                "output_dir": str(Path(directory) / "out"),
             })
             code, _, _ = run(["--config", str(config), "--diff-output",
                               str(Path(directory) / "from-cli.json")])
             names = sorted(p.name for p in Path(directory).iterdir())
         self.assertEqual(code, 0)
-        self.assertEqual(names, ["c.json", "catalog.json", "from-cli.json", "from-file.md"])
+        self.assertEqual(
+            names, ["c.json", "catalog.json", "from-cli.json", "from-file.md", "out"]
+        )
 
     @unittest.skipUnless(HAS_TOML, "needs Python 3.11+")
     def test_a_toml_file_works_end_to_end(self):
