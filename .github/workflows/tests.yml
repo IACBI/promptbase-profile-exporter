@@ -101,7 +101,13 @@ jobs:
 
           text = Path("action.yml").read_text(encoding="utf-8")
           script = textwrap.dedent(re.findall(r"\n      run: \|\n((?:        .*\n|\n)+)", text)[2])
-          Path("export-step.sh").write_text(script, encoding="utf-8")
+          # Default every env var the export step declares to empty, as the
+          # runner does for an unset input, so a new input cannot trip set -u
+          # here while the real action is fine.
+          env_block = text[text.index("id: export"):].split("\n      run: |")[0]
+          names = re.findall(r"\n        ([A-Z_]+): ", env_block)
+          prelude = "".join(': "${' + name + ':=}"\n' for name in names)
+          Path("export-step.sh").write_text(prelude + script, encoding="utf-8")
           PY
           mkdir -p stub
           printf '#!/bin/sh\nprintf "%%s\n" "$@"\n' > stub/promptbase-export
