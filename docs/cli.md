@@ -270,17 +270,25 @@ Transform your digital interfaces with ...
   which is the body. Values are written as JSON scalars, which are valid YAML, so
   every string is quoted and escaped: a title such as `yes` or `2026-01-01` is
   never read back as a boolean or a date.
-- **File names** are the prompt's slug, made safe: anything other than letters,
-  digits, `.`, `_`, and `-` becomes `_`, a leading dot is dropped, a name Windows
-  reserves (`CON`, `NUL`, ...) gets a `_` suffix, and two names that differ only
-  by case get a `-2`, `-3` suffix, so a slug can never write outside its folder.
+- **File names** come from the prompt's slug alone, made safe: a lowercase slug
+  that is already plain (every real one) is its own file name. Any other slug
+  keeps a safe form (anything but letters, digits, `.`, `_`, and `-` becomes `_`,
+  a leading dot is dropped, a name Windows reserves such as `CON` or `NUL` gets a
+  `_`) plus a short digest of the original, for example `a_b-3f2a1c8d.md`. Two
+  slugs that sanitise alike, or differ only by case, therefore never share a
+  name, a slug can never write outside its folder, and a prompt's file does not
+  change when a later run selects or sorts other prompts.
+- **Front matter** escapes the characters a YAML reader would alter or refuse:
+  U+0085 and the U+007F to U+009F controls, U+2028, U+2029, and U+FEFF are written
+  as `\uXXXX`, so the values read back exactly.
 - **Nothing is deleted.** A run replaces the files it writes (each atomically) and
   leaves the rest, including files of your own and files for prompts that have
   since been removed.
 - It needs Markdown (`--format` may be left out) and cannot be combined with
   `--output-file`, `--compare`, or `--update-file`, which work on a single
-  catalog file. The web UI does not offer it. `--timestamp-filenames` adds the
-  timestamp to the folder name.
+  catalog file. The web UI offers it as "Layout" (it needs the markdown format and
+  has no download link for a folder). `--timestamp-filenames` adds the timestamp
+  to the folder name.
 
 ### Extra fields
 

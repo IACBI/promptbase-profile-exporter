@@ -10,6 +10,7 @@ date.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -36,6 +37,7 @@ _WINDOWS_RESERVED = frozenset(
     | {f"LPT{number}" for number in range(1, 10)}
 )
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+_YAML_ESCAPED = frozenset({0x2028, 0x2029, 0xFEFF, 0xFFFE, 0xFFFF})
 MAX_STEM_LENGTH = 100
 
 
@@ -52,12 +54,32 @@ def safe_stem(slug: str) -> str:
     return stem
 
 
+def stable_stem(slug: str) -> str:
+    """The file name stem for a slug, decided by the slug alone.
+
+    A lowercase slug that is already safe (every real one) is its own name. Any
+    other slug keeps its safe form plus a short digest of the original, so two
+    slugs that sanitise alike, or differ only by case, never share a name, and a
+    prompt's file is the same whichever other prompts a run happens to select or
+    however it sorts them. A number taken from the other records would not be.
+    """
+    stem = safe_stem(slug)
+    if stem == slug and slug == slug.lower():
+        return stem
+    digest = hashlib.sha256(slug.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"{stem}-{digest}"
+
+
 def unique_names(records: Sequence[PromptRecord]) -> list[str]:
-    """One file name per record, distinct even on a case-insensitive file system."""
+    """One file name per record, each decided by its own slug.
+
+    Only a repeated slug (which a catalog does not contain) gets a number, so the
+    names are still distinct on a case-insensitive file system.
+    """
     used: set[str] = set()
     names = []
     for record in records:
-        base = safe_stem(record.slug)
+        base = stable_stem(record.slug)
         candidate, number = base, 1
         while candidate.casefold() in used:
             number += 1
@@ -65,6 +87,27 @@ def unique_names(records: Sequence[PromptRecord]) -> list[str]:
         used.add(candidate.casefold())
         names.append(f"{candidate}.{FORMAT_EXTENSIONS[FILES_FORMAT]}")
     return names
+
+
+def _yaml_safe(text: str) -> str:
+    """Escape what a YAML reader would alter or refuse inside a double-quoted scalar.
+
+    U+0085, U+2028, and U+2029 are YAML line breaks (U+0085 is folded to a space),
+    and U+007F to U+009F, U+FEFF, U+FFFE, and U+FFFF are outside the characters
+    YAML allows: PyYAML rejects the whole file on one. They are written as
+    ``\\uXXXX`` escapes, which YAML reads back as the same character. A lone
+    surrogate cannot be written at all and becomes U+FFFD.
+    """
+    out = []
+    for character in text:
+        code = ord(character)
+        if 0x7F <= code <= 0x9F or code in _YAML_ESCAPED:
+            out.append(f"\\u{code:04x}")
+        elif 0xD800 <= code <= 0xDFFF:
+            out.append(chr(0xFFFD))
+        else:
+            out.append(character)
+    return "".join(out)
 
 
 def _scalar(value: object) -> str:
@@ -78,7 +121,7 @@ def _scalar(value: object) -> str:
             mantissa, exponent = text.split("e")
             text = f"{mantissa}.0e{exponent}"
         return text
-    return json.dumps(value, ensure_ascii=False)
+    return _yaml_safe(json.dumps(value, ensure_ascii=False))
 
 
 def render_file(

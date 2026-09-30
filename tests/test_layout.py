@@ -114,6 +114,28 @@ class UniqueNamesTests(unittest.TestCase):
         records = [make("x"), make("X"), make("y")]
         self.assertEqual(unique_names(records), unique_names(records))
 
+    def test_a_name_depends_on_its_own_slug_only(self):
+        # Filtering or re-sorting must never move one prompt's file onto another's.
+        weird = [make("a/b"), make("a?b"), make("A"), make("a")]
+        together = dict(zip((r.slug for r in weird), unique_names(weird), strict=True))
+        for subset in ([weird[1]], [weird[1], weird[0]], list(reversed(weird)), weird[2:]):
+            alone = dict(zip((r.slug for r in subset), unique_names(subset), strict=True))
+            for slug, name in alone.items():
+                with self.subTest(slug=slug, subset=len(subset)):
+                    self.assertEqual(name, together[slug])
+        self.assertEqual(len(set(together.values())), 4)
+
+    def test_a_safe_lowercase_slug_is_its_own_file_name(self):
+        self.assertEqual(unique_names([make("glassmorphism-ui-elements-2")]),
+                         ["glassmorphism-ui-elements-2.md"])
+
+    def test_a_changed_slug_keeps_its_safe_form_and_gains_a_digest(self):
+        for slug in ("a/b", "A", "x" * 300, "con"):
+            with self.subTest(slug=slug):
+                name = unique_names([make(slug)])[0]
+                self.assertRegex(name, r"^[A-Za-z0-9._-]+-[0-9a-f]{8}\.md$")
+                self.assertNotEqual(name, f"{slug}.md")
+
 
 class RenderFileTests(unittest.TestCase):
     def test_front_matter_holds_every_field_but_the_description(self):
@@ -159,6 +181,36 @@ class RenderFileTests(unittest.TestCase):
         expected.pop("description")
         self.assertEqual(yaml.safe_load(front), expected)
 
+    def test_characters_yaml_would_alter_or_refuse_are_escaped(self):
+        # U+0085 is folded to a space by a YAML reader, and U+007F..U+009F make a
+        # strict reader reject the whole file; the rest are YAML line breaks or
+        # outside the characters YAML allows.
+        code_points = [*range(0x7F, 0xA0), 0x2028, 0x2029, 0xFEFF, 0xFFFE, 0xFFFF]
+        for code in code_points:
+            character = chr(code)
+            with self.subTest(code=hex(code)):
+                front, _ = split_file(render_file(make(title="a" + character + "b")))
+                self.assertNotIn(character, front)
+                self.assertIn(f"\\u{code:04x}", front)
+                self.assertEqual(parse_front(front)["title"], "a" + character + "b")
+
+    def test_ordinary_non_ascii_text_is_left_readable(self):
+        front, _ = split_file(render_file(make(title="Ünï \U0001f4cc çö")))
+        self.assertIn('title: "Ünï \U0001f4cc çö"', front)
+
+    def test_a_lone_surrogate_becomes_the_replacement_character(self):
+        front, _ = split_file(render_file(make(title="a" + chr(0xD800) + "b")))
+        self.assertEqual(parse_front(front)["title"], "a" + chr(0xFFFD) + "b")
+        front.encode("utf-8")  # must be writable
+
+    @unittest.skipIf(yaml is None, "PyYAML is not installed")
+    def test_a_real_yaml_parser_reads_back_every_escaped_character(self):
+        for code in [*range(0x00, 0x20), *range(0x7F, 0xA0), 0x2028, 0x2029, 0xFEFF]:
+            title = "a" + chr(code) + "b"
+            with self.subTest(code=hex(code)):
+                front, _ = split_file(render_file(make(title=title)))
+                self.assertEqual(yaml.safe_load(front)["title"], title)
+
     def test_awkward_numbers_are_written_in_a_form_yaml_reads_as_numbers(self):
         for value, text in ((1e-05, "1.0e-05"), (2.5, "2.5"), (0.0, "0.0"), (1e22, "1.0e+22")):
             front, _ = split_file(render_file(make(price=value)))
@@ -197,7 +249,7 @@ class WriteFilesTests(unittest.TestCase):
             folder = write_markdown_files(root / "out", "acb", "all", [make("../../evil")])
             inside = [p for p in root.rglob("*") if p.is_file()]
             self.assertEqual([p.parent for p in inside], [folder])
-            self.assertEqual(inside[0].name, "evil.md")
+            self.assertRegex(inside[0].name, r"^evil-[0-9a-f]{8}\.md$")
 
     def test_a_second_run_replaces_files_and_leaves_everything_else_alone(self):
         with TemporaryDirectory() as directory:
