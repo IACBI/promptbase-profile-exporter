@@ -31,6 +31,8 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `client.py` — public PromptBase/Firestore access: profile resolution,
   paginated queries, retry/backoff, and schema-drift detection.
 - `dates.py` — shared `parse_datetime_ms` (used by both `cli.py` and `web.py`).
+- `console.py` — `make_output_safe()`, called first thing by every entry point, so a
+  title a legacy Windows code page cannot encode prints as `?` instead of crashing.
 - `models.py` — `Profile` and `PromptRecord` (frozen dataclasses + derived
   properties like `url`, `created_iso`, `is_text`/`is_image`/`is_free`).
 - `formatting.py` — filtering, sorting, the per-format writers (txt,

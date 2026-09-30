@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
+from .console import make_output_safe
 from .dates import parse_datetime_ms
 from .diffing import (
     CATALOG_SUFFIXES,
@@ -1003,6 +1004,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    make_output_safe()
     args = parser.parse_args(argv)
 
     try:
