@@ -480,5 +480,15 @@ class DiffReportTests(unittest.TestCase):
             )
 
 
+class StrictLoadTests(unittest.TestCase):
+    def test_non_record_entries_are_skipped_unless_strict(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.json"
+            path.write_text(json.dumps([{"title": "A"}, None, 3, {"title": "B"}]), "utf-8")
+            self.assertEqual([r["title"] for r in load_catalog(path)], ["A", "B"])
+            with self.assertRaisesRegex(ValueError, "entry 2 of the catalog is not a record"):
+                load_catalog(path, strict=True)
+
+
 if __name__ == "__main__":
     unittest.main()

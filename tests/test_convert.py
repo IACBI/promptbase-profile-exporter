@@ -36,6 +36,17 @@ def sample_records(item_type="prompt"):
             price=0.0, tags=(), engine="", nsfw=True, featured=False,
             last_sale=1_790_000_000_000, unique_sales=0, item_type=item_type,
         ),
+        PromptRecord(
+            title="Awkward tags", description="d", slug="awkward", prompt_type="gpt",
+            domain="text", created=1_600_000_000_000, price=1.0,
+            tags=("has,comma", "two words", "[bracket"), engine="gpt-4o", unique_sales=1,
+            item_type=item_type,
+        ),
+        PromptRecord(
+            title="Bracketed tags", description="d", slug="bracketed", prompt_type="gpt",
+            domain="text", created=1_500_000_000_000, price=1.0, tags=("[x", "y]"),
+            item_type=item_type,
+        ),
     ]
 
 
@@ -183,7 +194,7 @@ class ConvertCommandTests(unittest.TestCase):
             exit_code, stdout, _ = run([str(source), "-f", "markdown"])
             self.assertEqual(exit_code, 0)
             self.assertTrue((Path(directory) / "catalog.md").is_file())
-        self.assertIn("Converted 2 record(s)", stdout)
+        self.assertIn("Converted 4 record(s)", stdout)
 
     def test_format_is_inferred_from_the_output_path(self):
         with TemporaryDirectory() as directory:
@@ -275,6 +286,125 @@ class ConvertCommandTests(unittest.TestCase):
             exit_code, _, stderr = run([str(Path(directory) / "gone.json"), "-f", "csv"])
         self.assertEqual(exit_code, 1)
         self.assertIn("error:", stderr)
+
+
+class ReviewFindingsTests(unittest.TestCase):
+    """Each of these silently lost or invented data before it was fixed."""
+
+    def _json_source(self, directory, rows, name="src.json"):
+        path = Path(directory) / name
+        path.write_text(json.dumps(rows), encoding="utf-8")
+        return path
+
+    def _rows(self, **extras):
+        return [{**record_to_dict(r), **extras} for r in sample_records()[:2]]
+
+    def test_a_failed_check_never_replaces_an_existing_destination(self):
+        rows = self._rows()
+        rows[0]["title"] = ""  # a blank title cannot be counted back out of a TXT file
+        with TemporaryDirectory() as directory:
+            source = self._json_source(directory, rows)
+            destination = Path(directory) / "out.txt"
+            destination.write_text("keep me", encoding="utf-8")
+            exit_code, _, stderr = run([str(source), "-o", str(destination), "--overwrite"])
+            kept = destination.read_text(encoding="utf-8")
+            leftovers = sorted(p.name for p in Path(directory).iterdir())
+        self.assertEqual(exit_code, 1)
+        self.assertIn("validation failed", stderr)
+        self.assertEqual(kept, "keep me")
+        self.assertEqual(leftovers, ["out.txt", "src.json"])  # no temp files left behind
+
+    def test_entries_that_are_not_records_are_refused_not_dropped(self):
+        for label, export_format, write_source in (
+            ("json", "json", lambda d, rows: self._json_source(d, rows)),
+            ("html", "html", None),
+        ):
+            with self.subTest(label), TemporaryDirectory() as directory:
+                records = sample_records()[:2]
+                if write_source:
+                    rows = [record_to_dict(r) for r in records]
+                    source = write_source(directory, [rows[0], None, rows[1]])
+                else:
+                    source = write(directory, "src.html", records, export_format)
+                    text = source.read_text(encoding="utf-8")
+                    data = json.dumps([record_to_dict(r) for r in records], ensure_ascii=False)
+                    broken = json.dumps(
+                        [record_to_dict(records[0]), 7, record_to_dict(records[1])],
+                        ensure_ascii=False,
+                    ).replace("<", "\\u003c")
+                    source.write_text(
+                        text.replace(data.replace("<", "\\u003c"), broken), encoding="utf-8"
+                    )
+                exit_code, _, stderr = run([str(source), "-f", "csv", "--quiet"])
+                written = list(Path(directory).glob("*.csv"))
+            self.assertEqual(exit_code, 1)
+            self.assertIn("entry 2 of the catalog is not a record", stderr)
+            self.assertEqual(written, [])
+
+    def test_an_extra_field_must_be_present_on_every_record(self):
+        rows = self._rows(nsfw=False)
+        del rows[1]["nsfw"]
+        with TemporaryDirectory() as directory:
+            source = self._json_source(directory, rows)
+            exit_code, _, stderr = run([str(source), "-f", "csv", "--quiet"])
+            written = list(Path(directory).glob("*.csv"))
+        self.assertEqual(exit_code, 1)
+        self.assertIn("record 2: has no nsfw column, which other records have", stderr)
+        self.assertEqual(written, [])
+
+    def test_a_recorded_flag_or_count_cannot_be_empty(self):
+        for column in ("nsfw", "featured", "unique_sales"):
+            rows = self._rows(nsfw=False, featured=False, unique_sales=0)
+            rows[0][column] = None
+            with self.subTest(column), TemporaryDirectory() as directory:
+                source = self._json_source(directory, rows)
+                exit_code, _, stderr = run([str(source), "-f", "csv", "--quiet"])
+            self.assertEqual(exit_code, 1)
+            self.assertIn(f"record 1: {column} is empty", stderr)
+
+    def test_unknown_times_may_stay_empty(self):
+        rows = self._rows(updated=None, updated_iso=None, last_sale=None, last_sale_iso=None)
+        with TemporaryDirectory() as directory:
+            source = self._json_source(directory, rows)
+            exit_code, _, _ = run([str(source), "-f", "csv", "--quiet"])
+        self.assertEqual(exit_code, 0)
+
+    def test_booleans_are_not_numbers(self):
+        for column in ("price", "discount", "rating"):
+            rows = self._rows()
+            rows[0][column] = True
+            with self.subTest(column), TemporaryDirectory() as directory:
+                source = self._json_source(directory, rows)
+                exit_code, _, stderr = run([str(source), "-f", "csv", "--quiet"])
+            self.assertEqual(exit_code, 1)
+            self.assertIn(f"{column} is not a number", stderr)
+
+    def test_tags_with_commas_survive_a_csv_round_trip(self):
+        records = [sample_records()[2]]
+        with TemporaryDirectory() as directory:
+            direct_json = write(directory, "direct.json", records, "json",
+                                extra_fields=EXTRA_FIELDS)
+            csv_path = write(directory, "catalog.csv", records, "csv", extra_fields=EXTRA_FIELDS)
+            cell = csv_path.read_text(encoding="utf-8")
+            exit_code, _, stderr = run(
+                [str(csv_path), "-o", str(Path(directory) / "back.json"), "--quiet"]
+            )
+            back = (Path(directory) / "back.json").read_bytes()
+            direct = direct_json.read_bytes()
+        self.assertEqual(exit_code, 0, stderr)
+        self.assertIn('"[""has,comma"", ""two words"", ""[bracket""]"', cell)
+        self.assertEqual(back, direct)
+
+    def test_tags_that_only_look_like_brackets_are_still_split_on_commas(self):
+        records = [sample_records()[3]]  # tags ("[x", "y]") joined as "[x, y]"
+        with TemporaryDirectory() as directory:
+            csv_path = write(directory, "catalog.csv", records, "csv", extra_fields=("tags",))
+            direct = write(directory, "direct.json", records, "json", extra_fields=("tags",))
+            exit_code, _, _ = run([str(csv_path), "-o", str(Path(directory) / "b.json"), "--quiet"])
+            back = (Path(directory) / "b.json").read_bytes()
+            expected = direct.read_bytes()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(back, expected)
 
 
 if __name__ == "__main__":

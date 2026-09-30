@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from . import __version__
@@ -113,7 +115,7 @@ def convert_catalog(
         )
     if destination.resolve() == source.resolve():
         raise ValueError("the output file is the source file; choose another --output-file")
-    rows = load_catalog(source, csv_safe=from_csv_safe)
+    rows = load_catalog(source, csv_safe=from_csv_safe, strict=True)
     if not rows:
         raise ValueError("the catalog has no records")
     records = []
@@ -129,6 +131,21 @@ def convert_catalog(
     # TXT keeps only a title and a description, so converting to it drops every
     # other field (price and the rest as well), extra fields included.
     extra_fields = () if export_format == "txt" else present_extra_fields(rows)
+    _check_extra_values(rows, extra_fields)
+    # Prove the rendering is valid before touching the destination: with
+    # --overwrite, a failed check after the write would already have replaced
+    # the file it was meant to protect.
+    with TemporaryDirectory() as scratch:
+        probe = write_export_to_path(
+            Path(scratch) / f"probe.{FORMAT_EXTENSIONS[export_format]}",
+            records,
+            export_format,
+            overwrite=True,
+            csv_safe=csv_safe,
+            extra_fields=extra_fields,
+            item_type=item_type,
+        )
+        _check_count(probe, export_format, len(records), destination)
     write_export_to_path(
         destination,
         records,
@@ -138,12 +155,35 @@ def convert_catalog(
         extra_fields=extra_fields,
         item_type=item_type,
     )
-    written = count_written_records(destination, export_format)
-    if written != len(records):
+    return _check_count(destination, export_format, len(records), destination)
+
+
+def _check_count(path: Path, export_format: str, expected: int, destination: Path) -> int:
+    written = count_written_records(path, export_format)
+    if written != expected:
         raise ValueError(
-            f"validation failed for {destination}: expected {len(records)}, wrote {written}"
+            f"validation failed for {destination}: expected {expected}, wrote {written}"
         )
     return written
+
+
+# Extra fields whose value is always recorded, so an empty cell is damage, not
+# "unknown". updated and last_sale may legitimately be empty; tags and engine
+# may legitimately be empty strings.
+_ALWAYS_RECORDED = ("nsfw", "featured", "unique_sales")
+
+
+def _check_extra_values(rows: Sequence[Mapping[str, Any]], extra_fields: Sequence[str]) -> None:
+    """Require every detected extra field on every record, instead of defaulting it."""
+    for name in extra_fields:
+        column = EXTRA_FIELD_COLUMNS[name][0]
+        for number, row in enumerate(rows, 1):
+            if column not in row:
+                raise ValueError(
+                    f"record {number}: has no {column} column, which other records have"
+                )
+            if name in _ALWAYS_RECORDED and (row[column] is None or row[column] == ""):
+                raise ValueError(f"record {number}: {column} is empty")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -258,6 +298,8 @@ def _required_float(data: Mapping[str, Any], column: str) -> float:
     value = data[column]
     if value is None or value == "":
         raise ValueError(f"{column} is empty")
+    if isinstance(value, bool):
+        raise ValueError(f"{column} is not a number: {value!r}")
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
@@ -292,11 +334,23 @@ def _tags(value: Any) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         items = [str(tag).strip() for tag in value]
     elif isinstance(value, str):
-        # A CSV cell joins the tags with ", ".
-        items = [part.strip() for part in value.split(",")]
+        items = _split_tag_cell(value)
     else:
         return ()
     return tuple(tag for tag in items if tag)
+
+
+def _split_tag_cell(cell: str) -> list[str]:
+    """Read a CSV tag cell: a JSON array (written when a tag holds a comma), else ``a, b``."""
+    stripped = cell.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            parsed = json.loads(stripped)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list) and all(isinstance(tag, str) for tag in parsed):
+            return [tag.strip() for tag in parsed]
+    return [part.strip() for part in cell.split(",")]
 
 
 def _item_type(data: Mapping[str, Any]) -> str:

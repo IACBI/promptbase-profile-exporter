@@ -331,11 +331,25 @@ def format_records_as_csv(
 def _csv_row(row: dict[str, object]) -> dict[str, object]:
     """Flatten the values a CSV cell cannot hold as-is (lists, booleans, None)."""
     return {
-        key: _cell_text(value)
-        if isinstance(value, (list, tuple, bool)) or value is None
+        key: _csv_list_cell(value)
+        if isinstance(value, (list, tuple))
+        else _cell_text(value)
+        if isinstance(value, bool) or value is None
         else value
         for key, value in row.items()
     }
+
+
+def _csv_list_cell(values: Sequence[object]) -> str:
+    """Tags as ``a, b, c``, or as a JSON array if a tag contains a comma.
+
+    The joined form is easy to read and to split, but a comma inside a tag
+    would make it ambiguous. JSON text (which a reader recognises by its
+    brackets) keeps such a cell exactly reversible.
+    """
+    if any("," in str(value) for value in values):
+        return json.dumps([str(value) for value in values], ensure_ascii=False)
+    return _cell_text(list(values))
 
 
 def csv_escape_formula(value: object) -> object:

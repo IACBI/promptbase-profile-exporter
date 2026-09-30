@@ -199,8 +199,9 @@ downloaded, so a default run transfers exactly what it did before.
 | `unique_sales` | The `uniqueSales` count. |
 
 A time PromptBase does not record is `null` in JSON and an empty cell in CSV,
-not a zero. In CSV a list is joined with `, ` and a flag is `true` or `false`;
-`--csv-safe` protects these cells like the others. Markdown adds one metadata
+not a zero. In CSV the tags are joined with `, ` (or, if a tag itself contains a
+comma, written as a JSON array so the cell can always be read back) and a flag
+is `true` or `false`; `--csv-safe` protects these cells like the others. Markdown adds one metadata
 line per field, and HTML shows them next to each prompt and embeds them in its
 JSON. TXT holds only a title and a description, so `--extra-fields` with
 `txt` is an error rather than a silent omission.
@@ -378,12 +379,16 @@ app catalogs.
   PromptBase instead. Converting *to* TXT or Markdown is fine; TXT keeps only a
   title and a description, so it drops every other field.
 - **Extra fields** in the source (see `--extra-fields`) are carried over when
-  the target format can hold them.
-- **No guessing:** a missing column, an empty number, or an unreadable value
-  stops the conversion with the record's position, and nothing is written.
+  the target format can hold them. Once a source has an extra field, every record
+  must have it; a missing or empty value stops the conversion.
+- **No guessing:** a missing column, an empty number, a value of the wrong type
+  (a boolean where a number belongs), an entry that is not a record, or an
+  unreadable value stops the conversion with the record's position, and nothing
+  is written.
 - **Safety:** it never overwrites the source, and it refuses to replace another
-  existing file unless you pass `--overwrite`; the write is atomic. The written
-  file is re-read and its record count checked.
+  existing file unless you pass `--overwrite`; the write is atomic. The result is
+  rendered and its record count checked in a scratch file first, so a file that
+  would fail the check never replaces the one you have.
 - `--csv-safe` protects the CSV being written; `--from-csv-safe` says the CSV
   being read was written with `--csv-safe`, so its escaped cells are restored.
 
