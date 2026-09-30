@@ -4,21 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.10.0 - 2026-09-30
+
 ### Added
 
-- With `compare` or `update-file`, the GitHub Action now shows the diff report
-  on the workflow run's summary page (`step-summary`, on by default, `false`
-  turns it off). A report over 900 KB is cut, with a note to use `diff-json`;
-  the summary is still written when `fail-on-diff` fails the step. The Action
-  docs gain a recipe that opens a pull request when the catalog changes.
-- `pb-convert` (`promptbase-convert`, or `python -m promptbase_exporter.convert`)
-  rewrites a saved catalog in another format without fetching anything. Its
-  result is the file a direct export would have written, byte for byte, extra
-  fields and bundle or app catalogs included. It reads JSON, CSV, and HTML
-  catalogs and refuses TXT and Markdown, which lack columns and would need
-  invented values; it stops on a missing column, an empty number, or an
-  unreadable value instead of guessing, and never overwrites its source.
-  `--csv-safe` and `--from-csv-safe` cover protected CSVs.
+- `--extra-fields` (Action input `extra-fields`, a checkbox group in the web
+  UI) adds `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, and
+  `unique_sales` to the markdown, JSON, CSV, and HTML exports. Only the fields
+  you ask for are requested from PromptBase, so a default export is
+  byte-identical to before and asking for all of them adds about 8 KB to a
+  243-prompt download. A time PromptBase does not record is `null` (empty in
+  CSV) rather than a zero, and `txt`, which cannot hold them, is an error. In
+  CSV the tags are joined with `, `, or written as a JSON array if a tag
+  contains a comma, so the cell can always be read back.
 - `--item-type` (Action input `item-type`, a "Kind" list in the web UI) exports
   a profile's `bundle`s or `app`s as well as its `prompt`s (the default).
   Bundles and apps take their descriptions from PromptBase's public `Bundles`
@@ -29,15 +27,22 @@ All notable changes to this project will be documented in this file.
   profile's prompts, are free, and have no `type`. Skills are not supported.
   The HTML catalog's markup gained a `data-noun` attribute so its heading and
   search count name the right kind.
-- `--extra-fields` (Action input `extra-fields`, a checkbox group in the web
-  UI) adds `tags`, `engine`, `nsfw`, `featured`, `updated`, `last_sale`, and
-  `unique_sales` to the markdown, JSON, CSV, and HTML exports. Only the fields
-  you ask for are requested from PromptBase, so a default export is
-  byte-identical to before and asking for all of them adds about 8 KB to a
-  243-prompt download. A time PromptBase does not record is `null` (empty in
-  CSV) rather than a zero, and `txt`, which cannot hold them, is an error. In
-  CSV the tags are joined with `, `, or written as a JSON array if a tag
-  contains a comma, so the cell can always be read back.
+- `pb-convert` (`promptbase-convert`, or `python -m promptbase_exporter.convert`)
+  rewrites a saved catalog in another format without fetching anything. Its
+  result is the file a direct export would have written, byte for byte, extra
+  fields and bundle or app catalogs included. It reads JSON, CSV, and HTML
+  catalogs and refuses TXT and Markdown, which lack columns and would need
+  invented values; it stops on a missing column, an empty number, or an
+  unreadable value instead of guessing (a boolean where a number belongs, an
+  entry that is not a record, or an extra field missing from some records
+  included), checks the result in a scratch file before it replaces anything,
+  and never overwrites its source. `--csv-safe` and `--from-csv-safe` cover
+  protected CSVs.
+- With `compare` or `update-file`, the GitHub Action now shows the diff report
+  on the workflow run's summary page (`step-summary`, on by default, `false`
+  turns it off). A report over 900 KB is cut, with a note to use `diff-json`;
+  the summary is still written when `fail-on-diff` fails the step. The Action
+  docs gain a recipe that opens a pull request when the catalog changes.
 
 ### Fixed
 

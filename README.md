@@ -99,7 +99,7 @@ the export options as a form and a download link for each file.
 To export on a schedule, use the GitHub Action:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.3
+- uses: IACBI/promptbase-profile-exporter@v0.10.0
   with:
     profile-url: https://promptbase.com/profile/acb
     format: markdown
@@ -245,7 +245,7 @@ Dışa aktarımı belirli aralıklarla çalıştırmak için GitHub Action'ı
 kullanabilirsiniz:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.9.3
+- uses: IACBI/promptbase-profile-exporter@v0.10.0
   with:
     profile-url: https://promptbase.com/profile/acb
     format: markdown
