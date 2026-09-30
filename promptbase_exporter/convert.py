@@ -30,7 +30,7 @@ EXIT_ERROR = 1
 # Only formats that keep every field can be converted. A TXT or Markdown
 # catalog lacks columns such as downloads and rating, and filling them in with
 # zeros would invent data, so they are refused rather than guessed at.
-LOSSLESS_SUFFIXES = frozenset({".json", ".csv", ".html", ".htm"})
+LOSSLESS_SUFFIXES = frozenset({".json", ".ndjson", ".jsonl", ".csv", ".html", ".htm"})
 
 # The columns a catalog must have, beyond the derived url and created_iso.
 REQUIRED_COLUMNS = (

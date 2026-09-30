@@ -554,7 +554,7 @@ def normalize_options(args: argparse.Namespace) -> RunOptions:
     extra_fields = parse_extra_fields(args.extra_fields)
     if extra_fields and export_format == "txt":
         raise ValueError(
-            "--extra-fields needs --format markdown, json, csv, or html: txt holds only "
+            "--extra-fields needs --format markdown, json, ndjson, csv, or html: txt holds only "
             "a title and a description"
         )
     compares_csv = compare_path is not None and compare_path.suffix.lower() == ".csv"

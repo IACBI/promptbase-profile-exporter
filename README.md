@@ -35,7 +35,8 @@ GitHub Action for scheduled exports.
   username, or `@username`,
   and exports several profiles in one run.
 - Exports a profile's prompts, bundles, or apps (`--item-type`).
-- Writes `txt`, `markdown`, `json`, `csv`, or a self-contained `html` page you
+- Writes `txt`, `markdown`, `json`, `ndjson` (one record per line), `csv`, or a
+  self-contained `html` page you
   can search in the browser, split into `all`, `text`, and `image` catalogs or
   as a single file. `--csv-safe` keeps CSV cells from running as spreadsheet
   formulas. `--extra-fields` adds tags, engine, update and last-sale times,
@@ -122,7 +123,7 @@ The ones you will reach for most:
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--mode` | `split` | `split` (all + text + image), `all`, `text`, or `image` |
-| `--format` | `txt` | `txt`, `markdown`, `json`, `csv`, or `html` |
+| `--format` | `txt` | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html` |
 | `--output-dir` | `exports` | Where generated files go |
 | `--sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, `rating` |
 | `--domain`, `--type` | none | Comma-separated filters, e.g. `--type gpt,claude` |
@@ -176,8 +177,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
   ya da `@kullanıcıadı` kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
 - Bir profilin prompt'larını, bundle'larını ya da app'lerini dışa aktarır
   (`--item-type`).
-- `txt`, `markdown`, `json`, `csv` ya da tarayıcıda arama yapılabilen, tek
-  dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
+- `txt`, `markdown`, `json`, `ndjson` (satır başına bir kayıt), `csv` ya da
+  tarayıcıda arama yapılabilen, tek dosyalık bir `html` sayfası yazar; çıktıyı `all`, `text` ve `image`
   kataloglarına ayırabilir ya da tek dosya üretebilir. `--csv-safe`, CSV
   hücrelerinin tablo programlarında formül olarak çalışmasını engeller.
   `--extra-fields` istenirse etiketleri, motoru, güncelleme ve son satış
