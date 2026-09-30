@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
+from promptbase_exporter.formatting import write_export
 from promptbase_exporter.models import Profile, PromptRecord
 from promptbase_exporter.web import (
     _EXPORT_LOCK,
@@ -543,6 +544,29 @@ class CompareFileTests(unittest.TestCase):
         page = render_form(request, result=result)
         self.assertIn("<h3>Comparison</h3>", page)
         self.assertIn("- Removed: 1", page)
+
+    def test_csv_safe_applies_to_the_comparison_catalog(self):
+        records = [record("=Formula", "text", "gpt", created=2, price=2.0)]
+
+        def fetcher(_profile_input):
+            return Profile(username="acb", uid="uid-1"), records
+
+        with _in_directory() as root:
+            write_export(root, "old", "all", records, "csv", csv_safe=True)
+            form = {
+                "profile": "acb",
+                "mode": "all",
+                "format": "csv",
+                "output_dir": "out",
+                "compare_file": "old_all_prompts.csv",
+            }
+            safe = run_export(build_request_config({**form, "csv_safe": "1"}), fetcher=fetcher)
+            plain = run_export(build_request_config(form), fetcher=fetcher)
+
+        self.assertFalse(safe.diff.has_changes)
+        # Read verbatim, the escaped slug "'=formula" no longer matches.
+        self.assertEqual([item["slug"] for item in plain.diff.removed], ["'=formula"])
+        self.assertEqual([item["slug"] for item in plain.diff.added], ["=formula"])
 
     def test_unreadable_compare_catalog_is_a_400_error(self):
         def fetcher(_profile_input):

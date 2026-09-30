@@ -125,9 +125,8 @@ class DiffingTests(unittest.TestCase):
             )
 
             html_loaded = load_catalog(html_path)
-            csv_loaded = load_catalog(csv_path)
+            csv_loaded = load_catalog(csv_path, csv_safe=True)
 
-        # The safe CSV's BOM tells the loader to undo the escape exactly.
         for loaded in (html_loaded, csv_loaded):
             self.assertEqual([item["title"] for item in loaded], [r.title for r in records])
             self.assertFalse(compare_catalogs(loaded, records).has_changes)
@@ -284,7 +283,7 @@ class CsvApostropheTests(unittest.TestCase):
                 path = write_export(
                     Path(directory) / str(safe), "acb", "all", records, "csv", csv_safe=safe
                 )
-                diff = compare_catalogs(load_catalog(path), records)
+                diff = compare_catalogs(load_catalog(path, csv_safe=safe), records)
                 self.assertFalse(diff.has_changes, f"csv_safe={safe}")
 
     def test_safe_and_plain_csv_files_compare_equal_both_ways(self):
@@ -292,7 +291,8 @@ class CsvApostropheTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             plain = load_catalog(write_export(Path(directory) / "p", "a", "all", records, "csv"))
             safe = load_catalog(
-                write_export(Path(directory) / "s", "a", "all", records, "csv", csv_safe=True)
+                write_export(Path(directory) / "s", "a", "all", records, "csv", csv_safe=True),
+                csv_safe=True,
             )
 
         self.assertFalse(compare_catalog_records(plain, safe).has_changes)
@@ -303,7 +303,7 @@ class CsvApostropheTests(unittest.TestCase):
             path = write_export(
                 Path(directory), "a", "all", self._records(["=old"]), "csv", csv_safe=True
             )
-            diff = compare_catalogs(load_catalog(path), self._records(["=new"]))
+            diff = compare_catalogs(load_catalog(path, csv_safe=True), self._records(["=new"]))
 
         self.assertEqual(diff.changed[0].fields, ("title",))
 
@@ -332,7 +332,8 @@ class CsvApostropheTests(unittest.TestCase):
         records = self._records(["=Formula", "normal"])
         with TemporaryDirectory() as directory:
             safe = load_catalog(
-                write_export(Path(directory) / "s", "a", "all", records, "csv", csv_safe=True)
+                write_export(Path(directory) / "s", "a", "all", records, "csv", csv_safe=True),
+                csv_safe=True,
             )
             txt = load_catalog(write_export(Path(directory) / "t", "a", "all", records, "txt"))
 
@@ -342,16 +343,52 @@ class CsvApostropheTests(unittest.TestCase):
             self.assertEqual(diff.unchanged, 2)
 
 
+    def test_bom_csv_from_other_tools_is_read_verbatim(self):
+        # Codex: a BOM alone (Excel's "CSV UTF-8") must not switch on safe mode.
+        with TemporaryDirectory() as directory:
+            plain = write_export(Path(directory), "a", "all", self._records(["'=SUM(A1)"]), "csv")
+            excel = Path(directory) / "excel.csv"
+            excel.write_bytes(b"\xef\xbb\xbf" + plain.read_bytes())
+
+            loaded = load_catalog(excel)
+
+        self.assertEqual(loaded[0]["title"], "'=SUM(A1)")
+        # The BOM is stripped, so the first column is still "title".
+        self.assertNotIn("\ufefftitle", loaded[0])
+
+    def test_safe_csv_without_the_flag_is_read_verbatim(self):
+        with TemporaryDirectory() as directory:
+            path = write_export(
+                Path(directory), "a", "all", self._records(["=x"]), "csv", csv_safe=True
+            )
+            self.assertEqual(load_catalog(path)[0]["title"], "'=x")
+            self.assertEqual(load_catalog(path, csv_safe=True)[0]["title"], "=x")
+
+
 class MarkdownPlaceholderTests(unittest.TestCase):
-    def test_unknown_placeholder_is_missing_metadata(self):
-        # Codex: Markdown writes empty type/domain as "unknown".
-        records = [PromptRecord("A", "d", "a", "", "", 1, 2.0)]
+    def test_literal_unknown_metadata_survives_markdown(self):
+        # Codex: a real type or domain named "unknown" must not read as empty.
+        records = [PromptRecord("A", "d", "a", "unknown", "unknown", 1, 2.0)]
         with TemporaryDirectory() as directory:
             markdown = load_catalog(
                 write_export(Path(directory), "x", "all", records, "markdown")
             )
             rich = load_catalog(write_export(Path(directory), "x", "all", records, "json"))
 
+        self.assertEqual((markdown[0]["type"], markdown[0]["domain"]), ("unknown", "unknown"))
+        self.assertFalse(compare_catalog_records(rich, markdown).has_changes)
+        self.assertFalse(compare_catalog_records(markdown, rich).has_changes)
+
+    def test_empty_metadata_is_written_empty_and_compares_equal(self):
+        records = [PromptRecord("A", "d", "a", "", "", 1, 2.0)]
+        with TemporaryDirectory() as directory:
+            markdown_path = write_export(Path(directory), "x", "all", records, "markdown")
+            text = markdown_path.read_text(encoding="utf-8")
+            markdown = load_catalog(markdown_path)
+            rich = load_catalog(write_export(Path(directory), "x", "all", records, "json"))
+
+        self.assertIn("- Domain:\n- Type:\n", text)
+        self.assertNotIn("unknown", text.split("- Created:")[0])
         self.assertEqual((markdown[0]["type"], markdown[0]["domain"]), ("", ""))
         self.assertFalse(compare_catalog_records(markdown, rich).has_changes)
         self.assertFalse(compare_catalog_records(rich, markdown).has_changes)

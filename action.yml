@@ -85,7 +85,10 @@ inputs:
     required: false
     default: ""
   csv-safe:
-    description: Protect CSV text cells from spreadsheet formula injection. Requires csv output.
+    description: >-
+      Protect CSV text cells from spreadsheet formula injection, and read a CSV
+      compare / update-file catalog as written that way.
+      Requires csv output or a csv comparison catalog.
     required: false
     default: "false"
   dry-run:

@@ -291,7 +291,7 @@ def run_export(
         # being compared against.
         if request.compare_path is not None:
             try:
-                previous = load_catalog(request.compare_path)
+                previous = load_catalog(request.compare_path, csv_safe=request.csv_safe)
             except (OSError, ValueError) as exc:
                 raise WebInputError(f"Could not load comparison catalog: {exc}") from exc
             diff = compare_catalogs(previous, filter_records(selected_records, modes[0]))

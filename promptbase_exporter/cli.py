@@ -146,7 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Prefix CSV text cells that start with =, +, -, or @ with an apostrophe so "
-            "spreadsheet apps do not run them as formulas. Requires --format csv."
+            "spreadsheet apps do not run them as formulas. Also reads a CSV --compare or "
+            "--update-file catalog as one written this way. Requires CSV output or a CSV "
+            "comparison catalog."
         ),
     )
     parser.add_argument(
@@ -373,6 +375,7 @@ def export_profile(
             args.diff_output or [],
             args.fail_on_diff,
             quiet=args.quiet,
+            csv_safe=args.csv_safe,
         )
         if diff_exit_code == EXIT_ERROR:
             # An operational failure (catalog load failed, or the requested diff
@@ -501,8 +504,9 @@ def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
         export_format = infer_format_from_path(output_file)
     else:
         export_format = args.format or "txt"
-    if args.csv_safe and export_format != "csv":
-        raise ValueError("--csv-safe requires --format csv")
+    compares_csv = compare_path is not None and compare_path.suffix.lower() == ".csv"
+    if args.csv_safe and export_format != "csv" and not compares_csv:
+        raise ValueError("--csv-safe requires CSV output or a CSV comparison catalog")
 
     since_created = parse_datetime_ms(args.since, end_of_day=False) if args.since else None
     until_created = parse_datetime_ms(args.until, end_of_day=True) if args.until else None
@@ -549,9 +553,10 @@ def handle_compare(
     fail_on_diff: bool,
     *,
     quiet: bool,
+    csv_safe: bool = False,
 ) -> int:
     try:
-        previous_records = load_catalog(compare_path)
+        previous_records = load_catalog(compare_path, csv_safe=csv_safe)
     except (OSError, ValueError) as exc:
         print(f"error: could not load comparison catalog: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -602,6 +607,11 @@ def build_diff_parser() -> argparse.ArgumentParser:
         help="Exit with code 2 when the catalogs differ.",
     )
     parser.add_argument(
+        "--csv-safe",
+        action="store_true",
+        help="Read CSV catalogs as written with --csv-safe and restore their escaped cells.",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Do not print the report.",
@@ -620,7 +630,7 @@ def diff_main(argv: list[str] | None = None) -> int:
     loaded: list[list[dict[str, Any]]] = []
     for path in (args.previous, args.current):
         try:
-            loaded.append(load_catalog(path))
+            loaded.append(load_catalog(path, csv_safe=args.csv_safe))
         except (OSError, ValueError) as exc:
             print(f"error: could not load catalog {path}: {exc}", file=sys.stderr)
             return EXIT_ERROR

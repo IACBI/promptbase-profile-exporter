@@ -513,14 +513,14 @@ class NewOptionValidationTests(unittest.TestCase):
             ["@acb", "--csv-safe", "--format", "json"]
         )
         self.assertEqual(exit_code, EXIT_ERROR)
-        self.assertIn("--csv-safe requires --format csv", stderr)
+        self.assertIn("--csv-safe requires CSV output or a CSV comparison catalog", stderr)
 
     def test_csv_safe_rejects_inferred_non_csv_output_file(self):
         exit_code, stderr = self._run_expecting_failure(
             ["@acb", "--mode", "all", "--csv-safe", "--output-file", "out.json"]
         )
         self.assertEqual(exit_code, EXIT_ERROR)
-        self.assertIn("--csv-safe requires --format csv", stderr)
+        self.assertIn("--csv-safe requires CSV output or a CSV comparison catalog", stderr)
 
     def test_single_catalog_options_reject_several_profiles(self):
         for option in (["--compare", "a.json"], ["--output-file", "a.json"]):
@@ -601,6 +601,38 @@ class NewOptionBehaviourTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(slugs, ["popular"])
+
+    def test_update_file_reads_safe_csv_only_when_told(self):
+        records = [PromptRecord("=cmd", "d", "x", "gpt", "text", 1, 0.0)]
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), records),
+        ):
+            catalog = Path(directory) / "catalog.csv"
+            base = ["@acb", "--mode", "all", "--quiet"]
+            first, _, _ = _quiet_main([*base, "--csv-safe", "--output-file", str(catalog)])
+            update = [*base, "--fail-on-diff", "--update-file", str(catalog)]
+            # Declared safe: the escaped "'=cmd" is restored and nothing changed.
+            safe_run, _, _ = _quiet_main([*update, "--csv-safe"])
+            # Not declared: the cell is read verbatim, so the title differs.
+            plain_run, _, _ = _quiet_main(update)
+
+        self.assertEqual((first, safe_run, plain_run), (0, 0, EXIT_DIFF))
+
+    def test_csv_safe_allows_a_csv_comparison_catalog_with_other_output(self):
+        with TemporaryDirectory() as directory, patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="u"), [record("A", "text", "gpt")]),
+        ) as fetch:
+            catalog = Path(directory) / "old.csv"
+            catalog.write_text("title,description,slug\n", encoding="utf-8")
+            exit_code, _, stderr = _quiet_main(
+                ["@acb", "--mode", "all", "--csv-safe", "--compare", str(catalog),
+                 "-o", directory, "--quiet"]
+            )
+
+        fetch.assert_called_once()
+        self.assertEqual(exit_code, 0, stderr)
 
     def test_csv_safe_output_file(self):
         records = [PromptRecord("=cmd", "d", "x", "gpt", "text", 1, 0.0)]
@@ -711,6 +743,16 @@ class DiffCommandTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("- Added: 1", stdout)
+
+    def test_csv_safe_flag_restores_escaped_cells(self):
+        records = [PromptRecord("=A", "d", "a", "gpt", "text", 1, 1.0)]
+        with TemporaryDirectory() as directory:
+            safe = write_export(Path(directory) / "s", "x", "all", records, "csv", csv_safe=True)
+            html = write_export(Path(directory) / "h", "x", "all", records, "html")
+            with_flag, _, _ = self._run([str(safe), str(html), "--csv-safe", "--fail-on-diff"])
+            without_flag, _, _ = self._run([str(safe), str(html), "--fail-on-diff", "--quiet"])
+
+        self.assertEqual((with_flag, without_flag), (0, EXIT_DIFF))
 
     def test_missing_catalog_is_an_error(self):
         with TemporaryDirectory() as directory:

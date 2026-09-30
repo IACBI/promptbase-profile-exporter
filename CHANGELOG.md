@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A CSV that merely starts with a UTF-8 BOM, such as one saved by Excel, is no
+  longer treated as a `--csv-safe` catalog. 0.9.1 used the BOM as the safe-mode
+  marker and stripped a real leading apostrophe (`'=SUM(A1)` read as
+  `=SUM(A1)`). Nothing inside a CSV can reliably mark safe mode, so it is now
+  declared: `--csv-safe` also applies to the CSV catalog read by `--compare`
+  and `--update-file`, `pb-diff` gains `--csv-safe`, and the web UI's CSV
+  formula protection applies to its comparison catalog. Without the flag every
+  CSV is read verbatim. A BOM is still written in safe mode for Excel and is
+  now stripped from every CSV that is read, so a CSV re-saved by Excel keeps
+  its `title` column.
+- The Markdown writer leaves an empty type or domain empty instead of writing
+  `unknown`, so a real type or domain named `unknown` survives a Markdown
+  round trip. A Markdown catalog written by 0.9.1 or earlier reads an old
+  `unknown` placeholder literally, which shows once as a change for prompts
+  with an empty type or domain until the catalog is rewritten.
+
 ## 0.9.1 - 2026-09-30
 
 ### Fixed

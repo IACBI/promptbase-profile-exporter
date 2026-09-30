@@ -117,7 +117,7 @@ jobs:
 | `compare` | Empty | Existing catalog path to compare against. Requires `mode` other than `split`. |
 | `diff-output` | Empty | Optional path for the comparison report: JSON for a `.json` path, Markdown otherwise. |
 | `fail-on-diff` | `false` | Exit with code 2 when `compare` or `update-file` finds changes. |
-| `csv-safe` | `false` | Protect CSV text cells from spreadsheet formula injection. Requires CSV output. |
+| `csv-safe` | `false` | Protect CSV text cells from spreadsheet formula injection, and read a CSV `compare` / `update-file` catalog as written that way. Requires CSV output or a CSV comparison catalog. |
 | `dry-run` | `false` | Fetch, filter, and validate without writing files. Skips the artifact upload. |
 | `timestamp-filenames` | `false` | Add a timestamp to generated filenames. |
 | `allow-missing-descriptions` | `false` | Write partial exports when descriptions are missing. |
