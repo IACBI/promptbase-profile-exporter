@@ -7,7 +7,7 @@ description: Add a new output/export format (like YAML or HTML) to promptbase-pr
 
 Formats are referenced in several places that must agree, or post-write
 validation (`count_written_records`) will reject otherwise-valid exports. Use the
-existing four formats (`txt`, `markdown`, `json`, `csv`) as the template.
+existing five formats (`txt`, `markdown`, `json`, `csv`, `html`) as the template.
 
 ## 1. Register the format — `promptbase_exporter/formatting.py`
 

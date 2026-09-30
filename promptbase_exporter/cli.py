@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
 from .dates import parse_datetime_ms
-from .diffing import compare_catalogs, format_diff_report, load_catalog, write_diff_report
+from .diffing import (
+    CatalogDiff,
+    compare_catalog_records,
+    compare_catalogs,
+    format_diff_report,
+    load_catalog,
+    write_diff_report,
+)
 from .formatting import (
     EXPORT_FORMATS,
     SORT_OPTIONS,
@@ -23,6 +32,7 @@ from .formatting import (
     write_export,
     write_export_to_path,
 )
+from .models import PromptRecord
 
 MODE_ALIASES = {
     "text-only": "text",
@@ -45,8 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Export public PromptBase profile prompts to catalog files.",
     )
     parser.add_argument(
-        "profile",
-        help="PromptBase profile URL, path, username, or @username.",
+        "profiles",
+        nargs="+",
+        metavar="profile",
+        help=(
+            "PromptBase profile URL, path, username, or @username. Pass several to "
+            "export each profile in one run."
+        ),
     )
     parser.add_argument(
         "-m",
@@ -117,6 +132,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export prompts priced at or below this amount.",
     )
     parser.add_argument(
+        "--min-sales",
+        type=int,
+        help="Export prompts with at least this many sales.",
+    )
+    parser.add_argument(
+        "--min-rating",
+        type=float,
+        help="Export prompts rated at or above this value.",
+    )
+    parser.add_argument(
+        "--csv-safe",
+        action="store_true",
+        help=(
+            "Prefix CSV text cells that start with =, +, -, or @ with an apostrophe so "
+            "spreadsheet apps do not run them as formulas. Requires --format csv."
+        ),
+    )
+    parser.add_argument(
         "--timestamp-filenames",
         action="store_true",
         help="Append a YYYYMMDD_HHMMSS timestamp to generated filenames.",
@@ -139,7 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--diff-output",
         type=Path,
-        help="Write the comparison report to this path. Requires --compare or --update-file.",
+        action="append",
+        help=(
+            "Write the comparison report to this path: JSON for a .json path, Markdown "
+            "otherwise. Repeat to write several. Requires --compare or --update-file."
+        ),
     )
     parser.add_argument(
         "--fail-on-diff",
@@ -157,7 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--limit",
         type=int,
-        help="Export only the first N prompts after filtering and sorting.",
+        help=(
+            "Export only the first N prompts after filtering and sorting. The limit is "
+            "applied before --mode splits prompts into text and image files."
+        ),
     )
     parser.add_argument(
         "--since",
@@ -207,8 +247,35 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    # One timestamp for the whole run keeps a multi-profile export's files
+    # grouped under the same suffix.
+    timestamp = (
+        datetime.now().strftime("%Y%m%d_%H%M%S")
+        if args.timestamp_filenames
+        else None
+    )
+    exit_codes: list[int] = []
+    for index, profile_input in enumerate(options["profiles"]):
+        if index and not args.quiet:
+            print()
+        exit_codes.append(export_profile(profile_input, args, options, timestamp))
+    # A failed profile does not stop the others, but the run still reports it.
+    if EXIT_ERROR in exit_codes:
+        return EXIT_ERROR
+    if EXIT_DIFF in exit_codes:
+        return EXIT_DIFF
+    return EXIT_SUCCESS
+
+
+def export_profile(
+    profile_input: str,
+    args: argparse.Namespace,
+    options: dict[str, Any],
+    timestamp: str | None,
+) -> int:
+    """Fetch, filter, and write the exports for one profile; return its exit code."""
     try:
-        profile, records = fetch_prompts(args.profile)
+        profile, records = fetch_prompts(profile_input)
     except PromptBaseError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -231,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         max_price=args.max_price,
         since_created=options["since_created"],
         until_created=options["until_created"],
+        min_sales=args.min_sales,
+        min_rating=args.min_rating,
     )
     if not selected_records:
         print("error: no prompts matched the selected filters", file=sys.stderr)
@@ -253,11 +322,6 @@ def main(argv: list[str] | None = None) -> int:
 
     modes = ["all", "text", "image"] if args.mode == "split" else [args.mode]
     output_dir = Path(args.output_dir)
-    timestamp = (
-        datetime.now().strftime("%Y%m%d_%H%M%S")
-        if args.timestamp_filenames
-        else None
-    )
 
     if not args.quiet:
         print(f"Profile: @{profile.username}")
@@ -281,6 +345,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Price range: {args.min_price}..{args.max_price}")
             if args.since or args.until:
                 print(f"Created range: {args.since or '*'}..{args.until or '*'}")
+            if args.min_sales is not None:
+                print(f"Minimum sales: {args.min_sales}")
+            if args.min_rating is not None:
+                print(f"Minimum rating: {args.min_rating:g}")
             if args.limit is not None:
                 print(f"Limit: {args.limit}")
 
@@ -302,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
             selected_records,
             modes,
             options["compare_path"],
-            args.diff_output,
+            args.diff_output or [],
             args.fail_on_diff,
             quiet=args.quiet,
         )
@@ -326,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
                 filtered,
                 options["export_format"],
                 overwrite=options["overwrite_output"],
+                csv_safe=args.csv_safe,
             )
         except FileExistsError as exc:
             print(f"error: {exc}. Use --overwrite to replace it.", file=sys.stderr)
@@ -336,13 +405,8 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        written_count = count_written_records(output_path, options["export_format"])
-        if written_count != len(filtered):
-            print(
-                f"error: validation failed for {output_path}: "
-                f"expected {len(filtered)}, wrote {written_count}",
-                file=sys.stderr,
-            )
+        written_count = validate_written(output_path, options["export_format"], len(filtered))
+        if written_count is None:
             return 1
         if not args.quiet:
             print(f"Wrote {mode:>5}: {written_count:>4} prompts -> {output_path}")
@@ -359,17 +423,13 @@ def main(argv: list[str] | None = None) -> int:
                 filtered,
                 options["export_format"],
                 timestamp=timestamp,
+                csv_safe=args.csv_safe,
             )
         except OSError as exc:
             print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
             return 1
-        written_count = count_written_records(output_path, options["export_format"])
-        if written_count != len(filtered):
-            print(
-                f"error: validation failed for {output_path}: "
-                f"expected {len(filtered)}, wrote {written_count}",
-                file=sys.stderr,
-            )
+        written_count = validate_written(output_path, options["export_format"], len(filtered))
+        if written_count is None:
             return 1
         if not args.quiet:
             print(f"Wrote {mode:>5}: {written_count:>4} prompts -> {output_path}")
@@ -379,9 +439,31 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def normalize_options(args: argparse.Namespace) -> dict:
+def normalize_options(args: argparse.Namespace) -> dict[str, Any]:
+    # Order-preserving de-duplication: the same profile twice would only
+    # rewrite the same files.
+    profiles = list(dict.fromkeys(profile.strip() for profile in args.profiles))
+    if not all(profiles):
+        raise ValueError("profile cannot be empty")
+    if len(profiles) > 1 and (args.output_file or args.update_file or args.compare):
+        raise ValueError(
+            "--output-file, --compare, and --update-file take a single profile"
+        )
     if args.limit is not None and args.limit <= 0:
         raise ValueError("--limit must be greater than zero")
+    # argparse's float() accepts "nan"/"inf"; NaN compares false against every
+    # value and would silently filter out all records.
+    for flag, value in (
+        ("--min-price", args.min_price),
+        ("--max-price", args.max_price),
+        ("--min-rating", args.min_rating),
+    ):
+        if value is not None and not math.isfinite(value):
+            raise ValueError(f"{flag} must be a finite number")
+    if args.min_sales is not None and args.min_sales < 0:
+        raise ValueError("--min-sales cannot be negative")
+    if args.min_rating is not None and args.min_rating < 0:
+        raise ValueError("--min-rating cannot be negative")
     if args.min_price is not None and args.min_price < 0:
         raise ValueError("--min-price cannot be negative")
     if args.max_price is not None and args.max_price < 0:
@@ -419,6 +501,8 @@ def normalize_options(args: argparse.Namespace) -> dict:
         export_format = infer_format_from_path(output_file)
     else:
         export_format = args.format or "txt"
+    if args.csv_safe and export_format != "csv":
+        raise ValueError("--csv-safe requires --format csv")
 
     since_created = parse_datetime_ms(args.since, end_of_day=False) if args.since else None
     until_created = parse_datetime_ms(args.until, end_of_day=True) if args.until else None
@@ -430,6 +514,7 @@ def normalize_options(args: argparse.Namespace) -> dict:
         raise ValueError("--since cannot be later than --until")
 
     return {
+        "profiles": profiles,
         "compare_path": compare_path,
         "export_format": export_format,
         "output_file": output_file,
@@ -439,11 +524,28 @@ def normalize_options(args: argparse.Namespace) -> dict:
     }
 
 
+def validate_written(output_path: Path, export_format: str, expected: int) -> int | None:
+    """Re-read a written export and return its record count, or None on mismatch."""
+    try:
+        written_count = count_written_records(output_path, export_format)
+    except (OSError, ValueError) as exc:
+        print(f"error: validation failed for {output_path}: {exc}", file=sys.stderr)
+        return None
+    if written_count != expected:
+        print(
+            f"error: validation failed for {output_path}: "
+            f"expected {expected}, wrote {written_count}",
+            file=sys.stderr,
+        )
+        return None
+    return written_count
+
+
 def handle_compare(
-    selected_records,
+    selected_records: list[PromptRecord],
     modes: list[str],
     compare_path: Path,
-    diff_output: Path | None,
+    diff_outputs: list[Path],
     fail_on_diff: bool,
     *,
     quiet: bool,
@@ -458,23 +560,81 @@ def handle_compare(
     report = format_diff_report(diff)
     if not quiet:
         print(report.rstrip())
-    if diff_output:
-        try:
-            write_diff_report(diff_output, diff)
-        except OSError as exc:
-            print(
-                f"error: could not write diff report to {diff_output}: {exc}",
-                file=sys.stderr,
-            )
-            return EXIT_ERROR
-        if not quiet:
-            print(f"Wrote diff report -> {diff_output}")
+    if not write_diff_reports(diff_outputs, diff, quiet=quiet):
+        return EXIT_ERROR
     if fail_on_diff and diff.has_changes:
         return EXIT_DIFF
     return EXIT_SUCCESS
 
 
-def count_by(records, attribute: str) -> dict[str, int]:
+def write_diff_reports(paths: list[Path], diff: CatalogDiff, *, quiet: bool) -> bool:
+    """Write the diff report to every path; return False after the first failure."""
+    for path in paths:
+        try:
+            write_diff_report(path, diff)
+        except OSError as exc:
+            print(f"error: could not write diff report to {path}: {exc}", file=sys.stderr)
+            return False
+        if not quiet:
+            print(f"Wrote diff report -> {path}")
+    return True
+
+
+def build_diff_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="promptbase-diff",
+        description=(
+            "Compare two exported PromptBase catalogs without fetching anything. "
+            "Reads JSON, CSV, TXT, Markdown, and HTML catalogs."
+        ),
+    )
+    parser.add_argument("previous", type=Path, help="The older catalog.")
+    parser.add_argument("current", type=Path, help="The newer catalog.")
+    parser.add_argument(
+        "--diff-output",
+        type=Path,
+        action="append",
+        help="Write the report to this path: JSON for a .json path, Markdown otherwise.",
+    )
+    parser.add_argument(
+        "--fail-on-diff",
+        action="store_true",
+        help="Exit with code 2 when the catalogs differ.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Do not print the report.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    return parser
+
+
+def diff_main(argv: list[str] | None = None) -> int:
+    """Entry point for ``pb-diff``: compare two catalog files offline."""
+    args = build_diff_parser().parse_args(argv)
+    loaded: list[list[dict[str, Any]]] = []
+    for path in (args.previous, args.current):
+        try:
+            loaded.append(load_catalog(path))
+        except (OSError, ValueError) as exc:
+            print(f"error: could not load catalog {path}: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    diff = compare_catalog_records(loaded[0], loaded[1])
+    if not args.quiet:
+        print(format_diff_report(diff).rstrip())
+    if not write_diff_reports(args.diff_output or [], diff, quiet=args.quiet):
+        return EXIT_ERROR
+    if args.fail_on_diff and diff.has_changes:
+        return EXIT_DIFF
+    return EXIT_SUCCESS
+
+
+def count_by(records: list[PromptRecord], attribute: str) -> dict[str, int]:
     counts = Counter((getattr(record, attribute) or "unknown") for record in records)
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
@@ -485,13 +645,13 @@ def print_counts(title: str, counts: dict[str, int]) -> None:
         print(f"  {key}: {value}")
 
 
-def print_planned_outputs(records, modes: list[str]) -> None:
+def print_planned_outputs(records: list[PromptRecord], modes: list[str]) -> None:
     print("Planned outputs:")
     for mode in modes:
         print(f"  {mode}: {len(filter_records(records, mode))}")
 
 
-def print_summary(records, all_count: int | None = None) -> None:
+def print_summary(records: list[PromptRecord], all_count: int | None = None) -> None:
     image_count = len(filter_records(records, "image"))
     text_count = len(filter_records(records, "text"))
     other_count = len(records) - image_count - text_count

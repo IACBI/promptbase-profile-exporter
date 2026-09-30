@@ -5,11 +5,14 @@ import unittest
 import urllib.error
 from unittest.mock import MagicMock, patch
 
+from promptbase_exporter import __version__
 from promptbase_exporter.client import (
     MAX_RETRIES,
+    USER_AGENT,
     PromptBaseError,
     _open_json_with_retry,
     _raise_if_schema_changed,
+    _run_query,
     _run_query_all,
     fetch_prompts,
     field_filter,
@@ -85,6 +88,44 @@ class PaginationTests(unittest.TestCase):
         self.assertEqual([doc["slug"] for doc in docs], ["a", "b", "c"])
         # One pause between the two pages, never before the first page.
         self.assertEqual(sleep.call_count, 1)
+
+
+class RunQueryResponseTests(unittest.TestCase):
+    _filters = [field_filter("uid", "EQUAL", {"stringValue": "uid-1"})]
+
+    def test_non_list_response_raises_prompt_base_error(self):
+        with patch(
+            "promptbase_exporter.client._open_json_with_retry",
+            return_value={"error": {"message": "quota"}},
+        ):
+            with self.assertRaises(PromptBaseError):
+                _run_query("Items", self._filters)
+
+    def test_skips_rows_without_documents_and_tolerates_missing_name(self):
+        rows = [
+            {"readTime": "2026-01-01T00:00:00Z"},
+            "garbage",
+            {"document": {"fields": {"slug": {"stringValue": "a"}}}},
+        ]
+        with patch("promptbase_exporter.client._open_json_with_retry", return_value=rows):
+            docs = _run_query("Items", self._filters)
+
+        self.assertEqual(docs, [{"slug": "a", "_doc_name": ""}])
+
+    def test_request_identifies_the_tool_honestly(self):
+        with patch(
+            "promptbase_exporter.client._open_json_with_retry", return_value=[]
+        ) as open_json:
+            _run_query("Items", self._filters)
+
+        request = open_json.call_args.args[0]
+        user_agent = request.get_header("User-agent")
+        self.assertEqual(user_agent, USER_AGENT)
+        self.assertTrue(user_agent.startswith(f"promptbase-profile-exporter/{__version__} "))
+        self.assertNotIn("Mozilla", user_agent)
+        self.assertEqual(request.get_method(), "POST")
+        body = json.loads(request.data)
+        self.assertEqual(body["structuredQuery"]["from"], [{"collectionId": "Items"}])
 
 
 class SchemaDriftTests(unittest.TestCase):
@@ -276,6 +317,17 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 1)
         sleep.assert_not_called()
         self.assertIs(ctx.exception.__cause__, error)
+
+    def test_http_error_responses_are_closed(self):
+        errors = [self._http_error(503), self._http_error(404)]
+        with patch(
+            "promptbase_exporter.client.urllib.request.urlopen", side_effect=errors
+        ), patch("promptbase_exporter.client.time.sleep"):
+            with self.assertRaises(PromptBaseError):
+                _open_json_with_retry(MagicMock())
+
+        for error in errors:
+            self.assertTrue(error.fp.closed)
 
     def test_persistent_transient_http_error_exhausts_retries(self):
         with patch(

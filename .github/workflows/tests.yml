@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -26,6 +26,7 @@ jobs:
       - run: python -m promptbase_exporter --version
       - run: python -m promptbase_exporter --help
       - run: promptbase-export-web --version
+      - run: promptbase-diff --version
 
   package:
     runs-on: ubuntu-latest
@@ -37,3 +38,44 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check dist/*
+
+  # End-to-end run of the composite action against live public data: an
+  # export, then an in-place update that must report no changes, then a
+  # multi-profile dry run (which must not try to upload an artifact).
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./
+        with:
+          profile-url: "@acb"
+          mode: all
+          format: json
+          output-dir: ci-exports
+          upload-artifact: false
+      - id: update
+        uses: ./
+        with:
+          profile-url: "@acb"
+          mode: all
+          update-file: ci-exports/acb_all_prompts.json
+          fail-on-diff: true
+          upload-artifact: false
+      - name: Check update outputs
+        env:
+          EXIT_CODE: ${{ steps.update.outputs.exit-code }}
+          HAS_CHANGES: ${{ steps.update.outputs.has-changes }}
+          UNCHANGED: ${{ steps.update.outputs.unchanged }}
+          DIFF_JSON: ${{ steps.update.outputs.diff-json }}
+        run: |
+          set -euo pipefail
+          test "$EXIT_CODE" = 0
+          test "$HAS_CHANGES" = false
+          test "$UNCHANGED" -gt 0
+          python -c "import json, sys; assert json.load(open(sys.argv[1]))['has_changes'] is False" "$DIFF_JSON"
+      - uses: ./
+        with:
+          profile-url: |
+            @acb
+            emanema
+          dry-run: true

@@ -96,9 +96,9 @@ jobs:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `profile-url` | Required | PromptBase profile URL, path, username, or `@username`. |
+| `profile-url` | Required | PromptBase profile URL, path, username, or `@username`. Separate several profiles with commas, spaces, or new lines. |
 | `mode` | `split` | `split`, `all`, `text`, `image`, `text-only`, or `image-only`. |
-| `format` | `txt` | `txt`, `markdown`, `json`, or `csv`. |
+| `format` | Empty | `txt`, `markdown`, `json`, `csv`, or `html`. Empty means `txt`, or the format inferred from `output-file` / `update-file`. |
 | `output-dir` | `exports` | Directory where files are written. |
 | `sort` | `newest` | `newest`, `oldest`, `title`, `price`, `views`, `sales`, `downloads`, `favorites`, or `rating`. |
 | `domain` | Empty | Optional comma-separated domain filter such as `text,image`. |
@@ -106,17 +106,24 @@ jobs:
 | `price-mode` | Empty | Leave empty for all prompts, or use `free` / `paid`. |
 | `min-price` | Empty | Optional minimum price. |
 | `max-price` | Empty | Optional maximum price. |
+| `min-sales` | Empty | Optional minimum number of sales. |
+| `min-rating` | Empty | Optional minimum rating. |
 | `limit` | Empty | Optional maximum number of prompts after filtering and sorting. |
 | `since` | Empty | Optional inclusive created-date filter such as `2026-01-01`. |
 | `until` | Empty | Optional inclusive created-date filter such as `2026-12-31`. |
+| `output-file` | Empty | Write a single catalog to this exact path. Requires `mode` other than `split`. |
+| `overwrite` | `false` | Allow `output-file` to replace an existing file. |
+| `update-file` | Empty | Compare against this catalog and rewrite it in place. Requires `mode` other than `split`. |
 | `compare` | Empty | Existing catalog path to compare against. Requires `mode` other than `split`. |
-| `diff-output` | Empty | Optional path where the comparison report should be written. |
-| `fail-on-diff` | `false` | Exit with code 2 when `compare` finds changes. |
+| `diff-output` | Empty | Optional path for the comparison report: JSON for a `.json` path, Markdown otherwise. |
+| `fail-on-diff` | `false` | Exit with code 2 when `compare` or `update-file` finds changes. |
+| `csv-safe` | `false` | Protect CSV text cells from spreadsheet formula injection. Requires CSV output. |
+| `dry-run` | `false` | Fetch, filter, and validate without writing files. Skips the artifact upload. |
 | `timestamp-filenames` | `false` | Add a timestamp to generated filenames. |
 | `allow-missing-descriptions` | `false` | Write partial exports when descriptions are missing. |
 | `python-version` | `3.12` | Python version used by `actions/setup-python`. |
 | `working-directory` | `.` | Directory where the export command runs. |
-| `upload-artifact` | `true` | Upload the output directory with `actions/upload-artifact`. |
+| `upload-artifact` | `true` | Upload the output directory (or the `output-file` / `update-file` catalog) with `actions/upload-artifact`. |
 | `artifact-name` | `promptbase-exports` | Name of the uploaded artifact. |
 
 ## Outputs
@@ -125,6 +132,13 @@ jobs:
 | --- | --- |
 | `output-dir` | Directory containing the generated export files (echoes the `output-dir` input). |
 | `artifact-name` | Name of the uploaded artifact (echoes the `artifact-name` input). |
+| `exit-code` | Exit code of the exporter: `0` success, `1` error, `2` changes found with `fail-on-diff`. |
+| `has-changes` | With `compare` or `update-file`: `true` when the catalog changed, otherwise `false`. |
+| `added`, `removed`, `changed`, `unchanged` | With `compare` or `update-file`: the number of prompts in each group. |
+| `diff-json` | With `compare` or `update-file`: path of the machine-readable JSON diff report. |
+
+The comparison outputs are set even when `fail-on-diff` fails the step, so a
+later step with `if: always()` can still read them.
 
 Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 
@@ -182,6 +196,37 @@ Fail a workflow when the catalog changed:
     compare: exports/acb_all_prompts.json
     diff-output: exports/catalog-diff.md
     fail-on-diff: true
+```
+
+Keep a catalog in the repository up to date, and act on what changed:
+
+```yaml
+- uses: actions/checkout@v7
+- id: catalog
+  uses: IACBI/promptbase-profile-exporter@v0.8.0
+  with:
+    profile-url: https://promptbase.com/profile/acb
+    mode: all
+    update-file: catalog/acb.json
+    upload-artifact: false
+- if: steps.catalog.outputs.has-changes == 'true'
+  run: |
+    echo "Added ${{ steps.catalog.outputs.added }}, removed ${{ steps.catalog.outputs.removed }}, changed ${{ steps.catalog.outputs.changed }}"
+    git config user.name "github-actions[bot]"
+    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+    git commit -am "Update PromptBase catalog" && git push
+```
+
+Export several profiles as searchable HTML catalogs:
+
+```yaml
+- uses: IACBI/promptbase-profile-exporter@v0.8.0
+  with:
+    profile-url: |
+      @acb
+      @dreamydesigns
+    mode: all
+    format: html
 ```
 
 Use the local checkout of this repository while developing the action:

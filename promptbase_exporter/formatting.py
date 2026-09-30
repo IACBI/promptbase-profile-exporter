@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
+import os
 import re
+import shutil
+import uuid
 from pathlib import Path
 
 from .models import PromptRecord
 
-EXPORT_FORMATS = ("txt", "markdown", "json", "csv")
+EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html")
 SORT_OPTIONS = (
     "newest",
     "oldest",
@@ -20,12 +24,42 @@ SORT_OPTIONS = (
     "favorites",
     "rating",
 )
+# CSV column order; must list exactly the keys record_to_dict produces.
+RECORD_FIELDS = (
+    "title",
+    "description",
+    "slug",
+    "url",
+    "type",
+    "domain",
+    "created",
+    "created_iso",
+    "price",
+    "discount",
+    "views",
+    "sales",
+    "downloads",
+    "favorites",
+    "rating",
+    "reviews",
+)
 FORMAT_EXTENSIONS = {
     "txt": "txt",
     "markdown": "md",
     "json": "json",
     "csv": "csv",
+    "html": "html",
 }
+# Spreadsheet apps evaluate a cell that starts with one of these as a formula
+# (CSV/formula injection). --csv-safe prefixes such text cells with "'".
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+# The HTML export embeds the full records as JSON in this element so the
+# catalog can be loaded back for --compare/--update-file.
+HTML_DATA_ELEMENT_ID = "promptbase-catalog-data"
+_HTML_DATA_RE = re.compile(
+    rf'<script type="application/json" id="{HTML_DATA_ELEMENT_ID}">(?P<data>.*?)</script>',
+    re.DOTALL,
+)
 
 
 def parse_csv_option(value: str | None) -> set[str]:
@@ -55,6 +89,8 @@ def filter_records_by_metadata(
     max_price: float | None = None,
     since_created: int | None = None,
     until_created: int | None = None,
+    min_sales: int | None = None,
+    min_rating: float | None = None,
 ) -> list[PromptRecord]:
     filtered = list(records)
     if domains:
@@ -75,6 +111,10 @@ def filter_records_by_metadata(
         filtered = [record for record in filtered if record.created >= since_created]
     if until_created is not None:
         filtered = [record for record in filtered if record.created <= until_created]
+    if min_sales is not None:
+        filtered = [record for record in filtered if record.sales >= min_sales]
+    if min_rating is not None:
+        filtered = [record for record in filtered if record.rating >= min_rating]
     return filtered
 
 
@@ -102,7 +142,7 @@ def format_records_as_text(records: list[PromptRecord]) -> str:
         description = record.description.replace("\r\n", "\n").replace("\r", "\n")
         parts.append(
             f"{index}.\n"
-            f"Title: {record.title}\n"
+            f"Title: {_single_line(record.title)}\n"
             f"Description:\n"
             f"{description.strip()}\n"
         )
@@ -115,7 +155,7 @@ def format_records_as_markdown(records: list[PromptRecord]) -> str:
         description = record.description.replace("\r\n", "\n").replace("\r", "\n")
         parts.extend(
             [
-                f"## {index}. {record.title}",
+                f"## {index}. {_single_line(record.title)}",
                 "",
                 f"- URL: {record.url}",
                 f"- Domain: {record.domain or 'unknown'}",
@@ -130,6 +170,12 @@ def format_records_as_markdown(records: list[PromptRecord]) -> str:
             ]
         )
     return "\n".join(parts).rstrip() + "\n"
+
+
+def _single_line(value: str) -> str:
+    # TXT and Markdown keep the title on one line; an embedded line break would
+    # split the record header and break both validation and diff parsing.
+    return " ".join(value.split())
 
 
 def record_to_dict(record: PromptRecord) -> dict[str, object]:
@@ -158,34 +204,151 @@ def format_records_as_json(records: list[PromptRecord]) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
-def format_records_as_csv(records: list[PromptRecord]) -> str:
-    fieldnames = [
-        "title",
-        "description",
-        "slug",
-        "url",
-        "type",
-        "domain",
-        "created",
-        "created_iso",
-        "price",
-        "discount",
-        "views",
-        "sales",
-        "downloads",
-        "favorites",
-        "rating",
-        "reviews",
-    ]
+def format_records_as_csv(records: list[PromptRecord], *, safe: bool = False) -> str:
     rows = [record_to_dict(record) for record in records]
+    if safe:
+        rows = [
+            {key: csv_escape_formula(value) for key, value in row.items()} for row in rows
+        ]
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer = csv.DictWriter(output, fieldnames=RECORD_FIELDS, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue()
 
 
-def format_records(records: list[PromptRecord], export_format: str) -> str:
+def csv_escape_formula(value: object) -> object:
+    """Prefix a text cell that a spreadsheet would run as a formula with ``'``.
+
+    Only strings are touched: numeric cells such as prices are written by the
+    exporter itself and cannot carry a formula.
+    """
+    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def csv_unescape_formula(value: str) -> str:
+    """Reverse :func:`csv_escape_formula` when loading a ``--csv-safe`` catalog."""
+    if len(value) > 1 and value[0] == "'" and value[1:].startswith(CSV_FORMULA_PREFIXES):
+        return value[1:]
+    return value
+
+
+_HTML_STYLE = """
+:root { color-scheme: light dark; --bg: #f5f7f9; --panel: #fff; --text: #16202a;
+  --muted: #5f6b77; --line: #d9e1e8; --accent: #1f7a5c; }
+@media (prefers-color-scheme: dark) { :root { --bg: #11171d; --panel: #19222b;
+  --text: #f0f4f8; --muted: #adbac7; --line: #34414f; --accent: #5cc49d; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.55;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { width: min(920px, calc(100% - 32px)); margin: 32px auto; }
+h1 { margin: 0 0 4px; font-size: 30px; }
+.summary { margin: 0 0 16px; color: var(--muted); }
+input[type=search] { width: 100%; padding: 10px 12px; margin-bottom: 16px; font: inherit;
+  color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; }
+ol { list-style: none; margin: 0; padding: 0; }
+.prompt { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 16px 20px; margin-bottom: 12px; }
+.prompt h2 { margin: 0 0 4px; font-size: 19px; }
+.prompt a { color: var(--accent); }
+.facts { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+.description { white-space: pre-wrap; overflow-wrap: anywhere; }
+"""
+
+# Plain DOM filtering over already-rendered, already-escaped markup: no record
+# data is ever inserted as HTML, so a hostile description cannot inject script.
+_HTML_SCRIPT = """
+(function () {
+  var box = document.getElementById("filter");
+  var items = Array.prototype.slice.call(document.querySelectorAll("li.prompt"));
+  var summary = document.getElementById("summary");
+  var total = items.length;
+  box.hidden = false;
+  box.addEventListener("input", function () {
+    var needle = box.value.trim().toLowerCase();
+    var shown = 0;
+    items.forEach(function (item) {
+      var hit = !needle || item.textContent.toLowerCase().indexOf(needle) !== -1;
+      item.hidden = !hit;
+      if (hit) { shown += 1; }
+    });
+    summary.textContent = needle ? shown + " of " + total + " prompts" : total + " prompts";
+  });
+})();
+"""
+
+
+def format_records_as_html(records: list[PromptRecord]) -> str:
+    """Render a self-contained, searchable HTML catalog.
+
+    Every record value is HTML-escaped. The full records are also embedded as
+    JSON (with ``<`` escaped so no value can close the script element) so the
+    file can be loaded back by the diff tooling.
+    """
+    items: list[str] = []
+    for record in records:
+        description = record.description.replace("\r\n", "\n").replace("\r", "\n").strip()
+        facts = " · ".join(
+            [
+                record.domain or "unknown",
+                record.prompt_type or "unknown",
+                f"price {record.price:g}",
+                record.created_iso[:10] if record.created_iso else "unknown date",
+                f"{record.views} views",
+                f"{record.sales} sales",
+            ]
+        )
+        items.append(
+            '<li class="prompt"><article>'
+            f'<h2><a href="{_h(record.url)}">{_h(_single_line(record.title))}</a></h2>'
+            f'<p class="facts">{_h(facts)}</p>'
+            f'<div class="description">{_h(description)}</div>'
+            "</article></li>"
+        )
+    data = json.dumps(
+        [record_to_dict(record) for record in records], ensure_ascii=False
+    ).replace("<", "\\u003c")
+    count = len(records)
+    return (
+        "<!doctype html>\n"
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        "<title>PromptBase Prompt Export</title>\n"
+        f"<style>{_HTML_STYLE}</style>\n</head>\n<body>\n<main>\n"
+        "<h1>PromptBase Prompt Export</h1>\n"
+        f'<p class="summary" id="summary">{count} prompts</p>\n'
+        '<input type="search" id="filter" placeholder="Filter prompts" '
+        'aria-label="Filter prompts" hidden>\n'
+        '<ol id="prompts">\n' + "\n".join(items) + "\n</ol>\n</main>\n"
+        f'<script type="application/json" id="{HTML_DATA_ELEMENT_ID}">{data}</script>\n'
+        f"<script>{_HTML_SCRIPT}</script>\n</body>\n</html>\n"
+    )
+
+
+def load_html_catalog_data(text: str) -> list[object]:
+    """Return the records embedded in an HTML export by :func:`format_records_as_html`."""
+    match = _HTML_DATA_RE.search(text)
+    if match is None:
+        raise ValueError("HTML catalog has no embedded PromptBase catalog data.")
+    data = json.loads(match.group("data"))
+    if not isinstance(data, list):
+        raise ValueError("HTML catalog data must be a list of records.")
+    return data
+
+
+def _h(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def format_records(
+    records: list[PromptRecord],
+    export_format: str,
+    *,
+    csv_safe: bool = False,
+) -> str:
     if export_format == "txt":
         return format_records_as_text(records)
     if export_format == "markdown":
@@ -193,7 +356,9 @@ def format_records(records: list[PromptRecord], export_format: str) -> str:
     if export_format == "json":
         return format_records_as_json(records)
     if export_format == "csv":
-        return format_records_as_csv(records)
+        return format_records_as_csv(records, safe=csv_safe)
+    if export_format == "html":
+        return format_records_as_html(records)
     raise ValueError(f"Unsupported export format: {export_format}")
 
 
@@ -226,6 +391,8 @@ def write_export(
     export_format: str,
     timestamp: str | None = None,
     overwrite: bool = True,
+    *,
+    csv_safe: bool = False,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / expected_timestamped_filename(
@@ -234,7 +401,9 @@ def write_export(
         export_format,
         timestamp,
     )
-    write_export_to_path(output_path, records, export_format, overwrite=overwrite)
+    write_export_to_path(
+        output_path, records, export_format, overwrite=overwrite, csv_safe=csv_safe
+    )
     return output_path
 
 
@@ -244,12 +413,38 @@ def write_export_to_path(
     export_format: str,
     *,
     overwrite: bool,
+    csv_safe: bool = False,
 ) -> Path:
-    if output_path.exists() and not overwrite:
-        raise FileExistsError(f"Output file already exists: {output_path}")
+    content = format_records(records, export_format, csv_safe=csv_safe)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(format_records(records, export_format), encoding="utf-8", newline="\n")
+    if not overwrite:
+        # Exclusive create: no window between an existence check and the write.
+        try:
+            with output_path.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(content)
+        except FileExistsError:
+            raise FileExistsError(f"Output file already exists: {output_path}") from None
+        return output_path
+    _atomic_write_text(output_path, content)
     return output_path
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    # Write beside the target and swap it in, so a failed write (disk full,
+    # interrupted run) never leaves a truncated catalog: --update-file
+    # rewrites what may be the user's only copy.
+    # Not tempfile.mkstemp: it creates the file 0600, which os.replace would
+    # carry over to the catalog. Exclusive create keeps the umask default.
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp_path.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+        if path.exists():
+            shutil.copymode(path, temp_path)
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def infer_format_from_path(path: Path) -> str:
@@ -262,6 +457,8 @@ def infer_format_from_path(path: Path) -> str:
         return "json"
     if extension == ".csv":
         return "csv"
+    if extension in {".html", ".htm"}:
+        return "html"
     raise ValueError(f"Cannot infer export format from extension: {path.suffix}")
 
 
@@ -284,6 +481,16 @@ def count_written_records(path: Path, export_format: str) -> int:
         return len(json.loads(text))
     if export_format == "csv":
         return sum(1 for _ in csv.DictReader(io.StringIO(text)))
+    if export_format == "html":
+        # Descriptions are HTML-escaped, so this marker only ever comes from
+        # the writer itself. The rendered list and the embedded data must agree.
+        rendered = text.count('<li class="prompt">')
+        embedded = len(load_html_catalog_data(text))
+        if rendered != embedded:
+            raise ValueError(
+                f"HTML catalog lists {rendered} prompts but embeds {embedded} records"
+            )
+        return rendered
     raise ValueError(f"Unsupported export format: {export_format}")
 
 

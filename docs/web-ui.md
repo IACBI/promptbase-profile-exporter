@@ -1,12 +1,20 @@
 # Web UI
 
 A small built-in web interface for running exports from the browser. Its form
-covers the export options of the [command line](cli.md): mode, format, sort,
-filters, limit, timestamped filenames, and partial exports. It adds a download
-link for each file it writes. Catalog comparison and in-place updates
-(`--compare`, `--update-file`) and the preview options (`--dry-run`,
-`--list-domains`, `--list-types`) are command-line only. Like the rest of the
-tool, it needs nothing beyond the Python standard library.
+covers the export options of the [command line](cli.md): mode, format
+(including the searchable HTML catalog), sort, filters (among them minimum
+sales and rating), limit, timestamped filenames, partial exports, and CSV
+formula protection. It adds a download link for each file it writes.
+
+It can also compare the export with a catalog you already have: enter the
+catalog's path in "Compare with existing catalog" (a JSON, CSV, TXT, Markdown,
+or HTML file inside the folder the server runs in, with a mode other than
+`split`), and the result page shows the same added / removed / changed report
+as `--compare`. The comparison is taken before any file is written, so it is
+accurate even when the export overwrites that catalog. Rewriting a catalog in
+place (`--update-file`), several profiles per run, and the preview options
+(`--dry-run`, `--list-domains`, `--list-types`) are command-line only. Like the
+rest of the tool, it needs nothing beyond the Python standard library.
 
 ## Starting it
 
@@ -33,7 +41,8 @@ so its protections focus on stopping other websites and other machines from
 using it:
 
 - **Loopback by default.** The server listens on `127.0.0.1` only. Binding to
-  another address, such as `--host 0.0.0.0`, prints a warning, because the
+  another address, such as `--host 0.0.0.0` or an empty `--host ""` (which
+  also means every interface), prints a warning, because the
   export endpoint fetches remote data and writes files for anyone who can
   reach it. Only do that on a network you trust.
 - **Cross-site requests are rejected.** `POST /export` checks the `Host`
@@ -45,15 +54,25 @@ using it:
   traversal are rejected. Paths are checked before they touch the
   filesystem, so a network path such as `//host/share` is refused without the
   server ever contacting that host.
+- **Comparisons read inside the working directory only.** The comparison
+  catalog path gets the same containment check as the output directory, must
+  have a catalog extension, and is only read, never written. The page shows
+  just the diff report (titles, slugs, and changed values).
 - **Downloads serve exports only.** `GET /download` returns a file only if it
   sits inside the working directory *and* its name matches the exporter's own
-  pattern, `<username>_<mode>_prompts[_timestamp].{txt,md,json,csv}`. It
+  pattern, `<username>_<mode>_prompts[_timestamp].{txt,md,json,csv,html}`. It
   cannot be used to read other files, not even a stray `secrets.json` next to
-  your exports.
+  your exports. Downloads are always sent as attachments with
+  `Content-Security-Policy: sandbox`, so an HTML export can never run script
+  on the UI's origin.
 - **Hardened responses.** Pages are served with a strict Content Security
   Policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
   `Referrer-Policy: no-referrer`. Oversized or malformed form submissions are
-  rejected.
+  rejected, and a connection that stalls while sending its request is closed
+  after 60 seconds.
+- **One export writes at a time.** Requests are handled in parallel, but the
+  compare-write-validate step is serialized, so two exports of the same profile
+  cannot interleave their writes to the same files.
 
 The command line is not subject to these limits: it runs as you and writes
 wherever you point it.

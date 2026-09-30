@@ -23,6 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
   "Topic :: Utilities"
 ]
@@ -36,9 +37,11 @@ Changelog = "https://github.com/IACBI/promptbase-profile-exporter/blob/main/CHAN
 [project.scripts]
 promptbase-export = "promptbase_exporter.cli:main"
 promptbase-export-web = "promptbase_exporter.web:main"
+promptbase-diff = "promptbase_exporter.cli:diff_main"
 # Short aliases for the same entry points (e.g. `uv tool install .` then `pb`).
 pb = "promptbase_exporter.cli:main"
 pb-web = "promptbase_exporter.web:main"
+pb-diff = "promptbase_exporter.cli:diff_main"
 
 [project.optional-dependencies]
 dev = ["build", "coverage", "mypy", "ruff", "twine"]

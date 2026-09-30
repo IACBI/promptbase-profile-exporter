@@ -2,19 +2,29 @@ from __future__ import annotations
 
 import argparse
 import html
+import math
 import os
 import re
 import sys
+import threading
 import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Protocol
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
 from .dates import parse_datetime_ms
+from .diffing import (
+    CATALOG_SUFFIXES,
+    CatalogDiff,
+    compare_catalogs,
+    format_diff_report,
+    load_catalog,
+)
 from .formatting import (
     EXPORT_FORMATS,
     SORT_OPTIONS,
@@ -41,6 +51,7 @@ DOWNLOAD_CONTENT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".csv": "text/csv; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
 }
 
 # Names that write_export actually produces:
@@ -50,8 +61,14 @@ DOWNLOAD_CONTENT_TYPES = {
 # directory, even when the server is exposed with --host 0.0.0.0.
 _EXPORT_FILENAME_RE = re.compile(
     r"^[A-Za-z0-9_.-]+_(?:all|text|image)_prompts(?:_\d{8}_\d{6})?"
-    r"\.(?:txt|md|json|csv)$"
+    r"\.(?:txt|md|json|csv|html)$"
 )
+
+
+# ThreadingHTTPServer handles requests concurrently. Two exports of the same
+# profile write the same filenames, so the compare/write/validate phase is
+# serialized; the slow network fetch before it still runs in parallel.
+_EXPORT_LOCK = threading.Lock()
 
 
 class WebInputError(ValueError):
@@ -77,6 +94,11 @@ class ExportRequest:
     until_created: int | None = None
     timestamp_filenames: bool = False
     allow_missing_descriptions: bool = False
+    min_sales: int | None = None
+    min_rating: float | None = None
+    csv_safe: bool = False
+    compare_file: str = ""
+    compare_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -95,10 +117,27 @@ class WebExportResult:
     image_records: int
     other_records: int
     files: tuple[ExportedFile, ...]
+    diff: CatalogDiff | None = None
 
 
 FetchPrompts = Callable[[str], tuple[Profile, list[PromptRecord]]]
-WriteExport = Callable[[Path, str, str, list[PromptRecord], str, str | None], Path]
+
+
+class WriteExport(Protocol):
+    def __call__(
+        self,
+        output_dir: Path,
+        username: str,
+        mode: str,
+        records: list[PromptRecord],
+        export_format: str,
+        timestamp: str | None = None,
+        overwrite: bool = True,
+        *,
+        csv_safe: bool = False,
+    ) -> Path: ...
+
+
 CountWrittenRecords = Callable[[Path, str], int]
 
 
@@ -132,9 +171,11 @@ def build_request_config(
 
     min_price = _parse_optional_price(form_data, "min_price")
     max_price = _parse_optional_price(form_data, "max_price")
+    min_sales = _parse_optional_int(form_data, "min_sales", minimum=0)
+    min_rating = _parse_optional_price(form_data, "min_rating")
     if min_price is not None and max_price is not None and min_price > max_price:
         raise WebInputError("Minimum price cannot be greater than maximum price.")
-    limit = _parse_optional_int(form_data, "limit")
+    limit = _parse_optional_int(form_data, "limit", minimum=1)
     since = _single_value(form_data, "since").strip()
     until = _single_value(form_data, "until").strip()
     since_created = _parse_optional_date(since, "since", end_of_day=False)
@@ -149,6 +190,13 @@ def build_request_config(
     output_dir = _single_value(form_data, "output_dir", DEFAULT_OUTPUT_DIR).strip()
     if not output_dir:
         output_dir = DEFAULT_OUTPUT_DIR
+
+    csv_safe = _as_bool(_single_value(form_data, "csv_safe"))
+    if csv_safe and export_format != "csv":
+        raise WebInputError("CSV formula protection requires the csv format.")
+
+    compare_file = _single_value(form_data, "compare_file").strip()
+    compare_path = _resolve_compare_path(compare_file, mode) if compare_file else None
 
     return ExportRequest(
         profile_input=profile_input,
@@ -170,6 +218,11 @@ def build_request_config(
         allow_missing_descriptions=_as_bool(
             _single_value(form_data, "allow_missing_descriptions")
         ),
+        min_sales=min_sales,
+        min_rating=min_rating,
+        csv_safe=csv_safe,
+        compare_file=compare_file,
+        compare_path=compare_path,
     )
 
 
@@ -207,6 +260,8 @@ def run_export(
         max_price=request.max_price,
         since_created=since_created,
         until_created=until_created,
+        min_sales=request.min_sales,
+        min_rating=request.min_rating,
     )
     if not selected_records:
         raise WebInputError("No prompts matched the selected filters.")
@@ -230,23 +285,39 @@ def run_export(
     )
 
     exported_files: list[ExportedFile] = []
-    for mode in modes:
-        filtered = filter_records(selected_records, mode)
-        output_path = writer(
-            request.output_dir,
-            profile.username,
-            mode,
-            filtered,
-            request.export_format,
-            timestamp,
-        )
-        written_count = counter(output_path, request.export_format)
-        if written_count != len(filtered):
-            raise WebInputError(
-                f"Validation failed for {output_path}: "
-                f"expected {len(filtered)}, wrote {written_count}."
+    diff: CatalogDiff | None = None
+    with _EXPORT_LOCK:
+        # Compare before writing: the export may overwrite the very catalog
+        # being compared against.
+        if request.compare_path is not None:
+            try:
+                previous = load_catalog(request.compare_path)
+            except (OSError, ValueError) as exc:
+                raise WebInputError(f"Could not load comparison catalog: {exc}") from exc
+            diff = compare_catalogs(previous, filter_records(selected_records, modes[0]))
+        for mode in modes:
+            filtered = filter_records(selected_records, mode)
+            output_path = writer(
+                request.output_dir,
+                profile.username,
+                mode,
+                filtered,
+                request.export_format,
+                timestamp,
+                csv_safe=request.csv_safe,
             )
-        exported_files.append(ExportedFile(mode=mode, path=output_path, count=written_count))
+            try:
+                written_count = counter(output_path, request.export_format)
+            except ValueError as exc:
+                raise WebInputError(f"Validation failed for {output_path}: {exc}") from exc
+            if written_count != len(filtered):
+                raise WebInputError(
+                    f"Validation failed for {output_path}: "
+                    f"expected {len(filtered)}, wrote {written_count}."
+                )
+            exported_files.append(
+                ExportedFile(mode=mode, path=output_path, count=written_count)
+            )
 
     image_count = len(filter_records(selected_records, "image"))
     text_count = len(filter_records(selected_records, "text"))
@@ -258,6 +329,7 @@ def run_export(
         image_records=image_count,
         other_records=len(selected_records) - image_count - text_count,
         files=tuple(exported_files),
+        diff=diff,
     )
 
 
@@ -288,6 +360,7 @@ def render_form(
             </thead>
             <tbody>{rows}</tbody>
           </table>
+          {_render_diff(result.diff)}
         </section>
         """
 
@@ -413,6 +486,18 @@ def render_form(
     code {{
       overflow-wrap: anywhere;
     }}
+    pre {{
+      margin: 14px 0 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }}
+    h3 {{
+      margin: 18px 0 0;
+      font-size: 16px;
+    }}
     .success {{
       border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
     }}
@@ -498,6 +583,16 @@ def render_form(
           <input id="until" name="until" value="{_h(request.until)}" placeholder="2026-12-31">
         </div>
         <div>
+          <label for="min_sales">Minimum sales</label>
+          <input id="min_sales" name="min_sales" inputmode="numeric"
+            value="{_h(_format_optional_int(request.min_sales))}" placeholder="0">
+        </div>
+        <div>
+          <label for="min_rating">Minimum rating</label>
+          <input id="min_rating" name="min_rating" inputmode="decimal"
+            value="{_h(_format_optional_float(request.min_rating))}" placeholder="4.5">
+        </div>
+        <div>
           <label for="limit">Limit</label>
           <input id="limit" name="limit" inputmode="numeric"
             value="{_h(_format_optional_int(request.limit))}" placeholder="50">
@@ -505,6 +600,11 @@ def render_form(
         <div class="full">
           <label for="output_dir">Output directory</label>
           <input id="output_dir" name="output_dir" value="{_h(str(request.output_dir))}">
+        </div>
+        <div class="full">
+          <label for="compare_file">Compare with existing catalog (optional)</label>
+          <input id="compare_file" name="compare_file" value="{_h(request.compare_file)}"
+            placeholder="exports/acb_all_prompts.json">
         </div>
         <label class="checkline">
           <input type="checkbox" name="timestamp_filenames" value="1"
@@ -516,6 +616,11 @@ def render_form(
             {_checked(request.allow_missing_descriptions)}>
           Allow partial exports
         </label>
+        <label class="checkline">
+          <input type="checkbox" name="csv_safe" value="1"
+            {_checked(request.csv_safe)}>
+          CSV formula protection
+        </label>
       </div>
       <div class="actions">
         <button type="submit">Export prompts</button>
@@ -525,6 +630,12 @@ def render_form(
 </body>
 </html>
 """
+
+
+def _render_diff(diff: CatalogDiff | None) -> str:
+    if diff is None:
+        return ""
+    return f"<h3>Comparison</h3><pre>{_h(format_diff_report(diff))}</pre>"
 
 
 def _render_file_row(item: ExportedFile) -> str:
@@ -555,6 +666,9 @@ def render_select(name: str, options: Sequence[str], selected: str) -> str:
 
 class PromptBaseWebHandler(BaseHTTPRequestHandler):
     server_version = f"PromptBaseProfileExporter/{__version__}"
+    # Socket timeout for reading the request: a client that opens a connection
+    # and stalls would otherwise pin a server thread indefinitely.
+    timeout = 60
 
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path
@@ -622,6 +736,11 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             self._send_html(render_form(request, error=str(exc)), status=400)
         except PromptBaseError as exc:
             self._send_html(render_form(request, error=str(exc)), status=502)
+        except OSError as exc:
+            self._send_html(
+                render_form(request, error=f"Could not write export: {exc}"),
+                status=500,
+            )
         except Exception as exc:  # pragma: no cover - last-resort web boundary
             self._send_html(
                 render_form(request, error=f"Unexpected error: {exc}"),
@@ -700,6 +819,9 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         # keeps any unusual characters from breaking the header.
         disposition = f'attachment; filename="{_content_disposition_name(filename)}"'
         self.send_header("Content-Disposition", disposition)
+        # HTML exports are served too; should a browser ever render one
+        # inline, a sandbox keeps its script from running on this origin.
+        self.send_header("Content-Security-Policy", "sandbox")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
@@ -724,7 +846,9 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", ""}
+# An empty host is deliberately absent: socket.bind treats "" as INADDR_ANY,
+# i.e. every interface, which is exactly the exposure the warning is for.
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _warn_if_exposed(host: str) -> None:
@@ -776,6 +900,24 @@ def _parse_optional_date(value: str, name: str, *, end_of_day: bool) -> int | No
         return parse_datetime_ms(value, end_of_day=end_of_day)
     except ValueError as exc:
         raise WebInputError(f"{name.title()} date is invalid: {exc}") from exc
+
+
+def _resolve_compare_path(raw: str, mode: str) -> Path:
+    """Validate a web-submitted comparison catalog: a readable file in the cwd."""
+    if mode == "split":
+        raise WebInputError("Comparing requires mode all, text, or image.")
+    path = _confine_to_cwd(raw)
+    if path is None:
+        raise WebInputError(
+            "Comparison catalog must be inside the server's working directory."
+        )
+    if path.suffix.lower() not in CATALOG_SUFFIXES:
+        raise WebInputError(
+            "Comparison catalog must be a JSON, CSV, TXT, Markdown, or HTML file."
+        )
+    if not path.is_file():
+        raise WebInputError("Comparison catalog not found.")
+    return path
 
 
 def _resolve_output_dir(raw: str) -> Path:
@@ -835,6 +977,10 @@ def _parse_optional_price(
         value = float(raw)
     except ValueError as exc:
         raise WebInputError(f"{name.replace('_', ' ').title()} must be a number.") from exc
+    # float() accepts "nan" and "inf"; NaN compares false against every price
+    # and would silently filter out all records.
+    if not math.isfinite(value):
+        raise WebInputError(f"{name.replace('_', ' ').title()} must be a number.")
     if value < 0:
         raise WebInputError(f"{name.replace('_', ' ').title()} cannot be negative.")
     return value
@@ -843,16 +989,21 @@ def _parse_optional_price(
 def _parse_optional_int(
     data: Mapping[str, str | Sequence[str]],
     name: str,
+    *,
+    minimum: int,
 ) -> int | None:
     raw = _single_value(data, name).strip()
     if not raw:
         return None
+    label = name.replace("_", " ").title()
     try:
         value = int(raw)
     except ValueError as exc:
-        raise WebInputError(f"{name.replace('_', ' ').title()} must be an integer.") from exc
-    if value <= 0:
-        raise WebInputError(f"{name.replace('_', ' ').title()} must be greater than zero.")
+        raise WebInputError(f"{label} must be an integer.") from exc
+    if value < minimum:
+        if minimum == 1:
+            raise WebInputError(f"{label} must be greater than zero.")
+        raise WebInputError(f"{label} cannot be less than {minimum}.")
     return value
 
 
