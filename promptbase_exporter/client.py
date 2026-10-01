@@ -113,7 +113,10 @@ def parse_profile_input(profile_input: str) -> str:
     # otherwise be taken as the username itself.
     if raw.lower().startswith(("promptbase.com/", "www.promptbase.com/")):
         raw = f"https://{raw}"
-    parsed = urllib.parse.urlparse(raw)
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except ValueError as exc:  # e.g. an unclosed "[" read as an IPv6 address
+        raise PromptBaseError(f"Not a valid profile URL: {exc}.") from None
 
     if parsed.scheme and parsed.netloc:
         path_parts = [part for part in parsed.path.split("/") if part]

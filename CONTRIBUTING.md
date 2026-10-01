@@ -43,6 +43,13 @@ python -m build
 python -m twine check dist/*
 ```
 
+Code that reads catalogs, config files, or remote text is also fuzzed:
+`fuzz/fuzz_parsers.py` runs under [Atheris](https://github.com/google/atheris) in
+the `fuzz` workflow (Linux; a minute on pull requests that change the code,
+five minutes weekly). Without Atheris, `python fuzz/fuzz_parsers.py --smoke 2000`
+runs the same checks on seeded random inputs, and the test suite runs a short
+smoke pass. When you add a parser, add a target and a seed for it there.
+
 When you change how data is fetched from PromptBase, also run a real export
 against a public profile:
 

@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- Found by the new fuzzing:
+  - A CSV catalog with a row longer than its header is now an error that names the
+    line. With `--compare-csv-safe` or `--from-csv-safe` it used to end in an
+    `AttributeError` traceback, and without them the surplus values were silently
+    kept under no column.
+  - A profile written as a malformed URL, such as `https://[x/profile/acb` (an
+    unclosed `[` reads as an IPv6 address), is now the usual "not a valid profile
+    URL" error; `pb` and `pb-history` used to stop with a traceback.
+  - Records that have neither a slug nor a title (a hand-edited CSV, say), or that
+    repeat a slug, are paired with an identical record first, so a catalog compared
+    with itself no longer reports them as both added and removed.
+
+### Changed
+
+- Development only: the code that reads catalogs, config files, and remote text is
+  fuzzed with Atheris (coverage-guided) in a new `fuzz` workflow: catalog loaders
+  in every format, `pb-convert`'s record reader and every writer, the text
+  sanitizers, profile and alert parsing, comparisons, and config files, each with
+  the guarantees it must keep. A seeded smoke mode runs the same checks without
+  Atheris, and the test suite runs it briefly.
 ### Security
 
 - The web UI no longer expands `~` in the output directory field. Expanding it ran

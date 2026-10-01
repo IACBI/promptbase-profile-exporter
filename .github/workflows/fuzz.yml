@@ -1,0 +1,48 @@
+name: fuzz
+
+# Coverage-guided fuzzing (Atheris) of the code that reads catalogs, config files,
+# and remote text: fuzz/fuzz_parsers.py. A short run on pull requests that change
+# the code, a longer one every week. Not a required check: a finding is a bug to
+# fix, and the input that caused it is uploaded as an artifact.
+on:
+  pull_request:
+    paths:
+      - "promptbase_exporter/**"
+      - "fuzz/**"
+      - "requirements-fuzz.txt"
+  schedule:
+    - cron: "11 2 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --require-hashes -r requirements-fuzz.txt
+      - run: python -m pip install --no-deps -e .
+      - name: Fuzz
+        env:
+          SECONDS_TO_RUN: ${{ github.event_name == 'pull_request' && '60' || '300' }}
+        run: |
+          set -euo pipefail
+          mkdir -p findings
+          python fuzz/fuzz_parsers.py -max_total_time="$SECONDS_TO_RUN" \
+            -rss_limit_mb=2048 -timeout=10 -artifact_prefix=findings/
+      - name: Keep the input that failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-findings
+          path: findings/
+          if-no-files-found: ignore
+          retention-days: 30

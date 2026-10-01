@@ -46,6 +46,8 @@ def linux(python: str) -> dict[str, str]:
 LOCKS = {
     "requirements-dev.txt": [linux(python) for python in PYTHONS],
     "requirements-release.txt": [linux("3.12")],
+    # Atheris ships Linux wheels for CPython 3.12+; the fuzz workflow uses 3.13.
+    "requirements-fuzz.txt": [linux("3.13")],
 }
 _PIN = re.compile(r"^([A-Za-z0-9._-]+(?:\[[^\]]*\])?)==([^\s;\\]+)")
 
