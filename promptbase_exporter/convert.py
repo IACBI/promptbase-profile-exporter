@@ -8,7 +8,6 @@ import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 from . import __version__
@@ -18,9 +17,11 @@ from .formatting import (
     EXPORT_FORMATS,
     EXTRA_FIELD_COLUMNS,
     FORMAT_EXTENSIONS,
-    count_written_records,
+    _storable,
+    count_records_in_text,
+    format_records,
     infer_format_from_path,
-    write_export_to_path,
+    write_rendered,
 )
 from .models import EXTRA_FIELDS, ITEM_TYPES, PromptRecord
 
@@ -133,38 +134,22 @@ def convert_catalog(
     # other field (price and the rest as well), extra fields included.
     extra_fields = () if export_format == "txt" else present_extra_fields(rows)
     _check_extra_values(rows, extra_fields)
-    # Prove the rendering is valid before touching the destination: with
-    # --overwrite, a failed check after the write would already have replaced
-    # the file it was meant to protect.
-    with TemporaryDirectory() as scratch:
-        probe = write_export_to_path(
-            Path(scratch) / f"probe.{FORMAT_EXTENSIONS[export_format]}",
-            records,
-            export_format,
-            overwrite=True,
-            csv_safe=csv_safe,
-            extra_fields=extra_fields,
-            item_type=item_type,
-        )
-        _check_count(probe, export_format, len(records), destination)
-    write_export_to_path(
-        destination,
+    content = format_records(
         records,
         export_format,
-        overwrite=overwrite,
         csv_safe=csv_safe,
         extra_fields=extra_fields,
         item_type=item_type,
     )
-    return _check_count(destination, export_format, len(records), destination)
-
-
-def _check_count(path: Path, export_format: str, expected: int, destination: Path) -> int:
-    written = count_written_records(path, export_format)
-    if written != expected:
+    # Check the exact text that will be written before touching the destination:
+    # with --overwrite, a failed check after the write would already have replaced
+    # the file it was meant to protect.
+    written = count_records_in_text(_storable(content), export_format)
+    if written != len(records):
         raise ValueError(
-            f"validation failed for {destination}: expected {expected}, wrote {written}"
+            f"validation failed for {destination}: expected {len(records)}, wrote {written}"
         )
+    write_rendered(destination, content, overwrite=overwrite)
     return written
 
 

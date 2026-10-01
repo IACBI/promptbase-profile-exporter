@@ -704,6 +704,12 @@ def write_export_to_path(
         extra_fields=extra_fields,
         item_type=item_type,
     )
+    return write_rendered(output_path, content, overwrite=overwrite)
+
+
+def write_rendered(output_path: Path, content: str, *, overwrite: bool) -> Path:
+    """Write an already rendered catalog: atomically, or with ``overwrite`` off, only
+    as a new file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if not overwrite:
         # Exclusive create: no window between an existence check and the write.
@@ -778,7 +784,11 @@ def infer_format_from_path(path: Path) -> str:
 
 
 def count_written_records(path: Path, export_format: str) -> int:
-    text = path.read_text(encoding="utf-8")
+    return count_records_in_text(path.read_text(encoding="utf-8"), export_format)
+
+
+def count_records_in_text(text: str, export_format: str) -> int:
+    """How many records a rendered catalog holds, read back the way a loader would."""
     if export_format == "txt":
         return len(
             re.findall(

@@ -14,7 +14,9 @@ import hashlib
 import json
 import math
 import re
+import stat
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .formatting import (
@@ -22,6 +24,7 @@ from .formatting import (
     FORMAT_EXTENSIONS,
     _atomic_write_text,
     _safe_username,
+    _storable,
     record_to_dict,
 )
 from .models import ITEM_TYPE_PLURALS, PromptRecord
@@ -39,6 +42,9 @@ _WINDOWS_RESERVED = frozenset(
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _YAML_ESCAPED = frozenset({0x2028, 0x2029, 0xFEFF, 0xFFFE, 0xFFFF})
 MAX_STEM_LENGTH = 100
+# Each file costs a few system calls, slow enough on Windows (and with an antivirus
+# scanning every new file) that writing several at once is several times faster.
+_WRITERS = 8
 
 
 def safe_stem(slug: str) -> str:
@@ -167,21 +173,38 @@ def write_markdown_files(
 ) -> Path:
     """Write one ``.md`` file per record into its own directory; return the directory.
 
-    Files of the same name are replaced, each atomically. Nothing is deleted: a
-    file left from an earlier run for a prompt that no longer exists stays, since
-    the directory may hold notes of your own.
+    Files of the same name are replaced, each atomically, unless they already hold
+    exactly the new text: an unchanged prompt keeps its file and its modification
+    time, so a sync tool or Git sees only what changed. Nothing is deleted: a file
+    left from an earlier run for a prompt that no longer exists stays, since the
+    directory may hold notes of your own.
     """
     directory = output_dir / folder_name(username, mode, item_type, timestamp)
     directory.mkdir(parents=True, exist_ok=True)
-    for record, name in zip(records, unique_names(records), strict=True):
-        _atomic_write_text(directory / name, render_file(record, extra_fields))
+    paths = [directory / name for name in unique_names(records)]
+    with ThreadPoolExecutor(max_workers=_WRITERS) as pool:
+        # list() re-raises the first failed write.
+        list(pool.map(_write_if_changed, paths, (render_file(r, extra_fields) for r in records)))
     return directory
+
+
+def _write_if_changed(path: Path, content: str) -> None:
+    try:
+        # A symbolic link is replaced as before, never left pointing elsewhere.
+        if not path.is_symlink() and path.read_bytes() == _storable(content).encode("utf-8"):
+            return
+    except OSError:
+        pass  # missing or unreadable: write it, and let that report any error
+    _atomic_write_text(path, content)
 
 
 def count_files(directory: Path, names: Sequence[str]) -> int:
     """How many of the expected files exist, are regular files, and are not empty."""
-    return sum(
-        1
-        for name in names
-        if (directory / name).is_file() and (directory / name).stat().st_size > 0
-    )
+    present = 0
+    for name in names:
+        try:
+            status = (directory / name).stat()
+        except OSError:
+            continue
+        present += stat.S_ISREG(status.st_mode) and status.st_size > 0
+    return present

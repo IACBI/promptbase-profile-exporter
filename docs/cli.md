@@ -289,7 +289,9 @@ Transform your digital interfaces with ...
   as `\uXXXX`, so the values read back exactly.
 - **Nothing is deleted.** A run replaces the files it writes (each atomically) and
   leaves the rest, including files of your own and files for prompts that have
-  since been removed.
+  since been removed. A file that already holds exactly the new text is not
+  touched, so it keeps its modification time and a sync tool or Git sees only the
+  prompts that changed.
 - It needs Markdown (`--format` may be left out) and cannot be combined with
   `--output-file`, `--compare`, or `--update-file`, which work on a single
   catalog file. The web UI offers it as "Layout" (it needs the markdown format and
@@ -507,8 +509,8 @@ app catalogs.
   is written.
 - **Safety:** it never overwrites the source, and it refuses to replace another
   existing file unless you pass `--overwrite`; the write is atomic. The result is
-  rendered and its record count checked in a scratch file first, so a file that
-  would fail the check never replaces the one you have.
+  rendered once and its record count checked before anything is written, so a
+  file that would fail the check never replaces the one you have.
 - `--csv-safe` protects the CSV being written; `--from-csv-safe` says the CSV
   being read was written with `--csv-safe`, so its escaped cells are restored.
 

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `--layout files` leaves a file alone when it already holds exactly the new text,
+  and writes the others several at a time. Re-exporting 5,000 prompts with one
+  change took 19.5 s on Windows and now takes 1.6 s; a first export took 12.8 s and
+  now takes 8.3 s. Unchanged files keep their modification time.
+- `pb-convert` renders the catalog once and checks it in memory instead of writing
+  and re-reading a scratch copy: converting 30,000 prompts to NDJSON took 6.6 s and
+  now takes 2.4 s (CSV 5.9 s to 4.0 s, HTML 6.1 s to 4.5 s), with identical output.
+- Reading a TXT catalog (`--compare`, `--update-file`, `pb-diff`) is about three
+  times faster on large catalogs, and reads exactly what it read before.
+
 ## 0.14.2 - 2026-10-01
 
 ### Changed

@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from promptbase_exporter import layout as layout_module
 from promptbase_exporter.cli import main
 from promptbase_exporter.formatting import record_to_dict
 from promptbase_exporter.layout import (
@@ -271,6 +272,46 @@ class WriteFilesTests(unittest.TestCase):
         self.assertEqual(names, ["my-notes.md", "old-prompt.md", "one.md"])  # no temp files
         self.assertIn("views: 99", updated)
         self.assertEqual(notes, "mine")
+
+    def test_an_unchanged_file_is_left_untouched_and_a_changed_one_rewritten(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = write_markdown_files(root, "acb", "all", [make("one"), make("two")])
+            for name in ("one.md", "two.md"):
+                os.utime(folder / name, ns=(1_000_000_000, 1_000_000_000))
+            write_markdown_files(root, "acb", "all", [make("one"), make("two", views=7)])
+            kept = (folder / "one.md").stat().st_mtime_ns
+            rewritten = (folder / "two.md").stat().st_mtime_ns
+            text = (folder / "two.md").read_text(encoding="utf-8")
+        self.assertEqual(kept, 1_000_000_000)
+        self.assertNotEqual(rewritten, 1_000_000_000)
+        self.assertIn("views: 7", text)
+
+    def test_a_failed_write_is_reported(self):
+        def failing(path, content):
+            if path.name == "two.md":
+                raise PermissionError(13, "Permission denied", str(path))
+            original(path, content)
+
+        original = layout_module._atomic_write_text
+        with TemporaryDirectory() as directory:
+            with patch.object(layout_module, "_atomic_write_text", failing):
+                with self.assertRaises(PermissionError):
+                    write_markdown_files(Path(directory), "acb", "all", [make("one"), make("two")])
+
+    def test_a_symbolic_link_is_replaced_even_when_its_target_matches(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = write_markdown_files(root, "acb", "all", [make("one")])
+            target = root / "elsewhere.md"
+            target.write_bytes((folder / "one.md").read_bytes())
+            (folder / "one.md").unlink()
+            try:
+                (folder / "one.md").symlink_to(target)
+            except OSError:
+                self.skipTest("creating symbolic links is not permitted here")
+            write_markdown_files(root, "acb", "all", [make("one")])
+            self.assertFalse((folder / "one.md").is_symlink())
 
     def test_count_files_ignores_missing_empty_and_directories(self):
         with TemporaryDirectory() as directory:
