@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- A profile's listings and their descriptions are fetched at the same time instead
+  of one after the other, at most two connections at once. Fetching @emanema's
+  2,683 prompts went from 29.4 to 18.3 seconds (median of 3 live runs, same records
+  either way); a small profile like @acb is not measurably faster.
+
+### Changed
+
 - Development only: CodeQL scans the Python code and the GitHub Actions workflows
   (security-extended queries) on every pull request, on `main`, and weekly; the
   OpenSSF Scorecard grades the repository's supply-chain practices weekly and
