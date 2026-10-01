@@ -202,6 +202,11 @@ def seeds() -> list[bytes]:
         bytes([3]) + b"https://promptbase.com/profile/acb",
         bytes([3]) + b"views+50%",
         bytes([4]) + json.dumps([[json.loads(row)], [json.loads(row)]]).encode(),
+        # Findings, kept so they stay fixed: a CSV row longer than its header (found by
+        # the first Atheris run, and by review), and rows with neither slug nor title.
+        bytes([0, 2, 1]) + b"a\n1,2\n",
+        bytes([0, 2, 0]) + b"x\n1\n",
+        bytes([3]) + b"https://[x/profile/acb",  # urlparse raised ValueError
         bytes([5, 0]) + b'{"profiles": ["@acb"], "format": "json"}',
         bytes([5, 1]) + b'profiles = ["@acb"]\nformat = "csv"\n',
     ]

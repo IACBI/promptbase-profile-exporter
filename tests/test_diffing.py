@@ -490,6 +490,26 @@ class StrictLoadTests(unittest.TestCase):
                 load_catalog(path, strict=True)
 
 
+class MalformedCatalogTests(unittest.TestCase):
+    def test_a_csv_row_longer_than_its_header_is_an_error_naming_the_line(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.csv"
+            path.write_text("title,slug\nA,a\nB,b,extra\n", encoding="utf-8")
+            for csv_safe in (False, True):
+                with self.subTest(csv_safe=csv_safe), \
+                        self.assertRaisesRegex(ValueError, "line 3 has more fields"):
+                    load_catalog(path, csv_safe=csv_safe)
+
+    def test_records_without_slug_or_title_compare_equal_to_themselves(self):
+        rows = [{"title": "", "slug": "", "description": "one"},
+                {"title": "", "slug": "", "description": "two"}]
+        diff = compare_catalog_records(rows, list(reversed(rows)))
+        self.assertEqual((diff.unchanged, len(diff.added), len(diff.removed)), (2, 0, 0))
+        other = [{"title": "", "slug": "", "description": "x"}]
+        changed = compare_catalog_records(rows[:1], other)
+        self.assertEqual((len(changed.added), len(changed.removed)), (1, 1))
+
+
 class ReportEscapingTests(unittest.TestCase):
     HOSTILE = "Real<!-- hide -->\n## Summary\n- Added: 0\n[Log in](https://evil.example)"
 
