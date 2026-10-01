@@ -308,7 +308,7 @@ class ReviewFindingsTests(unittest.TestCase):
             destination.write_text("keep me", encoding="utf-8")
             # A blank title used to make the TXT count come up short; that is fixed, so
             # the check's failure is forced here.
-            with patch("promptbase_exporter.convert.count_written_records", return_value=1):
+            with patch("promptbase_exporter.convert.count_records_in_text", return_value=1):
                 exit_code, _, stderr = run([str(source), "-o", str(destination), "--overwrite"])
             kept = destination.read_text(encoding="utf-8")
             leftovers = sorted(p.name for p in Path(directory).iterdir())
