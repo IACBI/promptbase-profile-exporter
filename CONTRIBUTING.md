@@ -23,7 +23,9 @@ running on the Python standard library alone.
 
 CI runs these on Python 3.10 through 3.14 (Ubuntu), plus the test suite on
 Windows and macOS with the oldest and newest Python, and `main` only accepts a
-pull request once all of them pass. A nightly `canary` workflow repeats
+pull request once all of them pass. CodeQL scans the Python code and the workflows on every pull request, and the
+OpenSSF Scorecard grades the repository's supply-chain practices each week. A
+nightly `canary` workflow repeats
 the live export and opens an issue if PromptBase data stops working. Run the
 checks locally before you push:
 
