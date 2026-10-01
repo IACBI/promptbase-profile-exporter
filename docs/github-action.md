@@ -161,6 +161,66 @@ requests" (Settings, Actions, General) must be on, and a pull request opened
 with the default `GITHUB_TOKEN` does not start other workflows, so use a
 personal access token or a GitHub App token if your checks must run on it.
 
+## Track trends on a schedule
+
+`pb-history` (see [Tracking changes over time](cli.md#tracking-changes-over-time))
+needs its SQLite file to survive between runs. A workflow can keep it in the
+Actions cache and put the day's report on the run's summary page:
+
+```yaml
+name: promptbase-trends
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "git+https://github.com/IACBI/promptbase-profile-exporter@v0.12.1"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: history.sqlite
+          key: promptbase-history-${{ github.run_id }}
+          restore-keys: promptbase-history-
+      - run: pb-history snapshot @acb --db history.sqlite
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: history.sqlite
+          key: promptbase-history-${{ github.run_id }}
+      - name: Report what moved since the previous run
+        run: |
+          set -euo pipefail
+          if [[ "$(pb-history list --db history.sqlite | wc -l)" -ge 2 ]]; then
+            pb-history report --db history.sqlite --metric views >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The first snapshot is stored; the report starts with the next run." >> "$GITHUB_STEP_SUMMARY"
+          fi
+```
+
+How it works and what to know:
+
+- A cache entry cannot be overwritten, so each run saves under a new key and the
+  next run restores the newest one through `restore-keys`. The snapshot is saved
+  before the report, so a failed report does not lose it.
+- The Markdown report escapes every title and value taken from PromptBase, so it
+  is safe to append to the summary page.
+- GitHub removes a cache entry nobody has read for 7 days, and the oldest entries
+  once a repository's caches pass 10 GB. A daily run keeps the newest entry alive,
+  but a long pause loses the history. To keep it for good, upload `history.sqlite`
+  as an artifact as well, or commit it to a branch of its own. That works for a
+  small profile: a snapshot takes about 100 bytes per listing.
+- `--days 7` instead of the default compares with a snapshot at least a week old,
+  once the history reaches back that far.
+
 ## Inputs
 
 | Input | Default | Description |

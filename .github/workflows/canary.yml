@@ -34,23 +34,40 @@ jobs:
           promptbase-export @acb --mode all --dry-run
           promptbase-export @acb --mode all --format json --output-file "$RUNNER_TEMP/acb.json"
           promptbase-export @acb --mode all --update-file "$RUNNER_TEMP/acb.json" --fail-on-diff --quiet
+      - name: Record two history snapshots and report on them
+        run: |
+          set -euo pipefail
+          db="$RUNNER_TEMP/history.sqlite"
+          promptbase-history snapshot @acb --db "$db" --quiet
+          promptbase-history snapshot @acb --db "$db" --quiet
+          promptbase-history report --db "$db" --format json > "$RUNNER_TEMP/trend.json"
+          python - "$RUNNER_TEMP/trend.json" <<'PY'
+          import json
+          import sys
+
+          listings = json.load(open(sys.argv[1], encoding="utf-8"))["totals"]["listings"]
+          assert listings["after"] > 0, listings
+          PY
       - name: Report the failure
         if: failure()
         run: |
           set -euo pipefail
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          number=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title"             --json number --jq '.[0].number // empty')
+          number=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number --jq '.[0].number // empty')
           if [[ -n "$number" ]]; then
             gh issue comment "$number" --body "Still failing: $run_url"
           else
-            gh issue create --title "$ISSUE_TITLE"               --body "The scheduled live export failed: $run_url"
+            gh issue create --title "$ISSUE_TITLE" \
+              --body "The scheduled live export failed: $run_url"
           fi
       - name: Close the issue once it passes again
         if: success()
         run: |
           set -euo pipefail
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          number=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title"             --json number --jq '.[0].number // empty')
+          number=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number --jq '.[0].number // empty')
           if [[ -n "$number" ]]; then
             gh issue close "$number" --comment "Passing again: $run_url"
           fi

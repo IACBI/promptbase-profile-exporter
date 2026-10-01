@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Deprecated
+
+- Python 3.10 reaches end of life on 31 October 2026 (PEP 619). This is the last
+  release line that supports it: the first release after that date will need
+  Python 3.11 or newer, which also makes `--config` TOML files work everywhere.
+
 ### Security
 
 - Text from PromptBase can no longer change how a report renders. Titles and values
@@ -39,6 +45,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The GitHub Action guide shows a scheduled `pb-history` workflow that keeps the
+  history in the Actions cache and posts each report to the run's summary page;
+  its commands were run as written from a clean install of v0.12.1. The nightly
+  canary now also records two live `pb-history` snapshots and reports on them.
 - Documentation only: the README (both languages) now lists `pb-history`, the web UI's
   Preview button and `--open`, `--config`, and `ndjson` where it had not; the CLI guide's
   contents list is complete; the coverage floor is stated as 85% everywhere.
