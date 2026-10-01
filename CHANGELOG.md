@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Security
+
+- The web UI no longer expands `~` in the output directory field. Expanding it ran
+  a path operation on the submitted text before the working-directory check (on
+  POSIX, `~name` looks up another account), and it pointed at the server user's
+  home, which the check then refused anyway, so nothing could escape. Now `~` is
+  an ordinary folder name inside the working directory, as in the comparison
+  catalog field. Reported by CodeQL (`py/path-injection`).
+
 ## 0.14.0 - 2026-10-01
 
 ### Added
