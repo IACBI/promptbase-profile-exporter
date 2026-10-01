@@ -442,11 +442,13 @@ class AuditFindingTests(unittest.TestCase):
         lone = chr(0xD800)
         with TemporaryDirectory() as directory:
             for export_format in EXPORT_FORMATS:
-                with self.subTest(format=export_format):
-                    path = write_export_to_path(
-                        Path(directory) / f"c.{FORMAT_EXTENSIONS[export_format]}",
-                        [self.record(description=f"a{lone}b")], export_format, overwrite=True)
-                    self.assertIn("a" + chr(0xFFFD) + "b", path.read_text(encoding="utf-8"))
+                for overwrite in (True, False):  # the atomic swap and the new-file write
+                    with self.subTest(format=export_format, overwrite=overwrite):
+                        path = write_export_to_path(
+                            Path(directory) / f"c{overwrite}.{FORMAT_EXTENSIONS[export_format]}",
+                            [self.record(description=f"a{lone}b")], export_format,
+                            overwrite=overwrite)
+                        self.assertIn("a" + chr(0xFFFD) + "b", path.read_text(encoding="utf-8"))
 
     def test_a_tag_that_looks_like_json_round_trips_through_csv(self):
         for tags in (('["a"]',), ("[x", "y]"), ("[", "]")):

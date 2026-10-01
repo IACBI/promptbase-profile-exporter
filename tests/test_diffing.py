@@ -1,9 +1,12 @@
 import json
+import random
+import re
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from promptbase_exporter.diffing import (
+    _parse_text_catalog,
     compare_catalog_records,
     compare_catalogs,
     diff_to_dict,
@@ -625,3 +628,27 @@ class CsvLineBreakTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TxtParserTests(unittest.TestCase):
+    """The TXT reader slices between record boundaries; it must read exactly what the
+    earlier single regular expression read, malformed text included."""
+
+    ORACLE = re.compile(
+        r"(?ms)^\d+\.\s*\nTitle:\s*(?P<title>.*?)\nDescription:\n"
+        r"(?P<description>.*?)(?=^\d+\.\s*\nTitle:|\Z)"
+    )
+
+    def oracle(self, text):
+        return [
+            {"title": m.group("title").strip(), "description": m.group("description").strip()}
+            for m in self.ORACLE.finditer(text)
+        ]
+
+    def test_matches_the_reference_reader_on_random_text(self):
+        rng = random.Random(20261001)
+        pieces = ["1.", "12.", "\n", "Title:", "Description:", " ", "a", "\r", "\t",
+                  "x\n", "2. \n", "\n1.\nTitle:", "\nDescription:\n"]
+        for _ in range(20000):
+            text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 30)))
+            self.assertEqual(_parse_text_catalog(text), self.oracle(text), repr(text))
