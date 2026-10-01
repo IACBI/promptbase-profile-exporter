@@ -58,7 +58,8 @@ GitHub Action for scheduled exports.
 
 ### Requirements
 
-- Python 3.10 or newer
+- Python 3.10 or newer. Python 3.10 reaches end of life on 31 October 2026, and the
+  first release after that date will need 3.11 or newer.
 - Network access to `firestore.googleapis.com`
 
 ### Installation
@@ -210,7 +211,8 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 
 ### Gereksinimler
 
-- Python 3.10 veya üzeri
+- Python 3.10 veya üzeri. Python 3.10'un desteği 31 Ekim 2026'da bitiyor; bu
+  tarihten sonraki ilk sürüm Python 3.11 veya üzerini isteyecek.
 - `firestore.googleapis.com` adresine ağ erişimi
 
 ### Kurulum

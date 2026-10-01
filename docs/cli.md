@@ -541,6 +541,9 @@ pb-history report --db history.sqlite --since 2026-09-01 --format html -o trends
   self-contained page with small trend charts of the totals across every snapshot;
   `-o` writes it to a file instead of the terminal.
 - **One profile per report:** if the file holds several, name one with `--profile`.
+- **On a schedule in GitHub Actions:** see
+  [Track trends on a schedule](github-action.md#track-trends-on-a-schedule), which
+  keeps the file in the Actions cache and puts each report on the run's summary page.
 - **Safe to keep around:** every value is stored through parameterised queries and
   every value in a report is escaped (HTML) or backslash-escaped so that a title
   cannot become raw HTML or a link (Markdown). The file has a format version and
