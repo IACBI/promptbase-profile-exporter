@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip install --require-hashes -r requirements-release.txt
       - name: Build
         env:
           TAG: ${{ github.event.release.tag_name }}
@@ -40,10 +40,17 @@ jobs:
           test "v$version" = "$TAG"
           ls dist/*"$version"*
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        id: attest
         with:
           subject-path: dist/*
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          # The signed Sigstore bundle goes next to the files it covers, so it can be
+          # checked offline too (gh attestation verify FILE --bundle BUNDLE ...).
+          cp "$BUNDLE" "dist/promptbase_profile_exporter-${TAG#v}.sigstore.json"
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

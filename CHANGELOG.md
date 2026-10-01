@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Development only: every tool CI installs is pinned by hash and installed with
+  `--require-hashes` (`requirements-dev.txt` for the checks,
+  `requirements-release.txt` for building), and the exporter is installed with
+  `--no-deps`, since it has no dependencies. `scripts/lock_requirements.py` rebuilds
+  the files, resolving the dependencies for each Python version CI uses. The
+  OpenSSF Scorecard counted these installs as unpinned.
+- Each release also carries its signed Sigstore bundle
+  (`promptbase_profile_exporter-X.Y.Z.sigstore.json`), so a download can be verified
+  against that file with `gh attestation verify --bundle`.
+
+### Changed
+
 - Development only: CodeQL scans the Python code and the GitHub Actions workflows
   (security-extended queries) on every pull request, on `main`, and weekly; the
   OpenSSF Scorecard grades the repository's supply-chain practices weekly and

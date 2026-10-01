@@ -13,11 +13,16 @@ python -m pip install -e ".[dev]"
 ```
 
 The `dev` extra installs the tooling only (ruff, mypy, coverage, build,
-twine), at their newest versions. CI installs the exact versions in
-`requirements-dev.txt` instead, so a new linter release cannot fail a pull request
-by itself; Dependabot proposes updates weekly. To match CI exactly, run
-`python -m pip install -e . -r requirements-dev.txt`. The exporter itself must keep
-running on the Python standard library alone.
+twine), at their newest versions. CI installs exact versions instead, every file
+checked against a hash: `requirements-dev.txt` (ruff, mypy, coverage) and
+`requirements-release.txt` (build, twine), so a new release of a tool, or a
+tampered download, cannot change a run. Dependabot proposes updates weekly. To
+change a version yourself, edit its line (one without "# via") and run
+`python scripts/lock_requirements.py`, which resolves the dependencies for every
+Python version CI uses and rewrites the hashes. To match CI exactly, run
+`python -m pip install --require-hashes -r requirements-dev.txt` and then
+`python -m pip install --no-deps -e .`. The exporter itself must keep running on
+the Python standard library alone.
 
 ## Checks
 
