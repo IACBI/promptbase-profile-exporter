@@ -431,9 +431,12 @@ def _csv_list_cell(values: Sequence[object]) -> str:
     would make it ambiguous. JSON text (which a reader recognises by its
     brackets) keeps such a cell exactly reversible.
     """
-    if any("," in str(value) for value in values):
+    joined = _cell_text(list(values))
+    # A reader takes a [..] cell for the JSON form, so a lone tag "[a]" needs it too.
+    looks_like_json = joined.strip().startswith("[") and joined.strip().endswith("]")
+    if looks_like_json or any("," in str(value) for value in values):
         return json.dumps([str(value) for value in values], ensure_ascii=False)
-    return _cell_text(list(values))
+    return joined
 
 
 def csv_escape_formula(value: object) -> object:
@@ -711,7 +714,7 @@ def write_export_to_path(
         created = os.fstat(handle.fileno())
         try:
             with handle:
-                handle.write(content)
+                handle.write(_storable(content))
         except BaseException:
             # A truncated leftover would make every retry fail with "already
             # exists". Remove it only if the path is still the file created
@@ -727,6 +730,18 @@ def write_export_to_path(
     return output_path
 
 
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _storable(content: str) -> str:
+    """``content`` with any lone surrogate replaced by U+FFFD.
+
+    JSON text may carry ``"\\ud800"``, which decodes to a string UTF-8 cannot
+    encode, and the write would fail after the whole catalog was built.
+    """
+    return _SURROGATE.sub("\ufffd", content)
+
+
 def _atomic_write_text(path: Path, content: str) -> None:
     # Write beside the target and swap it in, so a failed write (disk full,
     # interrupted run) never leaves a truncated catalog: --update-file
@@ -736,7 +751,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with temp_path.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
+            handle.write(_storable(content))
         if path.exists():
             shutil.copymode(path, temp_path)
         os.replace(temp_path, path)
@@ -767,7 +782,7 @@ def count_written_records(path: Path, export_format: str) -> int:
     if export_format == "txt":
         return len(
             re.findall(
-                r"(?m)^\d+\.\nTitle: .+\nDescription:\n",
+                r"(?m)^\d+\.\nTitle:[^\n]*\nDescription:\n",
                 text,
             )
         )

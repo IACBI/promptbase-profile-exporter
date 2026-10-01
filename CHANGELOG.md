@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A description that starts with a bulleted list is read back from a Markdown
+  catalog. Its "- item" lines were taken for more metadata, so the description came
+  back empty and `--compare` or `--update-file` reported a change that never
+  happened.
+- A TXT export of a listing with an empty title passes its post-write check; the
+  count required at least one character after "Title:" and the export failed.
+- A text holding a lone surrogate (valid in JSON, not in UTF-8) is written with
+  U+FFFD in its place; every writer used to fail after building the whole catalog.
+- A CSV tag that itself looks like a JSON list (`["a"]`) is written in the JSON form,
+  so it reads back as written; `pb-convert` turned it into `a`.
+
 ## 0.14.1 - 2026-10-01
 
 ### Fixed
