@@ -326,15 +326,22 @@ def _pair_records(
         title = _title_key(record)
         if title and index not in used:
             by_title.setdefault(title, []).append(index)
-    for position, record in enumerate(current):
-        title = _title_key(record)
-        if matches[position] is not None or not title:
-            continue
-        for index in by_title.get(title, ()):
-            if index not in used and _same_listing_by_title(record, previous[index]):
-                matches[position] = index
-                used.add(index)
-                break
+    # Records that repeat a title are paired with an identical old record first, so
+    # their order cannot turn two unchanged records into two changes.
+    for exact in (True, False):
+        for position, record in enumerate(current):
+            title = _title_key(record)
+            if matches[position] is not None or not title:
+                continue
+            for index in by_title.get(title, ()):
+                if (
+                    index not in used
+                    and _same_listing_by_title(record, previous[index])
+                    and (not exact or not _changed_fields(previous[index], record))
+                ):
+                    matches[position] = index
+                    used.add(index)
+                    break
     return matches
 
 

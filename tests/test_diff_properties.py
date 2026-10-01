@@ -139,10 +139,14 @@ class DiffPropertyTests(unittest.TestCase):
         for round_number in range(ROUNDS):
             catalog = [record(rng, number, "prompt") for number in range(rng.randint(1, 20))]
             copies = rng.randint(1, 3)
-            catalog += [PromptRecord(**{**catalog[0].__dict__, "slug": f"copy-{n}"})
+            # Same title, different descriptions: only an exact pairing is unchanged.
+            catalog += [PromptRecord(**{**catalog[0].__dict__, "slug": f"copy-{n}",
+                                        "description": f"copy number {n}"})
                         for n in range(copies)]
             rng.shuffle(catalog)
             bare = [{"title": item.title, "description": item.description} for item in catalog]
+            # The old catalog lists the same records in another order.
+            rng.shuffle(bare)
             with self.subTest(round=round_number):
                 diff = compare_catalog_records(bare, rows(catalog))
                 self.assertFalse(diff.has_changes)

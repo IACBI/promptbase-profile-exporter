@@ -11,7 +11,9 @@ All notable changes to this project will be documented in this file.
   change to that listing, and the unchanged original as added. Now every slug match
   is made before any title match, a title only pairs records when one side has no
   slug (a TXT catalog), and each old record is paired once; two old TXT records
-  with the same title used to leave one of them unmatched. Neither live profile
+  with the same title used to leave one of them unmatched. Records that share a
+  title are paired with an identical old record first, so reordering them is not
+  reported as a change. Neither live profile
   checked (@acb, @emanema) has repeated titles today; property tests found it.
 
 ### Changed
