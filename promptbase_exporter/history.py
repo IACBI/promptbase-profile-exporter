@@ -19,6 +19,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -667,10 +668,12 @@ def describe_duration(days: float) -> str:
 
 
 def _number(value: float) -> str:
-    """``2000100``, ``4.95``: in full, never ``2.0001e+06``."""
+    """``2000100``, ``4.95``, ``0.0000004``: in full, never ``2.0001e+06``."""
     if value == int(value):
         return str(int(value))
-    return f"{value:f}".rstrip("0").rstrip(".")
+    # repr is the shortest text that reads back as ``value``; Decimal only drops
+    # its exponent, so no digit is rounded away.
+    return format(Decimal(repr(value)), "f")
 
 
 def _delta(before: float, after: float) -> str:

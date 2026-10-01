@@ -433,7 +433,11 @@ def run_export(
                 previous = load_catalog(
                     request.compare_path, csv_safe=request.compare_csv_safe
                 )
-            except (OSError, ValueError) as exc:
+            except OSError as exc:
+                raise WebInputError(
+                    f"Could not load comparison catalog: {_describe_os_error(exc)}"
+                ) from exc
+            except ValueError as exc:
                 raise WebInputError(f"Could not load comparison catalog: {exc}") from exc
             diff = compare_catalogs(previous, filter_records(selected_records, modes[0]))
         for mode in modes:
@@ -451,7 +455,7 @@ def run_export(
                 present = count_files(folder, unique_names(filtered))
                 if present != len(filtered):
                     raise WebInputError(
-                        f"Validation failed for {folder}: "
+                        f"Validation failed for {_shown_path(folder)}: "
                         f"expected {len(filtered)}, wrote {present}."
                     )
                 exported_files.append(ExportedFile(mode=mode, path=folder, count=present))
@@ -470,10 +474,12 @@ def run_export(
             try:
                 written_count = counter(output_path, request.export_format)
             except ValueError as exc:
-                raise WebInputError(f"Validation failed for {output_path}: {exc}") from exc
+                raise WebInputError(
+                    f"Validation failed for {_shown_path(output_path)}: {exc}"
+                ) from exc
             if written_count != len(filtered):
                 raise WebInputError(
-                    f"Validation failed for {output_path}: "
+                    f"Validation failed for {_shown_path(output_path)}: "
                     f"expected {len(filtered)}, wrote {written_count}."
                 )
             exported_files.append(

@@ -534,6 +534,8 @@ class AuditFindingTests(unittest.TestCase):
         self.assertEqual(history._number(1_234_567.5), "1234567.5")
         self.assertEqual(history._number(4.95), "4.95")
         self.assertEqual(history._number(3.0), "3")
+        self.assertEqual(history._number(0.0000004), "0.0000004")
+        self.assertEqual(history._delta(0.0000001, 0.0000005), "+0.0000004")
 
     def test_first_snapshots_at_the_same_time_share_one_new_file(self):
         with TemporaryDirectory() as directory:
