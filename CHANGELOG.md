@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Comparing catalogs (`--compare`, `--update-file`, `pb-diff`) is about 16x faster on
+  large catalogs: text that is already equal is no longer normalised. A 30,000-prompt
+  comparison took 7.7 s and now takes 0.5 s, with an identical report.
+
 ### Fixed
 
 - A description that starts with a bulleted list is read back from a Markdown

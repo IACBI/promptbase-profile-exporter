@@ -29,10 +29,6 @@ CATALOG_SUFFIXES = frozenset(
     {".json", ".ndjson", ".jsonl", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"}
 )
 
-# Whitespace collapse runs once per compared field of every changed-candidate
-# record, so compile it once rather than per call.
-_WHITESPACE_RE = re.compile(r"\s+")
-
 
 @dataclass(frozen=True)
 class ChangedRecord:
@@ -392,8 +388,15 @@ def _changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[s
             # A field that is present but empty was cleared, and is reported.
             if field not in current:
                 continue
-        normalize = _comparable_number if field in NUMERIC_COMPARE_FIELDS else _comparable_value
-        if normalize(previous.get(field)) != normalize(current.get(field)):
+        before, after = previous.get(field), current.get(field)
+        if field in NUMERIC_COMPARE_FIELDS:
+            if _comparable_number(before) != _comparable_number(after):
+                changed.append(field)
+        # Equal text needs no normalising; descriptions are long, and this is the
+        # common case when nothing changed.
+        elif not (isinstance(before, str) and before == after) and (
+            _comparable_value(before) != _comparable_value(after)
+        ):
             changed.append(field)
     return changed
 
@@ -403,8 +406,9 @@ def _comparable_value(value: Any) -> str:
         return ""
     if isinstance(value, float):
         return f"{value:g}"
-    normalized = str(value).replace("\r\n", "\n").replace("\r", "\n")
-    return _WHITESPACE_RE.sub(" ", normalized).strip()
+    # str.split() collapses exactly what the regex \s+ did, line breaks included,
+    # several times faster on a multi-kilobyte description.
+    return " ".join(str(value).split())
 
 
 def _comparable_number(value: Any) -> str:
