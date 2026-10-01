@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import http.client
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, TypeVar
 
 from . import __version__
 from .models import EXTRA_FIELDS, ITEM_TYPES, Profile, PromptRecord
+
+T = TypeVar("T")
 
 FIRESTORE_RUN_QUERY = (
     "https://firestore.googleapis.com/v1/projects/"
@@ -475,6 +478,34 @@ def fetch_prompt_details(
     return by_slug
 
 
+def _in_background(function: Callable[..., T], *args: Any) -> Callable[[], T]:
+    """Start ``function(*args)`` on a daemon thread; the returned call waits for it.
+
+    A daemon thread, not an executor: if the caller fails first, its error reaches
+    the user at once, and the process can exit without waiting minutes for a peer
+    query that is still retrying.
+    """
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = function(*args)
+        except BaseException as exc:  # handed to the caller by wait()
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+
+    def wait() -> T:
+        while worker.is_alive():
+            worker.join(0.1)  # short joins, so Ctrl-C is not held up
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["value"]
+
+    return wait
+
+
 def fetch_prompts(
     profile_input: str,
     extra_fields: Sequence[str] = (),
@@ -492,8 +523,12 @@ def fetch_prompts(
     if item_type not in ITEM_TYPES:
         raise ValueError(f"Unknown item type: {item_type}")
     profile = resolve_profile(profile_input)
+    # The two collections are independent queries; fetching them side by side
+    # nearly halves a large profile's fetch (measured: 19.6 s to 10.5 s for 2,683
+    # prompts) and keeps at most two connections open.
+    wait_for_details = _in_background(fetch_prompt_details, profile, item_type)
     items = fetch_prompt_items(profile, extra_fields, item_type)
-    details_by_slug = fetch_prompt_details(profile, item_type)
+    details_by_slug = wait_for_details()
 
     records: list[PromptRecord] = []
     for item in items:

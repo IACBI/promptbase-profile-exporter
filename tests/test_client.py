@@ -2,6 +2,8 @@ import gzip
 import http.client
 import io
 import json
+import threading
+import time
 import unittest
 import urllib.error
 from email.message import Message
@@ -687,6 +689,55 @@ class ItemTypeFetchTests(unittest.TestCase):
         with patch("promptbase_exporter.client._run_query_all", side_effect=query):
             self.assertEqual(fetch_prompt_items(self._profile, (), "prompt")[0]["title"], "P")
             self.assertEqual(fetch_prompt_items(self._profile, (), "app")[0]["title"], "A")
+
+    def test_items_and_details_are_fetched_at_the_same_time(self):
+        # Each side waits for the other: this only finishes if they overlap.
+        both = threading.Barrier(2, timeout=5)
+        item = {"slug": "a", "title": "A", "type": "gpt", "domain": "text", "created": 1}
+
+        def items(*_args):
+            both.wait()
+            return [item]
+
+        def details(*_args):
+            both.wait()
+            return {"a": {"description": "D"}}
+
+        with patch("promptbase_exporter.client.resolve_profile", return_value=self._profile), \
+                patch("promptbase_exporter.client.fetch_prompt_items", side_effect=items), \
+                patch("promptbase_exporter.client.fetch_prompt_details", side_effect=details):
+            _profile, records = fetch_prompts("@acb")
+        self.assertEqual(records[0].description, "D")
+
+    def test_an_error_on_either_side_still_reaches_the_caller(self):
+        failure = PromptBaseError("PromptBase query failed: HTTP Error 503")
+        for failing in ("fetch_prompt_items", "fetch_prompt_details"):
+            other = ({"fetch_prompt_items", "fetch_prompt_details"} - {failing}).pop()
+            with self.subTest(failing=failing), \
+                    patch("promptbase_exporter.client.resolve_profile",
+                          return_value=self._profile), \
+                    patch(f"promptbase_exporter.client.{failing}", side_effect=failure), \
+                    patch(f"promptbase_exporter.client.{other}",
+                          return_value=[] if other == "fetch_prompt_items" else {}), \
+                    self.assertRaisesRegex(PromptBaseError, "503"):
+                fetch_prompts("@acb")
+
+    def test_an_items_error_is_not_held_up_by_a_stalled_details_query(self):
+        release = threading.Event()
+        self.addCleanup(release.set)  # let the abandoned worker finish
+
+        def stalled(*_args):
+            release.wait(30)
+            return {}
+
+        failure = PromptBaseError("PromptBase query failed: HTTP Error 404")
+        with patch("promptbase_exporter.client.resolve_profile", return_value=self._profile), \
+                patch("promptbase_exporter.client.fetch_prompt_items", side_effect=failure), \
+                patch("promptbase_exporter.client.fetch_prompt_details", side_effect=stalled):
+            start = time.monotonic()
+            with self.assertRaisesRegex(PromptBaseError, "404"):
+                fetch_prompts("@acb")
+            self.assertLess(time.monotonic() - start, 2)
 
     def test_apps_without_a_type_field_are_not_schema_drift(self):
         apps = [{"slug": f"a{i}", "title": "A", "domain": "text", "created": i} for i in range(5)]

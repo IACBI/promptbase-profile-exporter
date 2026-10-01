@@ -21,6 +21,10 @@ gh attestation verify promptbase_profile_exporter-X.Y.Z-py3-none-any.whl \
   --repo IACBI/promptbase-profile-exporter
 ```
 
+From 0.14.0 on, the release also carries the signed Sigstore bundle
+(`promptbase_profile_exporter-X.Y.Z.sigstore.json`), so the check can use that file
+instead of GitHub's attestation API: add `--bundle` with its path.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for security problems. Report them privately
