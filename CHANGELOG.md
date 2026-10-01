@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
   re-wrapped text; TXT catalogs with repeated titles) and require the diff to
   report exactly those changes, count each record once, and mirror when the sides
   are swapped.
+- Development only: CodeQL scans the Python code and the GitHub Actions workflows
+  (security-extended queries) on every pull request, on `main`, and weekly; the
+  OpenSSF Scorecard grades the repository's supply-chain practices weekly and
+  feeds the new README badge.
 
 ## 0.13.0 - 2026-10-01
 
