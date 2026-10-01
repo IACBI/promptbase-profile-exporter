@@ -24,6 +24,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A server that keeps returning the same page (a cursor that does not advance) now
+  stops the fetch after the second request with a clear error; it used to repeat
+  the query up to the 100-page safety limit first.
 - Comparisons keep listing kinds apart: a prompt and an app are no longer paired
   because they share a slug or, more often, a title. Comparing @acb's prompts with
   its apps used to report 132 "changed" listings; it now reports 243 removed and 211
@@ -39,6 +42,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Development only: resilience tests run the client against a real local HTTP
+  server that answers with 5xx and 4xx errors, drops the connection before or in
+  the middle of a body, truncates a compressed body, responds after the timeout,
+  and pages with and without a working cursor.
 - Documentation only: the README (both languages) now lists `pb-history`, the web UI's
   Preview button and `--open`, `--config`, and `ndjson` where it had not; the CLI guide's
   contents list is complete; the coverage floor is stated as 85% everywhere.

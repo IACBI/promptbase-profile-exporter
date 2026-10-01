@@ -31,6 +31,8 @@ TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 DEFAULT_PAGE_SIZE = 300
 MAX_PAGES = 100
 MAX_RETRIES = 3
+# Seconds to wait for a connection or for the next bytes of a response.
+REQUEST_TIMEOUT_SECONDS = 90
 # Far above a real page (300 records with descriptions is a few MB), but a bound,
 # so a broken or hostile response cannot exhaust memory, compressed or not.
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -219,7 +221,7 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
     last_error: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 return _read_json(response)
         except urllib.error.HTTPError as exc:
             # The error doubles as the open HTTP response; release its socket.
@@ -313,7 +315,11 @@ def _run_query_all(
         docs.extend(page_docs)
         if len(page_docs) < page_size:
             return docs
-        start_after = _cursor_values_for_doc(page_docs[-1], order_by)
+        cursor = _cursor_values_for_doc(page_docs[-1], order_by)
+        if cursor == start_after:
+            # The same last document twice: paging would repeat until MAX_PAGES.
+            raise PromptBaseError(f"{collection} query pagination did not advance.")
+        start_after = cursor
         time.sleep(PAGE_DELAY_SECONDS)
     raise PromptBaseError(
         f"Query exceeded the pagination safety limit of {MAX_PAGES * page_size} records."
