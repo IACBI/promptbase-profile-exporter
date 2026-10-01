@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.13.0 - 2026-10-01
+
 ### Added
 
 - Each release now carries a wheel and an sdist, built by a GitHub Actions workflow
@@ -55,6 +57,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The pinned `actions/checkout` (v7.0.1) and `actions/setup-python` (v7.0.0) are
+  updated in the Action, the workflows, and the documentation examples.
 - Development only: resilience tests run the client against a real local HTTP
   server that answers with 5xx and 4xx errors, drops the connection before or in
   the middle of a body, truncates a compressed body, responds after the timeout,
