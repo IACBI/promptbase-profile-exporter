@@ -31,6 +31,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The GitHub Action guide shows how to publish a dashboard on GitHub Pages every
+  day: the trends report, the searchable catalog, and an index linking them. Its
+  build step was run as written, with and without an earlier snapshot, and the
+  pages were checked in a browser (the catalog's search works, nothing is loaded
+  from other sites).
 - A profile's listings and their descriptions are fetched at the same time instead
   of one after the other, at most two connections at once. Fetching @emanema's
   2,683 prompts went from 29.4 to 18.3 seconds (median of 3 live runs, same records
