@@ -31,6 +31,10 @@ All notable changes to this project will be documented in this file.
   build step was run as written, with and without an earlier snapshot, and the
   pages were checked in a browser (the catalog's search works, nothing is loaded
   from other sites).
+- A profile's listings and their descriptions are fetched at the same time instead
+  of one after the other, at most two connections at once. Fetching @emanema's
+  2,683 prompts went from 29.4 to 18.3 seconds (median of 3 live runs, same records
+  either way); a small profile like @acb is not measurably faster.
 - Development only: every tool CI installs is pinned by hash and installed with
   `--require-hashes` (`requirements-dev.txt` for the checks,
   `requirements-release.txt` for building), and the exporter is installed with
