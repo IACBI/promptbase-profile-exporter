@@ -571,6 +571,13 @@ pb-history compare --db history.sqlite --days 7      # every profile in the file
   cannot become raw HTML or a link (Markdown). The file has a format version and
   its tables are checked against the expected columns, so a file that is not a
   `pb-history` file is refused and left untouched, and a newer format is refused rather than misread.
+- **Reports stay fast as the history grows:** each snapshot stores its counter totals
+  next to its listings, so a trends chart over a year of daily snapshots reads one row
+  per snapshot, not every listing of every snapshot. A file written by 0.14.3 or
+  earlier (format 1) is read as it is, and the first `pb-history snapshot` into it
+  upgrades it to format 2 in one transaction, filling in the totals of the snapshots
+  it already holds. A format 2 file is not readable by 0.14.3 or earlier, so keep one
+  version of the tool per history file (in GitHub Actions, the pinned `@vX.Y.Z`).
 
 Exit codes: `0` on success, `1` for an error, such as a missing file, fewer than
 two snapshots, or a profile that could not be fetched (the others are still

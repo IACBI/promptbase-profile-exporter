@@ -525,6 +525,221 @@ class CompareTests(unittest.TestCase):
         self.assertIn("no snapshots", err)
 
 
+V1_SCHEMA = """
+CREATE TABLE snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    taken_at TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    item_type TEXT NOT NULL,
+    record_count INTEGER NOT NULL
+);
+CREATE INDEX snapshots_lookup ON snapshots (profile, item_type, taken_at);
+CREATE TABLE observations (
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots (id) ON DELETE CASCADE,
+    slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price REAL NOT NULL,
+    discount REAL NOT NULL,
+    views INTEGER NOT NULL,
+    sales INTEGER NOT NULL,
+    downloads INTEGER NOT NULL,
+    favorites INTEGER NOT NULL,
+    rating REAL NOT NULL,
+    reviews INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, slug)
+) WITHOUT ROWID;
+"""
+
+
+def make_v1_file(path):
+    """A history file as version 1 wrote it: no stored totals, two snapshots and an empty one."""
+    with closing(sqlite3.connect(path)) as raw:
+        raw.executescript(V1_SCHEMA)
+        raw.execute("PRAGMA user_version = 1")
+        for snapshot, (days, rows) in enumerate(
+            [(0, [("a", 10, 1, 2, 3, 4), ("b", 5, 0, 0, 1, 0)]),
+             (1, [("a", 12, 2, 2, 3, 5), ("b", 9, 1, 1, 1, 1), ("c", 100, 7, 0, 0, 2)]),
+             (2, [])],
+            start=1,
+        ):
+            raw.execute(
+                "INSERT INTO snapshots (taken_at, profile, item_type, record_count) "
+                "VALUES (?, 'acb', 'prompt', ?)",
+                ((START + timedelta(days=days)).isoformat(timespec="seconds"), len(rows)),
+            )
+            for slug, views, sales, downloads, favorites, reviews in rows:
+                raw.execute(
+                    "INSERT INTO observations VALUES (?, ?, ?, 1.0, 0.0, ?, ?, ?, ?, 4.5, ?)",
+                    (snapshot, slug, slug.title(), views, sales, downloads, favorites, reviews),
+                )
+        raw.commit()
+
+
+def summed_from_observations(connection):
+    return connection.execute(
+        "SELECT s.id, s.record_count, COALESCE(SUM(o.views), 0), COALESCE(SUM(o.sales), 0), "
+        "COALESCE(SUM(o.downloads), 0), COALESCE(SUM(o.favorites), 0), "
+        "COALESCE(SUM(o.reviews), 0) FROM snapshots s "
+        "LEFT JOIN observations o ON o.snapshot_id = s.id GROUP BY s.id ORDER BY s.id"
+    ).fetchall()
+
+
+def stored_totals(connection):
+    return connection.execute(
+        "SELECT id, record_count, views_total, sales_total, downloads_total, favorites_total, "
+        "reviews_total FROM snapshots ORDER BY id"
+    ).fetchall()
+
+
+class StoredTotalsTests(unittest.TestCase):
+    """The trend chart reads one stored row per snapshot, not every observation."""
+
+    def test_a_snapshot_stores_the_totals_of_its_observations(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "h.sqlite"
+            store(path, "acb", [
+                (0, [rec("a", views=10, sales=1, downloads=2, favorites=3, reviews=4),
+                     rec("b", views=5, favorites=1)]),
+                (1, []),
+            ])
+            with closing(history.connect(path, create=False)) as connection:
+                stored = stored_totals(connection)
+                summed = summed_from_observations(connection)
+                series = history.totals_series(connection, "acb", "prompt")
+        self.assertEqual(stored, summed)
+        self.assertEqual(stored[0], (1, 2, 15, 1, 2, 4, 4))
+        self.assertEqual(stored[1], (2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(series[0][1], {"listings": 2, "views": 15, "sales": 1, "downloads": 2,
+                                        "favorites": 4, "reviews": 4})
+        self.assertEqual(series[1][1]["listings"], 0)
+
+    def test_the_series_is_per_profile_and_kind_and_oldest_first(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "h.sqlite"
+            store(path, "acb", [(3, [rec("late", views=3)]), (1, [rec("early", views=1)])])
+            store(path, "other", [(2, [rec("x", views=500)])])
+            store(path, "acb", [(2, [rec("bundle", views=70)])], item_type="bundle")
+            with closing(history.connect(path, create=False)) as connection:
+                series = history.totals_series(connection, "acb", "prompt")
+        self.assertEqual([point["views"] for _, point in series], [1, 3])
+        self.assertEqual([when for when, _ in series],
+                         [START + timedelta(days=1), START + timedelta(days=3)])
+
+    def test_a_version_1_file_is_read_as_it_is_and_left_untouched(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "old.sqlite"
+            make_v1_file(path)
+            before = path.read_bytes()
+            with closing(history.connect(path, create=False)) as connection:
+                series = history.totals_series(connection, "acb", "prompt")
+                listed = history.list_snapshots(connection)
+            code, stdout, _ = run(["report", "--db", str(path), "--format", "json"])
+            after = path.read_bytes()
+        self.assertEqual([point["views"] for _, point in series], [15, 121, 0])
+        self.assertEqual(series[1][1]["listings"], 3)
+        self.assertEqual(len(listed), 3)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["totals"]["views"]["after"], 0)
+        self.assertEqual(before, after)
+
+    def test_a_snapshot_upgrades_a_version_1_file_with_the_right_totals(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "old.sqlite"
+            make_v1_file(path)
+            with closing(history.connect(path, create=False)) as connection:
+                expected = history.totals_series(connection, "acb", "prompt")
+            with closing(history.connect(path, create=True)) as connection:
+                history.record_snapshot(connection, "acb", [rec("d", views=1000, reviews=1)],
+                                        "prompt", START + timedelta(days=5))
+            with closing(history.connect(path, create=False)) as connection:
+                stored = stored_totals(connection)
+                summed = summed_from_observations(connection)
+                series = history.totals_series(connection, "acb", "prompt")
+                kept = connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+            with closing(sqlite3.connect(path)) as raw:
+                version = raw.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, history.SCHEMA_VERSION)
+        self.assertEqual(stored, summed)
+        self.assertEqual(series[:3], expected)  # the old points, unchanged
+        self.assertEqual(series[3][1]["views"], 1000)
+        self.assertEqual(kept, 2 + 3 + 0 + 1)
+
+    def test_the_report_is_the_same_before_and_after_the_upgrade(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "old.sqlite"
+            make_v1_file(path)
+            argv = ["report", "--db", str(path), "--days", "1", "--format"]
+            before = [run([*argv, fmt]) for fmt in ("markdown", "json", "html")]
+            history.connect(path, create=True).close()
+            after = [run([*argv, fmt]) for fmt in ("markdown", "json", "html")]
+        self.assertEqual(before, after)
+        self.assertEqual([code for code, _, _ in after], [0, 0, 0])
+
+    def test_upgrading_at_the_same_time_upgrades_once_without_error(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "old.sqlite"
+            make_v1_file(path)
+            errors = []
+            start = threading.Barrier(8)
+
+            def open_it():
+                start.wait()
+                try:
+                    history.connect(path, create=True).close()
+                except Exception as exc:  # collected and asserted below
+                    errors.append(exc)
+
+            workers = [threading.Thread(target=open_it) for _ in range(8)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(60)
+            with closing(history.connect(path, create=False)) as connection:
+                columns = [row[1] for row in connection.execute("PRAGMA table_info(snapshots)")]
+                self.assertEqual(stored_totals(connection), summed_from_observations(connection))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(columns), len(set(columns)))
+
+    def test_a_failed_upgrade_leaves_the_file_as_it_was(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "old.sqlite"
+            make_v1_file(path)
+            before = path.read_bytes()
+            real_connect = sqlite3.connect
+
+            class Failing(sqlite3.Connection):
+                def executemany(self, *args, **kwargs):  # the backfill, after the new columns
+                    raise sqlite3.OperationalError("disk I/O error")
+
+            def connect(target, **kwargs):
+                return real_connect(target, factory=Failing, **kwargs)
+
+            with patch.object(history.sqlite3, "connect", connect):
+                with self.assertRaises(history.HistoryError):
+                    history.connect(path, create=True)
+            after = path.read_bytes()
+            with closing(history.connect(path, create=False)) as connection:
+                series = history.totals_series(connection, "acb", "prompt")
+        self.assertEqual(before, after)
+        self.assertEqual(len(series), 3)
+
+    def test_a_version_1_file_with_other_columns_is_refused(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "other.sqlite"
+            with closing(sqlite3.connect(path)) as other:
+                other.execute("CREATE TABLE snapshots (note TEXT)")
+                other.execute("PRAGMA user_version = 1")
+                other.commit()
+            for create in (True, False):
+                with self.subTest(create=create), self.assertRaisesRegex(
+                    history.HistoryError, "not a pb-history file"
+                ):
+                    history.connect(path, create=create)
+            with closing(sqlite3.connect(path)) as other:
+                columns = [row[1] for row in other.execute("PRAGMA table_info(snapshots)")]
+        self.assertEqual(columns, ["note"])
+
+
 class AuditFindingTests(unittest.TestCase):
     """Each misreported, crashed, or raced before it was fixed."""
 

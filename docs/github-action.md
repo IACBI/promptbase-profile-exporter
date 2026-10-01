@@ -221,6 +221,9 @@ How it works and what to know:
   branch of its own after each snapshot. That suits a small profile: a snapshot
   takes about 100 bytes per listing, about 9 MB a year of daily snapshots for 250
   listings.
+- Moving the `@vX.Y.Z` pin forward is safe: the first snapshot of a newer version
+  upgrades a restored history file in place. Moving it back is not, because an older
+  version refuses a file a newer one has upgraded; delete the cache entry first.
 - `--days 7` instead of the default compares with a snapshot at least a week old,
   once the history reaches back that far.
 - To be told when something happens, add rules to the report command, for example
