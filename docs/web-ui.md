@@ -94,7 +94,9 @@ using it:
   on the UI's origin.
 - **Hardened responses.** Pages are served with a strict Content Security
   Policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
-  `Referrer-Policy: no-referrer`. Oversized or malformed form submissions are
+  `Referrer-Policy: no-referrer`, error responses from the HTTP server itself
+  (an unsupported method, a malformed request) included. Paths on a page are
+  shown relative to the working directory, never where the server lives. Oversized or malformed form submissions are
   rejected, and a connection that stalls while sending its request is closed
   after 60 seconds.
 - **One export writes at a time.** Requests are handled in parallel, but the

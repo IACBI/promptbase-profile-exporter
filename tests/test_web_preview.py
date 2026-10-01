@@ -1,3 +1,4 @@
+import http.client
 import io
 import re
 import threading
@@ -231,6 +232,44 @@ class PreviewOverHttpTests(unittest.TestCase):
         request = build_request_config({"profile": "acb", "action": "preview", "sort": "views"})
         self.assertEqual((request.profile_input, request.sort), ("acb", "views"))
         self.assertTrue(re.search(r'name="action" value="export"', render_form()))
+
+
+class ServerErrorTests(PreviewOverHttpTests):
+    """Responses the http.server module builds itself, and failed writes."""
+
+    SECURITY_HEADERS = ("Content-Security-Policy", "X-Frame-Options",
+                        "X-Content-Type-Options", "Referrer-Policy")
+
+    def raw(self, method):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        self.addCleanup(connection.close)
+        connection.request(method, "/")
+        response = connection.getresponse()
+        return response.status, dict(response.getheaders()), response.read()
+
+    def test_an_unsupported_method_carries_the_security_headers(self):
+        for method in ("PUT", "DELETE", "OPTIONS", "PATCH"):
+            with self.subTest(method=method):
+                status, headers, body = self.raw(method)
+                self.assertEqual(status, 501)
+                for name in self.SECURITY_HEADERS:
+                    self.assertIn(name, headers)
+                self.assertTrue(body.startswith(b"501 "))
+
+    def test_a_head_request_gets_headers_and_no_body(self):
+        status, headers, body = self.raw("HEAD")
+        self.assertEqual(status, 501)
+        self.assertIn("Content-Security-Policy", headers)
+        self.assertEqual(body, b"")
+
+    def test_a_failed_write_does_not_show_the_server_path(self):
+        error = PermissionError(13, "Permission denied", str(Path.cwd() / "exports" / "x.txt"))
+        with patch.object(web, "run_export", side_effect=error):
+            status, body = self.post({"profile": "acb", "mode": "all"})
+        self.assertEqual(status, 500)
+        self.assertIn("Permission denied (exports/x.txt).", body)
+        self.assertNotIn(str(Path.cwd()), body)
+        self.assertNotIn(Path.cwd().as_posix(), body)
 
 
 class OpenBrowserTests(unittest.TestCase):

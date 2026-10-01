@@ -696,6 +696,29 @@ class CompareFileTests(unittest.TestCase):
             self.assertFalse((root / "exports").exists())
 
 
+    def test_export_errors_do_not_show_the_server_path(self):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
+            return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
+
+        with _in_directory() as root:
+            (root / "old.json").write_text("[]", encoding="utf-8")
+            request = build_request_config(
+                {"profile": "acb", "mode": "all", "compare_file": "old.json"}
+            )
+            denied = PermissionError(13, "Permission denied", str(root / "old.json"))
+            with patch("promptbase_exporter.web.load_catalog", side_effect=denied):
+                with self.assertRaises(WebInputError) as caught:
+                    run_export(request, fetcher=fetcher)
+            self.assertEqual(
+                str(caught.exception),
+                "Could not load comparison catalog: Permission denied (old.json).",
+            )
+            request = build_request_config({"profile": "acb", "mode": "all"})
+            with self.assertRaises(WebInputError) as caught:
+                run_export(request, fetcher=fetcher, counter=lambda _p, _f: 0)
+            self.assertNotIn(str(root), str(caught.exception))
+            self.assertIn("Validation failed for exports/acb_all_prompts.", str(caught.exception))
+
 class ExportLockTests(unittest.TestCase):
     def test_writes_happen_while_holding_the_export_lock(self):
         observed = []
