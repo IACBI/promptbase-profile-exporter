@@ -116,6 +116,17 @@ class WebTests(unittest.TestCase):
         with self.assertRaises(WebInputError):
             build_request_config({"profile": "acb", "output_dir": "exports\0x"})
 
+    def test_a_tilde_output_dir_is_a_folder_name_not_the_home_directory(self):
+        base = Path.cwd().resolve()
+        for raw in ("~", "~/exports", "~root/x"):
+            with self.subTest(raw=raw):
+                config = build_request_config({"profile": "acb", "output_dir": raw})
+                self.assertEqual(config.output_dir, base / raw)
+                self.assertTrue(config.output_dir.is_relative_to(base))
+        # The home directory itself, spelled out, is still outside and refused.
+        with self.assertRaises(WebInputError):
+            build_request_config({"profile": "acb", "output_dir": str(Path.home())})
+
     def test_build_request_config_rejects_invalid_prices(self):
         with self.assertRaises(WebInputError):
             build_request_config(

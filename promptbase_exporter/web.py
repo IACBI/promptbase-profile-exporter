@@ -1274,8 +1274,10 @@ def _resolve_output_dir(raw: str) -> Path:
     Unlike the CLI (which trusts the local user with arbitrary paths), the web
     form is reachable by any page the user's browser visits, so absolute paths
     and ``..`` traversal that would escape the working directory are rejected.
+    ``~`` is not expanded: it would name the server user's home, and nothing from
+    the form touches the filesystem before the containment check.
     """
-    resolved = _confine_to_cwd(Path(raw).expanduser())
+    resolved = _confine_to_cwd(raw)
     if resolved is None:
         raise WebInputError(
             "Output directory must stay within the server's working directory."
