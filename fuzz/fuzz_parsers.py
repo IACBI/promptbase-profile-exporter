@@ -207,10 +207,28 @@ def seeds() -> list[bytes]:
         bytes([0, 2, 1]) + b"a\n1,2\n",
         bytes([0, 2, 0]) + b"x\n1\n",
         bytes([3]) + b"https://[x/profile/acb",  # urlparse raised ValueError
+        bytes([0, 2, 0]) + b"title,slug,description\nA,dup,one\nA,dup,two\n",  # repeated slug
         bytes([5, 0]) + b'{"profiles": ["@acb"], "format": "json"}',
         bytes([5, 1]) + b'profiles = ["@acb"]\nformat = "csv"\n',
     ]
     return result
+
+
+def _mutate(rng: random.Random, raw: bytearray) -> None:
+    """One libFuzzer-style change: a byte, an insertion, or a copied or erased chunk."""
+    choice = rng.random()
+    if raw and choice < 0.35:
+        raw[rng.randrange(len(raw))] = rng.randrange(256)
+    elif choice < 0.55:
+        raw.insert(rng.randint(0, len(raw)), rng.randrange(256))
+    elif len(raw) > 2 and choice < 0.8:
+        start = rng.randrange(1, len(raw))
+        chunk = raw[start:start + rng.randint(1, 32)]
+        at = rng.randint(1, len(raw))
+        raw[at:at] = chunk
+    elif len(raw) > 2:
+        start = rng.randrange(1, len(raw))
+        del raw[start:start + rng.randint(1, 16)]
 
 
 def smoke(runs: int, seed: int = 20261001) -> None:
@@ -222,10 +240,7 @@ def smoke(runs: int, seed: int = 20261001) -> None:
     for _ in range(runs):
         raw = bytearray(rng.choice(corpus))
         for _ in range(rng.randint(1, 8)):
-            if raw and rng.random() < 0.6:
-                raw[rng.randrange(len(raw))] = rng.randrange(256)
-            else:
-                raw.insert(rng.randint(0, len(raw)), rng.randrange(256))
+            _mutate(rng, raw)
         test_one_input(bytes(raw))
 
 

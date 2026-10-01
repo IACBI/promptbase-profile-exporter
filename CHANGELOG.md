@@ -14,9 +14,9 @@ All notable changes to this project will be documented in this file.
   - A profile written as a malformed URL, such as `https://[x/profile/acb` (an
     unclosed `[` reads as an IPv6 address), is now the usual "not a valid profile
     URL" error; `pb` and `pb-history` used to stop with a traceback.
-  - Records that have neither a slug nor a title (a hand-edited CSV, say) are paired
-    with an identical record, so a catalog compared with itself no longer reports
-    them as both added and removed.
+  - Records that have neither a slug nor a title (a hand-edited CSV, say), or that
+    repeat a slug, are paired with an identical record first, so a catalog compared
+    with itself no longer reports them as both added and removed.
 
 ### Changed
 

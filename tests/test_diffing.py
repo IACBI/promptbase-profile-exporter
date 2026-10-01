@@ -500,6 +500,15 @@ class MalformedCatalogTests(unittest.TestCase):
                         self.assertRaisesRegex(ValueError, "line 3 has more fields"):
                     load_catalog(path, csv_safe=csv_safe)
 
+    def test_a_repeated_slug_compares_equal_to_itself(self):
+        # Found by fuzzing: the second row with a slug used to be left unmatched.
+        rows = [{"title": "A", "slug": "dup", "description": "one"},
+                {"title": "A", "slug": "dup", "description": "two"},
+                {"title": "B", "slug": "b", "description": "x"}]
+        for current in (rows, list(reversed(rows))):
+            diff = compare_catalog_records(rows, current)
+            self.assertEqual((diff.unchanged, len(diff.added), len(diff.removed)), (3, 0, 0))
+
     def test_records_without_slug_or_title_compare_equal_to_themselves(self):
         rows = [{"title": "", "slug": "", "description": "one"},
                 {"title": "", "slug": "", "description": "two"}]

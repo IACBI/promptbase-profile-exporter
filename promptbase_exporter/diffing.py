@@ -312,16 +312,25 @@ def _pair_records(
     """
     matches: list[int | None] = [None] * len(current)
     used: set[int] = set()
-    by_slug: dict[str, int] = {}
+    by_slug: dict[str, list[int]] = {}
     for index, record in enumerate(previous):
         key = _slug_key(record)
         if key:
-            by_slug.setdefault(key, index)
-    for position, record in enumerate(current):
-        found = by_slug.get(_slug_key(record)) if _slug_key(record) else None
-        if found is not None and found not in used:
-            matches[position] = found
-            used.add(found)
+            by_slug.setdefault(key, []).append(index)
+    # A slug should appear once, but a hand-edited catalog can repeat one; identical
+    # records are paired first, so a catalog compared with itself is always clean.
+    for exact in (True, False):
+        for position, record in enumerate(current):
+            key = _slug_key(record)
+            if matches[position] is not None or not key:
+                continue
+            for index in by_slug.get(key, ()):
+                if index not in used and (
+                    not exact or not _changed_fields(previous[index], record)
+                ):
+                    matches[position] = index
+                    used.add(index)
+                    break
 
     by_title: dict[str, list[int]] = {}
     for index, record in enumerate(previous):
