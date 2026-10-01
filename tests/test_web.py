@@ -564,6 +564,33 @@ class CompareFileTests(unittest.TestCase):
                 with self.assertRaisesRegex(WebInputError, message, msg=str(form)):
                     build_request_config({"profile": "acb", **form})
 
+    def test_an_exposed_server_compares_only_with_exported_catalogs(self):
+        with _in_directory():
+            Path("secrets.json").write_text('[{"title": "s"}]', encoding="utf-8")
+            Path("acb_all_prompts.json").write_text("[]", encoding="utf-8")
+            form = {"profile": "acb", "mode": "all", "compare_file": "secrets.json"}
+            self.assertEqual(build_request_config(form).compare_path.name, "secrets.json")
+            with self.assertRaisesRegex(WebInputError, "file this tool exported"):
+                build_request_config(form, exposed=True)
+            # Refused before the existence check, so it cannot probe for files either.
+            with self.assertRaisesRegex(WebInputError, "file this tool exported"):
+                build_request_config({**form, "compare_file": "missing.json"}, exposed=True)
+            allowed = build_request_config(
+                {**form, "compare_file": "acb_all_prompts.json"}, exposed=True
+            )
+        self.assertEqual(allowed.compare_path.name, "acb_all_prompts.json")
+
+    def test_the_handler_knows_when_it_is_exposed(self):
+        for host, exposed in (("127.0.0.1", False), ("::1", False), ("0.0.0.0", True),
+                              ("192.168.1.5", True)):
+            with self.subTest(host=host):
+                handler = _make_handler({}, address=(host, 8765))
+                self.assertEqual(handler._exposed(), exposed)
+
+    def test_the_export_name_pattern_matches_the_whole_name(self):
+        self.assertTrue(_EXPORT_FILENAME_RE.fullmatch("acb_all_prompts.json"))
+        self.assertFalse(_EXPORT_FILENAME_RE.fullmatch("acb_all_prompts.json" + chr(10)))
+
     def test_run_export_compares_before_overwriting_the_same_file(self):
         records = [record("Fresh", "text", "gpt", created=2, price=2.0)]
 

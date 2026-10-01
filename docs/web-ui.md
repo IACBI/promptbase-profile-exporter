@@ -80,7 +80,10 @@ using it:
 - **Comparisons read inside the working directory only.** The comparison
   catalog path gets the same containment check as the output directory, must
   have a catalog extension, and is only read, never written. The page shows
-  just the diff report (titles, slugs, and changed values).
+  just the diff report (titles, slugs, and changed values). On a server bound
+  beyond loopback (`--host 0.0.0.0`), the catalog must also be named like an
+  export, as for downloads, so another machine cannot read values from any JSON
+  or CSV file here or probe which files exist.
 - **Downloads serve exports only.** `GET /download` returns a file only if it
   sits inside the working directory *and* its name matches the exporter's own
   pattern, `<username>_<mode>_<prompts|bundles|apps>[_timestamp].{txt,md,json,csv,html,ndjson}`. It

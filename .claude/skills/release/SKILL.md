@@ -30,9 +30,12 @@ and add a fresh empty `## Unreleased` heading above it.
 
 ## 4. Sync the pinned Action examples
 
-Update the `@vX.Y.Z` pins so they reference the new version:
+Replace every reference to the previous version (the `@vX.Y.Z` pins, the `# vX.Y.Z`
+comment of the commit-SHA example, and its `git ls-remote` tag):
 - `README.md` (the Action example in both the English and Türkçe sections)
 - `docs/github-action.md` (every example)
+
+`SECURITY.md` needs no change: it supports "the latest release", not a number.
 
 ## 5. Validate locally (all must pass)
 

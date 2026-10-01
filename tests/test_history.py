@@ -324,6 +324,8 @@ class RenderTests(unittest.TestCase):
     def test_a_slug_with_backticks_or_pipes_stays_inside_its_code_span(self):
         self.assertEqual(history._code("we`ird|slug"), r"`` we`ird\|slug ``")
         self.assertEqual(history._code("plain  slug"), "`plain slug`")
+        # A double backtick inside must not close the span and expose a link.
+        self.assertEqual(history._code("a``[x](https://e)``b"), "``` a``[x](https://e)``b ```")
 
     def test_the_count_row_is_labelled_listings_for_every_kind(self):
         report = self.make()

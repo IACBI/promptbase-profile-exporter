@@ -222,8 +222,14 @@ def default_request() -> ExportRequest:
 
 def build_request_config(
     form_data: Mapping[str, str | Sequence[str]],
+    *,
+    exposed: bool = False,
 ) -> ExportRequest:
-    """Build and validate an export request from web form data."""
+    """Build and validate an export request from web form data.
+
+    ``exposed`` says the server listens beyond loopback, where the comparison
+    catalog must be one of the exporter's own files (see ``_resolve_compare_path``).
+    """
     profile_input = _single_value(form_data, "profile").strip()
     if not profile_input:
         raise WebInputError("Profile is required.")
@@ -284,7 +290,9 @@ def build_request_config(
     compare_file = _single_value(form_data, "compare_file").strip()
     if layout == "files" and compare_file:
         raise WebInputError("The files layout writes a folder, so it cannot be compared.")
-    compare_path = _resolve_compare_path(compare_file, mode) if compare_file else None
+    compare_path = (
+        _resolve_compare_path(compare_file, mode, exposed=exposed) if compare_file else None
+    )
     selected_extras = form_data.get("extra_fields", [])
     try:
         extra_fields = parse_extra_fields(
@@ -969,7 +977,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             return
         # Only serve files this tool actually exports, not any supported-
         # extension file that happens to be in the working directory.
-        if not _EXPORT_FILENAME_RE.match(candidate.name):
+        if not _EXPORT_FILENAME_RE.fullmatch(candidate.name):
             self._send_text("not found\n", status=404)
             return
         content_type = DOWNLOAD_CONTENT_TYPES[candidate.suffix.lower()]
@@ -991,7 +999,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         request: ExportRequest | None = None
         try:
             form = self._read_form()
-            request = build_request_config(form)
+            request = build_request_config(form, exposed=self._exposed())
             if _single_value(form, "action", "export") == "preview":
                 self._send_html(render_form(request, preview=run_preview(request)))
             else:
@@ -1010,6 +1018,11 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
                 render_form(request, error=f"Unexpected error: {exc}"),
                 status=500,
             )
+
+    def _exposed(self) -> bool:
+        address = self.server.server_address
+        host = address[0] if isinstance(address, tuple) else ""
+        return str(host) not in LOOPBACK_HOSTS
 
     def _expected_authorities(self) -> set[str]:
         """Host:port authorities this server legitimately answers to."""
@@ -1164,9 +1177,9 @@ def _url_host(host: str) -> str:
 def browser_url(host: str, port: int) -> str:
     """The address to open for a server bound to ``host``.
 
-    Binding to every interface ("" or 0.0.0.0) is reached through loopback.
+    Binding to every interface ("", 0.0.0.0, or ::) is reached through loopback.
     """
-    reachable = "127.0.0.1" if host in {"", "0.0.0.0"} else host
+    reachable = {"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
     return f"http://{_url_host(reachable)}:{port}/"
 
 
@@ -1215,8 +1228,14 @@ def _parse_optional_date(value: str, name: str, *, end_of_day: bool) -> int | No
         raise WebInputError(f"{name.title()} date is invalid: {exc}") from exc
 
 
-def _resolve_compare_path(raw: str, mode: str) -> Path:
-    """Validate a web-submitted comparison catalog: a readable file in the cwd."""
+def _resolve_compare_path(raw: str, mode: str, *, exposed: bool = False) -> Path:
+    """Validate a web-submitted comparison catalog: a readable file in the cwd.
+
+    When the server is reachable from other hosts, the catalog must also be named
+    like an export, as ``/download`` requires: otherwise another machine could read
+    the titles and prices of any JSON or CSV file here through the diff, or probe
+    which files exist.
+    """
     if mode == "split":
         raise WebInputError("Comparing requires mode all, text, or image.")
     path = _confine_to_cwd(raw)
@@ -1227,6 +1246,11 @@ def _resolve_compare_path(raw: str, mode: str) -> Path:
     if path.suffix.lower() not in CATALOG_SUFFIXES:
         raise WebInputError(
             "Comparison catalog must be a JSON, CSV, TXT, Markdown, or HTML file."
+        )
+    if exposed and not _EXPORT_FILENAME_RE.fullmatch(path.name):
+        raise WebInputError(
+            "On a server reachable from other hosts, the comparison catalog must be a "
+            "file this tool exported (for example acb_all_prompts.json)."
         )
     if not path.is_file():
         raise WebInputError("Comparison catalog not found.")

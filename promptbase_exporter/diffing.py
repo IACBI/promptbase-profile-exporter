@@ -5,13 +5,16 @@ import io
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .console import printable
 from .formatting import (
     UTF8_BOM,
     csv_unescape_formula,
+    escape_markdown,
     load_html_catalog_data,
     load_ndjson_catalog_data,
     record_to_dict,
@@ -20,6 +23,7 @@ from .models import PromptRecord
 
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
+_KIND_FROM_URL_RE = re.compile(r"/(prompt|bundle|app)/([^/?#]+)")
 # File extensions load_catalog can read.
 CATALOG_SUFFIXES = frozenset(
     {".json", ".ndjson", ".jsonl", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"}
@@ -144,7 +148,7 @@ def compare_catalog_records(
     unchanged = 0
 
     for record in current:
-        previous_index = _match_previous(record, previous_by_slug, previous_by_title)
+        previous_index = _match_previous(record, previous, previous_by_slug, previous_by_title)
         if previous_index is None or previous_index in used_previous:
             added.append(record)
             continue
@@ -176,7 +180,14 @@ def compare_catalog_records(
     )
 
 
-def format_diff_report(diff: CatalogDiff) -> str:
+def format_diff_report(diff: CatalogDiff, *, markdown: bool = False) -> str:
+    """The diff as readable text; ``markdown`` escapes the titles and values it quotes.
+
+    A ``.md`` report is rendered (a GitHub step summary, a pull request), where a
+    remote title could otherwise add links, headings, or hide the rest of the report.
+    The terminal and the web UI show the plain text.
+    """
+    text = escape_markdown if markdown else printable
     lines = [
         "# PromptBase Catalog Diff",
         "",
@@ -188,9 +199,9 @@ def format_diff_report(diff: CatalogDiff) -> str:
         "",
     ]
 
-    _append_record_section(lines, "Added", diff.added)
-    _append_changed_section(lines, diff.changed)
-    _append_record_section(lines, "Removed", diff.removed)
+    _append_record_section(lines, "Added", diff.added, text)
+    _append_changed_section(lines, diff.changed, text)
+    _append_record_section(lines, "Removed", diff.removed, text)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -228,7 +239,10 @@ def format_diff_json(diff: CatalogDiff) -> str:
 
 def write_diff_report(path: Path, diff: CatalogDiff) -> Path:
     """Write the report as JSON for a ``.json`` path, otherwise as Markdown."""
-    content = format_diff_json(diff) if path.suffix.lower() == ".json" else format_diff_report(diff)
+    if path.suffix.lower() == ".json":
+        content = format_diff_json(diff)
+    else:
+        content = format_diff_report(diff, markdown=path.suffix.lower() in {".md", ".markdown"})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
     return path
@@ -273,6 +287,7 @@ def _parse_markdown_catalog(text: str) -> list[dict[str, str]]:
                 "title": title,
                 "description": "\n".join(body_lines).strip(),
                 "slug": _slug_from_url(metadata.get("url", "")),
+                "url": metadata.get("url", ""),
                 "type": metadata.get("type", ""),
                 "domain": metadata.get("domain", ""),
                 "price": metadata.get("price", ""),
@@ -298,6 +313,7 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
 
 def _match_previous(
     record: dict[str, Any],
+    previous: list[dict[str, Any]],
     previous_by_slug: dict[str, int],
     previous_by_title: dict[str, int],
 ) -> int | None:
@@ -306,7 +322,12 @@ def _match_previous(
         return previous_by_slug[slug]
     title = _title_key(record)
     if title and title in previous_by_title:
-        return previous_by_title[title]
+        index = previous_by_title[title]
+        # An app often shares a prompt's title. A record whose kind is unknown (a TXT
+        # catalog stores no URL) still matches by title alone.
+        kinds = {_known_kind(record), _known_kind(previous[index])} - {""}
+        if len(kinds) <= 1:
+            return index
     return None
 
 
@@ -350,7 +371,27 @@ def _metadata_missing(value: Any) -> bool:
 
 
 def _slug_key(record: dict[str, Any]) -> str:
-    return str(record.get("slug") or "").strip().casefold()
+    """A listing's identity: its slug within its kind.
+
+    Slugs are unique only within a kind (a prompt and an app can share one), so a
+    bundle is never paired with a prompt of the same slug.
+    """
+    slug = str(record.get("slug") or "").strip().casefold()
+    return f"{_kind(record)}/{slug}" if slug else ""
+
+
+def _kind(record: dict[str, Any]) -> str:
+    # A record with a slug but no kind is a prompt: only bundles and apps store one.
+    return _known_kind(record) or "prompt"
+
+
+def _known_kind(record: dict[str, Any]) -> str:
+    """The listing kind a record states, from ``item_type`` or its URL, else ``""``."""
+    kind = str(record.get("item_type") or "").strip().lower()
+    if kind:
+        return kind
+    match = _KIND_FROM_URL_RE.search(str(record.get("url") or ""))
+    return match.group(1) if match else ""
 
 
 def _title_key(record: dict[str, Any]) -> str:
@@ -358,35 +399,40 @@ def _title_key(record: dict[str, Any]) -> str:
 
 
 def _slug_from_url(url: str) -> str:
-    match = re.search(r"/(?:prompt|bundle|app)/([^/?#]+)", url)
-    return match.group(1) if match else ""
+    match = _KIND_FROM_URL_RE.search(url)
+    return match.group(2) if match else ""
 
 
 def _append_record_section(
     lines: list[str],
     title: str,
     records: tuple[dict[str, Any], ...],
+    text: Callable[[object], str],
 ) -> None:
     if not records:
         return
     lines.extend([f"## {title}", ""])
     for record in records:
-        lines.append(f"- {_record_label(record)}")
+        lines.append(f"- {text(_record_label(record))}")
     lines.append("")
 
 
-def _append_changed_section(lines: list[str], records: tuple[ChangedRecord, ...]) -> None:
+def _append_changed_section(
+    lines: list[str],
+    records: tuple[ChangedRecord, ...],
+    text: Callable[[object], str],
+) -> None:
     if not records:
         return
     lines.extend(["## Changed", ""])
     for record in records:
-        lines.append(f"- {_record_label(record.current)}")
+        lines.append(f"- {text(_record_label(record.current))}")
         lines.append(f"  Changed fields: {', '.join(record.fields)}")
         for field in record.fields:
             change = _describe_change(
                 field, record.previous.get(field), record.current.get(field)
             )
-            lines.append(f"  - {field}: {change}")
+            lines.append(f"  - {field}: {text(change)}")
     lines.append("")
 
 

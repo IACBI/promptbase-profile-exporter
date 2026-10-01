@@ -24,7 +24,8 @@ from typing import Any
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts, parse_profile_input
-from .console import make_output_safe
+from .console import make_output_safe, printable
+from .formatting import escape_markdown as _cell
 from .models import ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
 
 SCHEMA_VERSION = 1
@@ -377,22 +378,18 @@ def _delta(before: float, after: float) -> str:
     return "0" if change == 0 else f"{change:+g}"
 
 
-_MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]<>&|~!#])")
-
-
-def _cell(text: object) -> str:
-    """Text from a remote listing made safe for a Markdown line or table cell.
-
-    Backslash-escaping ``<`` and ``&`` keeps a title from becoming raw HTML, and the
-    brackets keep it from becoming a link, in renderers that allow either.
-    """
-    return _MARKDOWN_SPECIAL.sub(r"\\\1", " ".join(str(text).split()))
-
-
 def _code(text: object) -> str:
-    """A code span: nothing inside is interpreted, so only pipes and backticks matter."""
-    flat = " ".join(str(text).split()).replace("|", "\\|")
-    return f"`` {flat} ``" if "`" in flat else f"`{flat}`"
+    """A code span: nothing inside is interpreted, so only pipes and backticks matter.
+
+    The fence is one backtick longer than the longest run inside, so no run of
+    backticks in a slug can close the span early.
+    """
+    flat = printable(text).replace("|", "\\|")
+    longest = max((len(run) for run in re.findall("`+", flat)), default=0)
+    if not longest:
+        return f"`{flat}`"
+    fence = "`" * (longest + 1)
+    return f"{fence} {flat} {fence}"
 
 
 def _heading(report: Report) -> str:

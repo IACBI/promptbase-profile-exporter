@@ -490,6 +490,77 @@ class StrictLoadTests(unittest.TestCase):
                 load_catalog(path, strict=True)
 
 
+class ReportEscapingTests(unittest.TestCase):
+    HOSTILE = "Real<!-- hide -->\n## Summary\n- Added: 0\n[Log in](https://evil.example)"
+
+    def _diff(self):
+        return compare_catalog_records(
+            [row("Old", slug="old"), row("Kept", slug="kept", type="gpt")],
+            [row(self.HOSTILE, slug="new"), row("Kept", slug="kept", type="x[y](z)")],
+        )
+
+    def test_a_markdown_report_file_renders_remote_text_as_text(self):
+        with TemporaryDirectory() as directory:
+            text = write_diff_report(Path(directory) / "diff.md", self._diff()).read_text(
+                encoding="utf-8"
+            )
+        self.assertNotIn("<!--", text)
+        self.assertNotIn("[Log in](", text)
+        self.assertNotIn("\n## Summary", text)
+        self.assertIn(r"\<\!-- hide --\>", text)
+        self.assertIn(r'"x\[y\](z)"', text)
+        self.assertEqual(text.count("\n## "), 3)  # Added, Changed, Removed only
+
+    def test_the_plain_report_keeps_each_record_on_one_line(self):
+        report = format_diff_report(self._diff())
+        self.assertNotIn("\n## Summary", report)
+        self.assertIn("- Real<!-- hide --> ## Summary - Added: 0 [Log in](https://evil.example)",
+                      report)
+
+
+class ListingKindTests(unittest.TestCase):
+    """A slug is unique only within a kind, so the kind is part of a listing's identity."""
+
+    def test_a_prompt_and_an_app_with_one_slug_are_not_paired(self):
+        prompt = row("Logo maker", slug="same", url="https://promptbase.com/prompt/same")
+        app = row("Story app", slug="same", url="https://promptbase.com/app/same", item_type="app")
+        diff = compare_catalog_records([prompt], [app])
+        self.assertEqual((len(diff.added), len(diff.removed), len(diff.changed)), (1, 1, 0))
+
+    def test_an_app_with_a_prompts_title_is_not_matched_by_title(self):
+        # Live data: many apps carry the title of one of the profile's prompts.
+        prompt = row("Logo maker", slug="logo", url="https://promptbase.com/prompt/logo")
+        app = row("Logo maker", slug="logo-app", item_type="app")
+        diff = compare_catalog_records([prompt], [app])
+        self.assertEqual((len(diff.added), len(diff.removed), len(diff.changed)), (1, 1, 0))
+
+    def test_a_record_of_unknown_kind_still_matches_by_title(self):
+        from_txt = row("Logo maker")  # TXT stores neither a slug nor a URL
+        bundle = row("Logo maker", slug="logo", item_type="bundle")
+        diff = compare_catalog_records([from_txt], [bundle])
+        self.assertEqual((diff.unchanged, len(diff.added)), (1, 0))
+
+    def test_kind_comes_from_item_type_then_the_url_then_defaults_to_prompt(self):
+        by_column = row("A", slug="a", item_type="bundle")
+        by_url = row("B", slug="a", url="https://promptbase.com/bundle/a")
+        plain = row("C", slug="a")
+        self.assertFalse(compare_catalog_records([by_column], [by_url]).added)
+        self.assertEqual(len(compare_catalog_records([by_column], [plain]).added), 1)
+
+    def test_a_bundle_markdown_catalog_matches_its_json_twin(self):
+        bundle = PromptRecord(
+            title="Kit", description="d", slug="kit", prompt_type="gpt", domain="text",
+            created=1, price=1.0, item_type="bundle",
+        )
+        with TemporaryDirectory() as directory:
+            as_md = load_catalog(write_export(
+                Path(directory), "acb", "all", [bundle], "markdown", item_type="bundle"))
+            as_json = load_catalog(write_export(
+                Path(directory), "acb", "all", [bundle], "json", item_type="bundle"))
+        diff = compare_catalog_records(as_md, as_json)
+        self.assertEqual((diff.unchanged, len(diff.added), len(diff.removed)), (1, 0, 0))
+
+
 class CsvLineBreakTests(unittest.TestCase):
     DESCRIPTION = "first\r\nsecond\rthird\nfourth"
 
