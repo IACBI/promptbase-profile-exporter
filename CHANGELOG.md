@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Each release now carries a wheel and an sdist, built by a GitHub Actions workflow
+  from the release tag with a signed build provenance attestation;
+  `gh attestation verify` checks a downloaded file (see SECURITY.md). There is
+  still no PyPI package.
+
 ### Security
 
 - Text from PromptBase can no longer change how a report renders. Titles and values
@@ -39,6 +46,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Development only: CI installs exact versions of its tools from
+  `requirements-dev.txt` (Dependabot updates them), checks out without keeping the
+  token in `.git/config`, and every test job, Windows and macOS included, is now
+  required before a pull request can merge.
 - Documentation only: the README (both languages) now lists `pb-history`, the web UI's
   Preview button and `--open`, `--config`, and `ndjson` where it had not; the CLI guide's
   contents list is complete; the coverage floor is stated as 85% everywhere.
