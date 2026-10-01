@@ -99,6 +99,15 @@ class EveryEntryPointSurvivesLegacyOutputTests(unittest.TestCase):
 
 
 class PrintableTests(unittest.TestCase):
+    def test_bidirectional_controls_are_removed(self):
+        rlo, pdf, lri, pdi, rlm = chr(0x202E), chr(0x202C), chr(0x2066), chr(0x2069), chr(0x200F)
+        text = f"price {rlo}01${pdf} ok {lri}x{pdi} {rlm}y"
+        self.assertEqual(printable(text), "price 01$ ok x y")
+
+    def test_right_to_left_letters_are_kept(self):
+        shalom = "".join(map(chr, (0x05E9, 0x05DC, 0x05D5, 0x05DD)))
+        self.assertEqual(printable(shalom), shalom)
+
     def test_remote_text_stays_on_one_line_without_control_characters(self):
         esc, bell = chr(27), chr(7)
         hostile = f"Nice\n::error title=x::fake\r\n## Heading{esc}]8;;https://e{bell}link{esc}[2J"

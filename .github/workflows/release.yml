@@ -33,7 +33,9 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          python -m build
+          # No isolation: build with the hash-pinned setuptools installed above, not
+          # whatever version PyPI serves at release time, since the result is attested.
+          python -m build --no-isolation
           python -m twine check dist/*
           # The files must be this tag's version, not whatever the tag points near.
           version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"

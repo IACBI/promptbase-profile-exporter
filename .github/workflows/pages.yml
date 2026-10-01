@@ -1,0 +1,102 @@
+name: pages
+
+# The project site: site/index.html plus a live demo built from @acb's public
+# profile, the dashboard recipe in docs/github-action.md run on this repository.
+# It runs the exporter straight from the checkout, so a change on main that breaks
+# the recipe shows up here within a day.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "promptbase_exporter/**"
+      - ".github/workflows/pages.yml"
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # Nothing to install: the exporter is the standard library only, and runs
+      # from the checkout with python -m.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: history.sqlite
+          key: pages-history-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: pages-history-
+      # Only the daily run takes a snapshot: one from a push minutes after it would
+      # make the trends page compare two almost identical moments.
+      - if: github.event_name != 'push'
+        run: python -m promptbase_exporter.history snapshot @acb --db history.sqlite --quiet
+      - if: github.event_name != 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: history.sqlite
+          key: pages-history-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Build the site
+        run: |
+          set -euo pipefail
+          mkdir _site
+          python -m promptbase_exporter @acb --mode all --format html \
+            --output-file _site/catalog.html --quiet
+          snapshots=0
+          if [[ -f history.sqlite ]]; then
+            snapshots="$(python -m promptbase_exporter.history list --db history.sqlite | wc -l)"
+          fi
+          if [[ "$snapshots" -ge 2 ]]; then
+            python -m promptbase_exporter.history report --db history.sqlite --format html \
+              -o _site/trends.html
+          else
+            cat > _site/trends.html <<'HTML'
+          <!doctype html>
+          <html lang="en"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+          <title>Trends</title>
+          <style>:root{color-scheme:light dark}body{font:1.0625rem/1.6 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem}</style>
+          </head><body><h1>Trends</h1>
+          <p>The history has fewer than two daily snapshots so far. Trends appear after the next daily build.</p>
+          <p><a href="./">Back to the project page</a></p>
+          </body></html>
+          HTML
+          fi
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          page = Path("site/index.html").read_text(encoding="utf-8")
+          built = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+          assert page.count("__BUILT__") == 1
+          Path("_site/index.html").write_text(page.replace("__BUILT__", built), encoding="utf-8")
+          PY
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write  # publish the site
+      id-token: write  # prove the deployment comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

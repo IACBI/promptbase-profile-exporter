@@ -16,8 +16,9 @@ checklist; skipping a step leaves the CLI, web UI, Action, and docs out of sync.
   raising `ValueError` with a clear message — `main()` turns that into
   `error: ...` and exit code 1. Do not validate inside `main()`.
 - Thread the value into the right stage:
-  - record selection → `filter_records_by_metadata` (in `formatting.py`)
-  - ordering → `sort_records`
+  - record selection and ordering → `pipeline.Selection` (filter → sort → limit),
+    shared by `cli.py` and `web.py`; it calls `filter_records_by_metadata` and
+    `sort_records`. `SurfacesAgreeTests` fails if the CLI and the web form drift.
   - output shaping → `filter_records` / the writers
 - If the option is informational and should short-circuit (like `--list-domains`),
   follow that pattern and return before writing.
@@ -26,7 +27,8 @@ checklist; skipping a step leaves the CLI, web UI, Action, and docs out of sync.
 
 - Add a field to `ExportRequest` and parse/validate it in
   `build_request_config` (raise `WebInputError` for bad input → HTTP 400).
-- Use it in `run_export`.
+- Use it in `run_export`; a selection option reaches the preview too, through
+  `_fetch_selection`, which `run_export` and `run_preview` share.
 - Add the matching form control in `render_form` and escape any echoed value
   with `_h(...)`.
 

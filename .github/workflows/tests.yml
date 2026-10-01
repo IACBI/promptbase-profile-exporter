@@ -78,7 +78,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --require-hashes -r requirements-release.txt
-      - run: python -m build
+      - run: python -m build --no-isolation  # the hash-pinned setuptools, as in release.yml
       - run: python -m twine check dist/*
 
   # End-to-end run of the composite action against live public data: an

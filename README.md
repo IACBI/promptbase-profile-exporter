@@ -8,6 +8,7 @@ Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, NDJ
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/IACBI/promptbase-profile-exporter/badge)](https://scorecard.dev/viewer/?uri=github.com/IACBI/promptbase-profile-exporter)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15144/badge)](https://www.bestpractices.dev/projects/15144)
 
 **Read this in:** [English](#english) · [Türkçe](#turkce)
 
@@ -22,6 +23,9 @@ Give it a PromptBase profile URL or username, and it collects every approved
 prompt on that profile with its title, description, and listing metadata, and
 writes a tidy catalog. It is useful for backing up your own listings, auditing
 them, or publishing a readable catalog somewhere else.
+
+See it on a real profile: the [project site](https://iacbi.github.io/promptbase-profile-exporter/)
+rebuilds a searchable catalog and a trends page from a public profile every day.
 
 It reads the same public data the PromptBase website serves: no login, no API
 key, no browser automation. It is written against the Python standard library
@@ -172,6 +176,10 @@ profildeki onaylı tüm prompt'ları başlık, açıklama ve ilan bilgileriyle
 toplayıp düzenli bir katalog dosyasına yazar. Kendi ilanlarınızı yedeklemek,
 gözden geçirmek ya da okunaklı bir katalog olarak başka bir yerde yayımlamak
 için kullanışlıdır.
+
+Gerçek bir profilde nasıl göründüğüne [proje sitesinden](https://iacbi.github.io/promptbase-profile-exporter/)
+bakabilirsiniz: site, herkese açık bir profilden her gün aranabilir bir katalog ve
+bir değişim sayfası üretir.
 
 PromptBase sitesinin herkese açık olarak sunduğu veriyi okur; giriş yapmanız,
 API anahtarı almanız ya da tarayıcı otomasyonu kurmanız gerekmez. Yalnızca

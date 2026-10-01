@@ -49,8 +49,11 @@ def safe_stem(slug: str) -> str:
     and a name Windows reserves gets a suffix.
     """
     stem = _UNSAFE.sub("_", slug).strip("._-")[:MAX_STEM_LENGTH].strip("._-") or "untitled"
-    if stem.upper().split(".")[0] in _WINDOWS_RESERVED:
-        stem += "_"
+    head, dot, rest = stem.partition(".")
+    if head.upper() in _WINDOWS_RESERVED:
+        # Older Windows reads "con.x" as the device too, so the suffix goes on the
+        # part before the first dot.
+        stem = f"{head}_{dot}{rest}"
     return stem
 
 

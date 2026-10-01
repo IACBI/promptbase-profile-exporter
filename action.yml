@@ -201,7 +201,6 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        python -m pip install --upgrade pip
         python -m pip install "$GITHUB_ACTION_PATH"
 
     - name: Validate action inputs

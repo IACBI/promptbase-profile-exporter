@@ -11,6 +11,9 @@ venv/
 build/
 dist/
 exports/
+# pb-history files and fuzzing crash artifacts from local runs
+*.sqlite
+findings/
 .claude/settings.local.json
 .DS_Store
 Thumbs.db

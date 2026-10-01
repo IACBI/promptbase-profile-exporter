@@ -7,7 +7,8 @@ description: Add a new output/export format (like YAML or HTML) to promptbase-pr
 
 Formats are referenced in several places that must agree, or post-write
 validation (`count_written_records`) will reject otherwise-valid exports. Use the
-existing five formats (`txt`, `markdown`, `json`, `csv`, `html`) as the template.
+existing six formats (`txt`, `markdown`, `json`, `ndjson`, `csv`, `html`) as the
+template.
 
 ## 1. Register the format — `promptbase_exporter/formatting.py`
 
@@ -20,14 +21,15 @@ existing five formats (`txt`, `markdown`, `json`, `csv`, `html`) as the template
   `main()` compares it against the expected count and fails on mismatch. For
   text-like formats, mirror the careful regex approach used for `txt`/`markdown`.
 - Add a branch to `infer_format_from_path()` so `--output-file foo.<ext>` infers
-  the format.
+  the format (an alias goes there too, as `.jsonl` does for `ndjson`).
 
 ## 2. Make it comparable — `promptbase_exporter/diffing.py`
 
 - If the new format should be usable with `--compare`/`--update-file`, add a
   branch to `load_catalog()` that parses the file back into normalized record
   dicts (see `_parse_text_catalog` / `_parse_markdown_catalog` for structured
-  text formats). JSON/CSV-like formats can reuse their stdlib parsers.
+  text formats, and `load_ndjson_catalog_data` for a line-oriented one). JSON/CSV-like
+  formats can reuse their stdlib parsers.
 
 ## 3. Surface it everywhere
 

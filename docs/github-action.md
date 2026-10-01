@@ -308,6 +308,10 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 ```
 
+This repository runs the same recipe for its own
+[project site](https://iacbi.github.io/promptbase-profile-exporter/), in
+[`.github/workflows/pages.yml`](../.github/workflows/pages.yml).
+
 Before the first run, set the repository's Pages source to **GitHub Actions**
 (Settings, Pages). Then:
 
