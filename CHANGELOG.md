@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Comparing catalogs (`--compare`, `--update-file`, `pb-diff`) is about 16x faster on
+  large catalogs: text that is already equal is no longer normalised. A 30,000-prompt
+  comparison took 7.7 s and now takes 0.5 s, with an identical report.
+
 ### Fixed
 
 - `pb-history` writes numbers in full: a gain of 2,000,100 views read `+2.0001e+06`
