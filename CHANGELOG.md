@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.15.0 - 2026-10-02
+
 ### Changed
 
 - `pb-history` reports no longer slow down as the history grows. Every report used to
