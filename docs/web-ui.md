@@ -76,7 +76,8 @@ using it:
   inside the folder the server was started in; absolute paths and `..`
   traversal are rejected. Paths are checked before they touch the
   filesystem, so a network path such as `//host/share` is refused without the
-  server ever contacting that host.
+  server ever contacting that host. `~` is not expanded: `~/exports` is a
+  folder named `~` inside the working directory, not your home directory.
 - **Comparisons read inside the working directory only.** The comparison
   catalog path gets the same containment check as the output directory, must
   have a catalog extension, and is only read, never written. The page shows
