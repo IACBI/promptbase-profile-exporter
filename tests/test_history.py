@@ -434,6 +434,73 @@ class AlertTests(unittest.TestCase):
                          {"rules": [], "hits": []})
 
 
+class CompareTests(unittest.TestCase):
+    def setUp(self):
+        self._directory = TemporaryDirectory()
+        self.addCleanup(self._directory.cleanup)
+        self.db = Path(self._directory.name) / "h.sqlite"
+        store(self.db, "small", [
+            (0, [rec("a", price=0.0, sales=1, views=10, rating=4.0)]),
+            (2, [rec("a", price=0.0, sales=3, views=30, rating=4.0), rec("b", price=4.0)]),
+        ])
+        store(self.db, "big", [(2, [rec("x", price=1.0, sales=9), rec("y", price=3.0, sales=1),
+                                    rec("z", price=5.0, sales=0, rating=5.0)])])
+
+    def summaries(self, *profiles, days=None):
+        with closing(history.connect(self.db, create=False)) as connection:
+            return history.summarize(connection, "prompt", profiles, days=days)
+
+    def test_profiles_are_summarized_and_ordered_by_sales(self):
+        big, small = self.summaries()
+        self.assertEqual((big.profile, small.profile), ("big", "small"))
+        self.assertEqual((big.listings, big.totals["sales"], big.median_price), (3, 10, 3.0))
+        self.assertEqual((small.listings, small.median_price, small.free_share), (2, 2.0, 0.5))
+        self.assertAlmostEqual(big.sales_per_listing, 10 / 3)
+        self.assertEqual(small.average_rating, 4.0)  # unrated listings are left out
+
+    def test_growth_is_per_day_and_missing_history_is_none(self):
+        big, small = self.summaries(days=1)
+        self.assertIsNone(big.growth)  # a single snapshot reaches back no time at all
+        self.assertEqual(small.growth, {"sales": 1.0, "views": 10.0, "favorites": 0.0})
+        self.assertEqual(small.growth_days, 2.0)
+
+    def test_profiles_can_be_chosen_by_any_spelling_and_must_exist(self):
+        self.assertEqual([s.profile for s in self.summaries("@small", "small")], ["small"])
+        with self.assertRaisesRegex(history.HistoryError, "no snapshots of prompts for @nobody"):
+            self.summaries("small", "nobody")
+
+    def test_each_format(self):
+        summaries = self.summaries(days=1)
+        markdown = history.render_comparison_markdown(summaries, "prompt", 1)
+        self.assertIn("| @small | 2 | 30 | 3 |", markdown)
+        self.assertIn("| n/a | n/a | n/a |", markdown)
+        data = json.loads(json.dumps(history.comparison_to_dict(summaries, "prompt", 1)))
+        self.assertEqual([p["profile"] for p in data["profiles"]], ["big", "small"])
+        self.assertIsNone(data["profiles"][0]["per_day"])
+        self.assertEqual(data["profiles"][1]["per_day"]["sales"], 1.0)
+        page = history.render_comparison_html(summaries, "prompt", 1)
+        self.assertIn("<td>@small</td>", page)
+        self.assertNotIn("<script", page)
+
+    def test_profile_names_are_escaped(self):
+        store(self.db, "<b>x</b>|y", [(0, [rec("q")])])
+        summaries = self.summaries()
+        self.assertNotIn("<b>", history.render_comparison_html(summaries, "prompt"))
+        self.assertIn(r"@\<b\>x\</b\>\|y", history.render_comparison_markdown(summaries, "prompt"))
+
+    def test_command(self):
+        code, out, _ = run(["compare", "--db", str(self.db), "--days", "1"])
+        target = Path(self._directory.name) / "c.json"
+        json_code, _, _ = run(["compare", "--db", str(self.db), "--profile", "small",
+                               "--format", "json", "-o", str(target)])
+        written = json.loads(target.read_text(encoding="utf-8"))
+        missing, _, err = run(["compare", "--db", str(self.db), "--profile", "nobody"])
+        self.assertEqual((code, json_code, missing), (0, 0, 1))
+        self.assertIn("# PromptBase profiles compared (prompts)", out)
+        self.assertEqual([p["profile"] for p in written["profiles"]], ["small"])
+        self.assertIn("no snapshots", err)
+
+
 class CommandTests(unittest.TestCase):
     def fetch(self, *records, profile="acb"):
         return patch(

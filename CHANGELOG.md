@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `pb-history compare` lines up every profile in a history file (or the ones named
+  with `--profile`) from its latest snapshot: listings, total views, sales,
+  favorites, and reviews, average rating, median price, share of free listings,
+  and sales per listing. `--days N` adds per-day growth, and `n/a` marks a profile
+  whose history is shorter. Markdown, JSON, or HTML.
 - `pb-history report --alert RULE` flags the listings that moved enough to act on:
   a counter's gain (`sales+1`, `views+50%`) or an event (`new`, `removed`, `price`).
   The hits come first in the Markdown, HTML, and JSON report, and the command exits

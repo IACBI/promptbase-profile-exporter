@@ -522,6 +522,7 @@ pb-history report --db history.sqlite                 # the latest snapshot agai
 pb-history report --db history.sqlite --days 7 --metric views --top 20
 pb-history report --db history.sqlite --since 2026-09-01 --format html -o trends.html
 pb-history report --db history.sqlite --alert views+50% --alert sales+1 --alert new
+pb-history compare --db history.sqlite --days 7      # every profile in the file, side by side
 ```
 
 - **A snapshot** holds the views, sales, downloads, favorites, reviews, rating,
@@ -549,6 +550,12 @@ pb-history report --db history.sqlite --alert views+50% --alert sales+1 --alert 
   change). A percentage needs a baseline above zero; a listing that had none before
   is caught by an absolute rule. In JSON, the rules and hits are under `alerts`.
 - **One profile per report:** if the file holds several, name one with `--profile`.
+- **Profiles side by side:** `pb-history compare` puts every profile in the file (or
+  each `--profile`) in one table from its latest snapshot: listings, total views,
+  sales, favorites, and reviews, average rating, median price, the share of free
+  listings, and sales per listing, most sales first. `--days N` adds sales, views,
+  and favorites per day over at least N days; a profile whose history does not
+  reach back that far shows `n/a`. It takes `--format` and `-o` like `report`.
 - **On a schedule in GitHub Actions:** see
   [Track trends on a schedule](github-action.md#track-trends-on-a-schedule), which
   keeps the file in the Actions cache and puts each report on the run's summary page.
