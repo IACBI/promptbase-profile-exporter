@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Development only: the code that reads catalogs, config files, and remote text is
+  fuzzed with Atheris (coverage-guided) in a new `fuzz` workflow: catalog loaders
+  in every format, `pb-convert`'s record reader and every writer, the text
+  sanitizers, profile and alert parsing, comparisons, and config files, each with
+  the guarantees it must keep. A seeded smoke mode runs the same checks without
+  Atheris, and the test suite runs it briefly.
+
 ## 0.14.0 - 2026-10-01
 
 ### Added

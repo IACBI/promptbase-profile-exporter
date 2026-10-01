@@ -93,3 +93,5 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "S"]
 # nest `with` blocks for readability, and use a seeded PRNG to fuzz (not for secrets).
 "tests/*" = ["S101", "S104", "S310", "S311", "S603", "SIM117", "RUF012"]
 ".claude/hooks/*" = ["S603", "S607"]
+# The fuzz harness asserts its guarantees and mutates inputs with a seeded PRNG.
+"fuzz/*" = ["S101", "S311"]
