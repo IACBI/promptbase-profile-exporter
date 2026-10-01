@@ -37,7 +37,9 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `layout.py` — `--layout files`: one Markdown file per prompt with JSON-scalar (valid YAML)
   front matter; `safe_stem` turns a remote slug into a safe file name. Never deletes files.
 - `history.py` — `pb-history`: snapshots of a profile's counters in SQLite (stdlib `sqlite3`,
-  parameterised queries only, versioned file) and a trend report (Markdown/JSON/HTML).
+  parameterised queries only, versioned file; each snapshot stores its counter totals, and a
+  `snapshot` upgrades an older file in one transaction while reads never write) and a trend
+  report (Markdown/JSON/HTML).
   Independent of the export pipeline.
 - `console.py` — `make_output_safe()`, called first thing by every entry point, so a
   title a legacy Windows code page cannot encode prints as `?` instead of crashing.

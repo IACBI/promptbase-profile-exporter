@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `pb-history` reports no longer slow down as the history grows. Every report used to
+  add up every listing of every snapshot for the trend chart; each snapshot now
+  stores its totals when it is taken. With 30,000 listings and 40 snapshots the
+  report took 2.2 s and now takes 0.46 s, the same at any history length (the totals
+  alone: 1.6 s, now 1 ms).
+- **History format 2.** A file written by 0.14.3 or earlier is still read as it is,
+  and its reports are unchanged. The first `pb-history snapshot` into it upgrades it
+  in one transaction (0.4 s for 40 snapshots of 30,000 listings), so two scheduled
+  runs at once are safe. Afterwards 0.14.3 and earlier refuse the file as a newer
+  format; keep one version of the tool per history file.
+
 ## 0.14.3 - 2026-10-01
 
 ### Added

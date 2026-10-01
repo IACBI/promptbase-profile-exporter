@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from operator import attrgetter
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,9 @@ from .console import make_output_safe, printable
 from .formatting import escape_markdown as _cell
 from .models import ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
 
-SCHEMA_VERSION = 1
+# Version 1 files (no stored totals) are still read; a snapshot taken into one
+# upgrades it to the current version.
+SCHEMA_VERSION = 2
 COUNTERS = ("views", "sales", "downloads", "favorites", "reviews")
 REPORT_FORMATS = ("markdown", "json", "html")
 EXIT_SUCCESS = 0
@@ -47,7 +50,12 @@ CREATE TABLE snapshots (
     taken_at TEXT NOT NULL,
     profile TEXT NOT NULL,
     item_type TEXT NOT NULL,
-    record_count INTEGER NOT NULL
+    record_count INTEGER NOT NULL,
+    views_total INTEGER NOT NULL DEFAULT 0,
+    sales_total INTEGER NOT NULL DEFAULT 0,
+    downloads_total INTEGER NOT NULL DEFAULT 0,
+    favorites_total INTEGER NOT NULL DEFAULT 0,
+    reviews_total INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX snapshots_lookup ON snapshots (profile, item_type, taken_at);
 CREATE TABLE observations (
@@ -66,10 +74,17 @@ CREATE TABLE observations (
 ) WITHOUT ROWID;
 """
 
+_TOTAL_COLUMNS = tuple(f"{counter}_total" for counter in COUNTERS)
+_OBSERVATION_COLUMNS = ["snapshot_id", "slug", "title", "price", "discount", "views", "sales",
+                        "downloads", "favorites", "rating", "reviews"]
+_SNAPSHOT_COLUMNS = ["id", "taken_at", "profile", "item_type", "record_count"]
+# The columns each readable format version must have, in order.
 _EXPECTED_COLUMNS = {
-    "snapshots": ["id", "taken_at", "profile", "item_type", "record_count"],
-    "observations": ["snapshot_id", "slug", "title", "price", "discount", "views", "sales",
-                     "downloads", "favorites", "rating", "reviews"],
+    1: {"snapshots": _SNAPSHOT_COLUMNS, "observations": _OBSERVATION_COLUMNS},
+    2: {
+        "snapshots": [*_SNAPSHOT_COLUMNS, *_TOTAL_COLUMNS],
+        "observations": _OBSERVATION_COLUMNS,
+    },
 }
 
 
@@ -197,10 +212,13 @@ def _prepare(connection: sqlite3.Connection, path: Path, create: bool) -> None:
 def _check(connection: sqlite3.Connection, path: Path, create: bool) -> None:
     """Accept a pb-history file, or (with ``create``) give an empty one the schema."""
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == SCHEMA_VERSION:
+    if version in _EXPECTED_COLUMNS:
         # The version number alone proves nothing: any SQLite file can carry it.
-        if not _has_expected_schema(connection):
+        if not _has_expected_schema(connection, version):
             raise HistoryError(f"{path} is a SQLite file, but not a pb-history file")
+        if version != SCHEMA_VERSION and create:
+            # Only a command that writes upgrades the file; a report leaves it as it is.
+            _upgrade(connection)
         return
     if version != 0:
         raise HistoryError(
@@ -220,8 +238,29 @@ def _check(connection: sqlite3.Connection, path: Path, create: bool) -> None:
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
-def _has_expected_schema(connection: sqlite3.Connection) -> bool:
-    for table, columns in _EXPECTED_COLUMNS.items():
+def _upgrade(connection: sqlite3.Connection) -> None:
+    """Give a version 1 file the stored totals, in the caller's transaction.
+
+    Every name in the SQL is a constant of this module; nothing comes from the file.
+    """
+    for column in _TOTAL_COLUMNS:
+        connection.execute(
+            f"ALTER TABLE snapshots ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+        )
+    sums = ", ".join(f"SUM({counter})" for counter in COUNTERS)
+    totals = connection.execute(
+        f"SELECT snapshot_id, {sums} FROM observations GROUP BY snapshot_id"  # noqa: S608
+    ).fetchall()
+    assignments = ", ".join(f"{column} = ?" for column in _TOTAL_COLUMNS)
+    connection.executemany(
+        f"UPDATE snapshots SET {assignments} WHERE id = ?",  # noqa: S608
+        [(*(int(total) for total in row[1:]), row[0]) for row in totals],
+    )
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _has_expected_schema(connection: sqlite3.Connection, version: int) -> bool:
+    for table, columns in _EXPECTED_COLUMNS[version].items():
         found = [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
         if found != columns:
             return False
@@ -242,11 +281,14 @@ def record_snapshot(
          record.downloads, record.favorites, record.rating, record.reviews)
         for record in records
     ]
+    # Kept beside the snapshot so a trend chart never has to read every observation.
+    totals = [sum(getattr(record, counter) for record in records) for counter in COUNTERS]
     with connection:
         cursor = connection.execute(
-            "INSERT INTO snapshots (taken_at, profile, item_type, record_count) "
-            "VALUES (?, ?, ?, ?)",
-            (moment.isoformat(timespec="seconds"), profile, item_type, len(rows)),
+            "INSERT INTO snapshots (taken_at, profile, item_type, record_count, "
+            "views_total, sales_total, downloads_total, favorites_total, reviews_total) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (moment.isoformat(timespec="seconds"), profile, item_type, len(rows), *totals),
         )
         snapshot_id = int(cursor.lastrowid or 0)
         connection.executemany(
@@ -299,7 +341,24 @@ def totals_series(
     profile: str,
     item_type: str,
 ) -> list[tuple[datetime, dict[str, int]]]:
-    """The totals of every counter at every snapshot, oldest first, for a chart."""
+    """The totals of every counter at every snapshot, oldest first, for a chart.
+
+    A current file stores the totals with each snapshot, so this reads one row per
+    snapshot. A version 1 file has none and is summed from its observations, as
+    before, until the next snapshot upgrades it.
+    """
+    if connection.execute("PRAGMA user_version").fetchone()[0] >= 2:
+        stored = ", ".join(_TOTAL_COLUMNS)
+        series = connection.execute(
+            f"SELECT taken_at, record_count, {stored} FROM snapshots "  # noqa: S608
+            "WHERE profile = ? AND item_type = ? ORDER BY taken_at, id",
+            (profile, item_type),
+        )
+        return [
+            (datetime.fromisoformat(row[0]),
+             {"listings": int(row[1]), **{c: int(row[2 + i]) for i, c in enumerate(COUNTERS)}})
+            for row in series
+        ]
     sums = ", ".join(f"SUM(o.{counter})" for counter in COUNTERS)
     rows = connection.execute(
         f"SELECT s.taken_at, COUNT(o.slug), {sums} FROM snapshots s "  # noqa: S608
@@ -363,7 +422,7 @@ def choose_baseline(
 def _totals(observations: dict[str, Observation]) -> dict[str, float]:
     values: dict[str, float] = {"listings": float(len(observations))}
     for counter in COUNTERS:
-        values[counter] = float(sum(getattr(o, counter) for o in observations.values()))
+        values[counter] = float(sum(map(attrgetter(counter), observations.values())))
     rated = [o.rating for o in observations.values() if o.rating > 0]
     values["average rating"] = sum(rated) / len(rated) if rated else 0.0
     return values
