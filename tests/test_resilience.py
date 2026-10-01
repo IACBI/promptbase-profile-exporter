@@ -8,7 +8,9 @@ bodies, slow responses, and paging are exercised end to end. Nothing leaves
 
 import gzip
 import json
+import os
 import socket
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -74,6 +76,19 @@ def hang_up(handler):
     handler.connection.shutdown(socket.SHUT_RDWR)
 
 
+class _QuietServer(ThreadingHTTPServer):
+    """Leaves out the traceback of a client that hung up, which these tests cause.
+
+    The timeout test abandons its first request on purpose, so the late reply hits a
+    closed socket; any other error is still printed.
+    """
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
+
+
 class FakeFirestore:
     def __init__(self, script):
         self.script = script
@@ -87,7 +102,7 @@ class FakeFirestore:
             def log_message(self, *args):
                 pass
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = _QuietServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
@@ -95,6 +110,8 @@ class FakeFirestore:
         self.thread.start()
         port = self.server.server_address[1]
         self.patches = [
+            # Requests to the fixture must not go through a proxy set in the environment.
+            patch.dict(os.environ, {"NO_PROXY": "*", "no_proxy": "*"}),
             patch.object(client, "FIRESTORE_RUN_QUERY", f"http://127.0.0.1:{port}/runQuery"),
             patch.object(client, "REQUEST_TIMEOUT_SECONDS", 2),
             patch.object(client, "PAGE_DELAY_SECONDS", 0),
