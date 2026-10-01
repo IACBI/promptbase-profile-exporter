@@ -4,15 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-### Fixed
-
-- A time stored as epoch milliseconds is now converted by counting from the epoch,
-  not with `fromtimestamp`, which depends on the platform: a catalog holding a time
-  outside years 1 to 9999 (a corrupt or hand-edited file) made every writer, and so
-  `pb-convert`, stop with an `OverflowError`, and on Windows any time before 1970
-  failed. Such a time is now unknown, like a missing one. For every real time the
-  text is unchanged (checked on all 4,826 timestamps of two live profiles and
-  200,000 random ones). Found by the weekly-length Atheris run.
+## 0.14.1 - 2026-10-01
 
 ### Fixed
 
@@ -27,6 +19,13 @@ All notable changes to this project will be documented in this file.
   - Records that have neither a slug nor a title (a hand-edited CSV, say), or that
     repeat a slug, are paired with an identical record first, so a catalog compared
     with itself no longer reports them as both added and removed.
+- A time stored as epoch milliseconds is now converted by counting from the epoch,
+  not with `fromtimestamp`, which depends on the platform: a catalog holding a time
+  outside years 1 to 9999 (a corrupt or hand-edited file) made every writer, and so
+  `pb-convert`, stop with an `OverflowError`, and on Windows any time before 1970
+  failed. Such a time is now unknown, like a missing one. For every real time the
+  text is unchanged (checked on all 4,826 timestamps of two live profiles and
+  200,000 random ones). Found by the weekly-length Atheris run.
 
 ### Changed
 
