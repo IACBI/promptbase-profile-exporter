@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.14.3 - 2026-10-01
+
 ### Added
 
 - A project site on GitHub Pages, https://iacbi.github.io/promptbase-profile-exporter/,
