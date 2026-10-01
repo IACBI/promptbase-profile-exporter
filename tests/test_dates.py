@@ -1,15 +1,25 @@
 import unittest
 
-from promptbase_exporter.dates import parse_datetime_ms, re_full_date
+from promptbase_exporter.dates import parse_datetime_ms
 
 
 class FullDateTests(unittest.TestCase):
-    def test_recognizes_iso_date(self):
-        self.assertTrue(re_full_date("2026-01-01"))
+    """Only a bare YYYY-MM-DD date stretches to the end of the day."""
 
-    def test_rejects_non_dates(self):
-        for value in ("2026-1-1", "2026/01/01", "2026-01-01T00:00", "", "2026-01"):
-            self.assertFalse(re_full_date(value))
+    def test_a_bare_date_moves_to_the_end_of_the_day(self):
+        self.assertGreater(parse_datetime_ms("2026-01-01", end_of_day=True),
+                           parse_datetime_ms("2026-01-01", end_of_day=False))
+
+    def test_anything_with_a_time_keeps_it(self):
+        for value in ("2026-01-01T00:00", "2026-01-01T00:00:00Z", "2026-01-01 00:00"):
+            with self.subTest(value=value):
+                self.assertEqual(parse_datetime_ms(value, end_of_day=True),
+                                 parse_datetime_ms(value, end_of_day=False))
+
+    def test_not_quite_dates_are_rejected(self):
+        for value in ("2026-1-1", "2026/01/01", "2026-01"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_datetime_ms(value, end_of_day=False)
 
 
 class ParseDatetimeMsTests(unittest.TestCase):
@@ -47,6 +57,12 @@ class ParseDatetimeMsTests(unittest.TestCase):
     def test_empty_value_rejected(self):
         with self.assertRaises(ValueError):
             parse_datetime_ms("   ", end_of_day=False)
+
+    def test_an_offset_past_year_1_or_9999_is_invalid_not_a_crash(self):
+        # astimezone() raised OverflowError, a traceback in the CLI and a 500 in the web UI.
+        for value in ("0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-14:00"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "invalid date"):
+                parse_datetime_ms(value, end_of_day=False)
 
     def test_invalid_value_rejected(self):
         for value in ("not-a-date", "2026-13-01", "2026-01-99"):

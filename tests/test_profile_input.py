@@ -11,6 +11,11 @@ class ParseProfileInputTests(unittest.TestCase):
                     self.assertRaisesRegex(PromptBaseError, "valid profile URL"):
                 parse_profile_input(raw)
 
+    def test_a_bare_at_sign_or_profile_path_names_no_profile(self):
+        for raw in ("@", "@@", "https://promptbase.com/profile/@"):
+            with self.subTest(raw=raw), self.assertRaisesRegex(PromptBaseError, "empty"):
+                parse_profile_input(raw)
+
     def test_full_url(self):
         self.assertEqual(
             parse_profile_input("https://promptbase.com/profile/acb"),

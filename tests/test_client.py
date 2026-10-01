@@ -515,6 +515,19 @@ class RetryTests(unittest.TestCase):
             finally:
                 self.calls = urlopen.call_count
 
+    def test_a_body_that_is_not_utf8_is_retried_then_reported(self):
+        with patch("promptbase_exporter.client.urllib.request.urlopen") as urlopen, \
+                patch("promptbase_exporter.client.time.sleep"):
+            urlopen.side_effect = [self._response(b"\xff") for _ in range(MAX_RETRIES)]
+            with self.assertRaisesRegex(PromptBaseError, "query failed"):
+                _open_json_with_retry(MagicMock())
+        self.assertEqual(urlopen.call_count, MAX_RETRIES)
+
+    def test_an_infinite_number_is_reported_as_bad_data(self):
+        from promptbase_exporter.client import _int_field
+        with self.assertRaisesRegex(PromptBaseError, "Expected numeric"):
+            _int_field({"views": float("inf")}, "views")
+
     def test_an_oversized_body_is_refused_without_a_retry(self):
         with self.assertRaisesRegex(PromptBaseError, "over 0 MiB"):
             self._open_once(b"[" + b"1," * 600 + b"1]")

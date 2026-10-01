@@ -104,6 +104,14 @@ class PromptBaseError(RuntimeError):
 
 def parse_profile_input(profile_input: str) -> str:
     """Return a PromptBase username from a URL, path, username, or @username."""
+    username = _username(profile_input)
+    if not username:
+        # "@" or "profile/" alone would otherwise query PromptBase for "".
+        raise PromptBaseError("Profile input is empty.")
+    return username
+
+
+def _username(profile_input: str) -> str:
     raw = profile_input.strip()
     if not raw:
         raise PromptBaseError("Profile input is empty.")
@@ -245,6 +253,7 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
             http.client.BadStatusLine,
             urllib.error.URLError,
             json.JSONDecodeError,
+            UnicodeDecodeError,  # a body that is not UTF-8, e.g. from a proxy
             # A truncated or corrupt gzip body, the compressed IncompleteRead.
             EOFError,
             zlib.error,
@@ -595,7 +604,7 @@ def _int_field(item: dict[str, Any], field: str) -> int:
         return 0
     try:
         return int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:  # OverflowError: infinity
         raise PromptBaseError(
             f"Expected numeric PromptBase field '{field}', got {value!r}"
         ) from exc

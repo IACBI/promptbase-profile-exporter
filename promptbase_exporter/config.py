@@ -40,9 +40,9 @@ def load_config(path: Path) -> dict[str, Any]:
                 raise ConfigError(
                     f"{path}: TOML needs Python 3.11 or newer; use a .json configuration file"
                 ) from exc
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
+            data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
         else:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:  # tomllib.TOMLDecodeError is a ValueError
         if isinstance(exc, ConfigError):
             raise
@@ -84,6 +84,40 @@ def split_config(
         seen[option] = key
         arguments.extend(_tokens(key, option, known[option], value))
     return arguments, profiles
+
+
+def without_overridden(
+    arguments: Sequence[str],
+    command_line: Sequence[str],
+    parser: argparse.ArgumentParser,
+) -> list[str]:
+    """``arguments`` from a file, less those a command-line option excludes.
+
+    The command line wins, but argparse refuses two options of one mutually
+    exclusive group (``--free-only`` from the file, ``--paid-only`` typed): the
+    file's option gives way instead.
+    """
+    typed = {action for token in command_line if (action := _action(parser, token))}
+    dropped: set[argparse.Action] = set()
+    for group in parser._mutually_exclusive_groups:
+        chosen = typed & set(group._group_actions)
+        if chosen:
+            dropped |= set(group._group_actions) - chosen
+    return [token for token in arguments if _action(parser, token) not in dropped]
+
+
+def _action(parser: argparse.ArgumentParser, token: str) -> argparse.Action | None:
+    """The option a ``--name`` or ``--name=value`` token (or a prefix of it) sets."""
+    if not token.startswith("--"):
+        return None
+    name = token.split("=", 1)[0]
+    exact = parser._option_string_actions.get(name)
+    if exact is not None:
+        return exact
+    # argparse accepts an unambiguous prefix (--paid for --paid-only).
+    matches = {action for option, action in parser._option_string_actions.items()
+               if option.startswith(name)}
+    return matches.pop() if len(matches) == 1 else None
 
 
 def _profiles(value: Any) -> list[str]:
