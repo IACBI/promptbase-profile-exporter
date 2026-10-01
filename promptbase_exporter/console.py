@@ -25,9 +25,13 @@ def make_output_safe() -> None:
             reconfigure(errors="replace")
 
 
-# C0 and C1 controls, and the bidirectional controls that can make a line display
+# C0 and C1 controls, and the bidirectional controls (the Arabic letter mark, the
+# marks, embeddings, overrides, and isolates) that can make a line display
 # in another order than it reads ("Trojan Source").
-_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
+_CONTROL_CHARACTERS = re.compile(
+    r"[\x00-\x1f\x7f-\x9f"
+    r"\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+)
 
 
 def printable(text: object) -> str:
