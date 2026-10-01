@@ -13,7 +13,8 @@ All notable changes to this project will be documented in this file.
   the file it rewrites, so the other catalog was ignored without a word.
 - A response that is not UTF-8 (from a proxy or a captive portal, say) is retried
   and then reported like any unreadable response, not a traceback; an infinite
-  number in PromptBase's data is reported as bad data.
+  or NaN number in PromptBase's data (a count, price, or rating) is reported as bad
+  data instead of a crash or an invalid `Infinity` in a JSON export.
 - `@` (or `@@`) alone is an empty profile, not a query for a user with no name.
 - A `--config` file saved with a byte order mark is read (Windows Notepad adds one),
   and an option on the command line now replaces one from the file that it excludes

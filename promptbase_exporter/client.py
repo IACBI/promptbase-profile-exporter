@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import threading
 import time
 import urllib.error
@@ -629,8 +630,13 @@ def _float_field(item: dict[str, Any], field: str) -> float:
     if value is None or value == "":
         return 0.0
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError) as exc:
         raise PromptBaseError(
             f"Expected numeric PromptBase field '{field}', got {value!r}"
         ) from exc
+    if not math.isfinite(number):
+        # float() accepts "Infinity" and "NaN", which no price or rating can be, and
+        # json.dumps would write them as literals that are not valid JSON.
+        raise PromptBaseError(f"Expected a finite PromptBase field '{field}', got {value!r}")
+    return number

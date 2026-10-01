@@ -524,9 +524,13 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, MAX_RETRIES)
 
     def test_an_infinite_number_is_reported_as_bad_data(self):
-        from promptbase_exporter.client import _int_field
+        from promptbase_exporter.client import _float_field, _int_field
         with self.assertRaisesRegex(PromptBaseError, "Expected numeric"):
             _int_field({"views": float("inf")}, "views")
+        for value in (float("inf"), float("-inf"), float("nan"), "Infinity", "NaN"):
+            with self.subTest(value=value), self.assertRaisesRegex(PromptBaseError, "finite"):
+                _float_field({"price": value}, "price")
+        self.assertEqual(_float_field({"price": "4.99"}, "price"), 4.99)
 
     def test_an_oversized_body_is_refused_without_a_retry(self):
         with self.assertRaisesRegex(PromptBaseError, "over 0 MiB"):
