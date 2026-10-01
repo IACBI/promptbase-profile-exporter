@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: IACBI/promptbase-profile-exporter@v0.12.1
+      - uses: IACBI/promptbase-profile-exporter@v0.13.0
         with:
           profile-url: ${{ github.event.inputs.profile_url || 'https://promptbase.com/profile/acb' }}
           mode: split
@@ -52,13 +52,13 @@ the full commit SHA of a release, as GitHub recommends for third-party actions,
 with the version in a comment so Dependabot can still update it:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@<full-commit-sha> # v0.12.1
+- uses: IACBI/promptbase-profile-exporter@<full-commit-sha> # v0.13.0
 ```
 
 The release's commit SHA is what the tag points to:
 
 ```bash
-git ls-remote https://github.com/IACBI/promptbase-profile-exporter "refs/tags/v0.12.1^{}"
+git ls-remote https://github.com/IACBI/promptbase-profile-exporter "refs/tags/v0.13.0^{}"
 ```
 
 ## Commit exports back to the repository
@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: IACBI/promptbase-profile-exporter@v0.12.1
+      - uses: IACBI/promptbase-profile-exporter@v0.13.0
         with:
           profile-url: https://promptbase.com/profile/acb
           mode: split
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: update
-        uses: IACBI/promptbase-profile-exporter@v0.12.1
+        uses: IACBI/promptbase-profile-exporter@v0.13.0
         with:
           profile-url: https://promptbase.com/profile/acb
           mode: all
@@ -182,10 +182,10 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: python -m pip install "git+https://github.com/IACBI/promptbase-profile-exporter@v0.12.1"
+      - run: python -m pip install "git+https://github.com/IACBI/promptbase-profile-exporter@v0.13.0"
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: history.sqlite
@@ -287,7 +287,7 @@ Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 
 ```yaml
 - id: export
-  uses: IACBI/promptbase-profile-exporter@v0.12.1
+  uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: https://promptbase.com/profile/acb
 - run: ls -R "${{ steps.export.outputs.output-dir }}"
@@ -298,7 +298,7 @@ Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 Export only text prompts to CSV:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.12.1
+- uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: "@acb"
     mode: text
@@ -308,7 +308,7 @@ Export only text prompts to CSV:
 Export only paid image prompts, sorted by views:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.12.1
+- uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: image
@@ -320,7 +320,7 @@ Export only paid image prompts, sorted by views:
 Create timestamped backups:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.12.1
+- uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: split
@@ -331,7 +331,7 @@ Create timestamped backups:
 Fail a workflow when the catalog changed:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.12.1
+- uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: all
@@ -346,7 +346,7 @@ Keep a catalog in the repository up to date, and act on what changed:
 ```yaml
 - uses: actions/checkout@v7
 - id: catalog
-  uses: IACBI/promptbase-profile-exporter@v0.12.1
+  uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: https://promptbase.com/profile/acb
     mode: all
@@ -363,7 +363,7 @@ Keep a catalog in the repository up to date, and act on what changed:
 Export several profiles as searchable HTML catalogs:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.12.1
+- uses: IACBI/promptbase-profile-exporter@v0.13.0
   with:
     profile-url: |
       @acb
