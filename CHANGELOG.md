@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.14.0 - 2026-10-01
+
 ### Added
 
 - `pb-history compare` lines up every profile in a history file (or the ones named

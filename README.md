@@ -108,7 +108,7 @@ run would select without writing anything, and a download link for each file;
 To export on a schedule, use the GitHub Action:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.13.0
+- uses: IACBI/promptbase-profile-exporter@v0.14.0
   with:
     profile-url: https://promptbase.com/profile/acb
     format: markdown
@@ -265,7 +265,7 @@ Dışa aktarımı belirli aralıklarla çalıştırmak için GitHub Action'ı
 kullanabilirsiniz:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.13.0
+- uses: IACBI/promptbase-profile-exporter@v0.14.0
   with:
     profile-url: https://promptbase.com/profile/acb
     format: markdown
