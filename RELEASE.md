@@ -61,6 +61,16 @@ gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file notes.md
 rm notes.md
 ```
 
+Publishing the release starts the `release` workflow: it builds the sdist and wheel
+from the tag, checks that their version matches the tag, records a signed build
+provenance attestation, and attaches both files to the release. Confirm it passed
+and that the files are there:
+
+```bash
+gh run list --workflow release --limit 1
+gh release view vX.Y.Z --json assets --jq '.assets[].name'
+```
+
 The `@vX.Y.Z` examples in the docs resolve once the release exists.
 
 ## Publishing to PyPI (not set up)

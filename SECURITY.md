@@ -10,6 +10,17 @@ release is supported; please upgrade before reporting.
 | The [latest release](https://github.com/IACBI/promptbase-profile-exporter/releases/latest) | Yes |
 | Any earlier release | No |
 
+## Verifying a release
+
+Each release from 0.13.0 on carries a wheel and an sdist built by this
+repository's `release` workflow from the release tag, with a signed build
+provenance attestation. To check that a file you downloaded was built there:
+
+```bash
+gh attestation verify promptbase_profile_exporter-X.Y.Z-py3-none-any.whl \
+  --repo IACBI/promptbase-profile-exporter
+```
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for security problems. Report them privately
