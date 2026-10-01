@@ -521,6 +521,7 @@ pb-history list --db history.sqlite
 pb-history report --db history.sqlite                 # the latest snapshot against the one before
 pb-history report --db history.sqlite --days 7 --metric views --top 20
 pb-history report --db history.sqlite --since 2026-09-01 --format html -o trends.html
+pb-history report --db history.sqlite --alert views+50% --alert sales+1 --alert new
 ```
 
 - **A snapshot** holds the views, sales, downloads, favorites, reviews, rating,
@@ -540,6 +541,13 @@ pb-history report --db history.sqlite --since 2026-09-01 --format html -o trends
   0 or more. `--format` is `markdown` (the default), `json`, or `html`, a
   self-contained page with small trend charts of the totals across every snapshot;
   `-o` writes it to a file instead of the terminal.
+- **Alerts:** `--alert RULE` (repeatable) lists every listing that meets a rule at
+  the top of the report, and the command exits with `2` when any rule fires, so a
+  scheduled job can act on it (the report is still written). A rule is a counter
+  with a gain, absolute or in percent: `sales+1`, `views+50%`, `favorites+10`.
+  Alternatively, it is an event: `new`, `removed`, or `price` (a price or discount
+  change). A percentage needs a baseline above zero; a listing that had none before
+  is caught by an absolute rule. In JSON, the rules and hits are under `alerts`.
 - **One profile per report:** if the file holds several, name one with `--profile`.
 - **On a schedule in GitHub Actions:** see
   [Track trends on a schedule](github-action.md#track-trends-on-a-schedule), which
@@ -550,9 +558,9 @@ pb-history report --db history.sqlite --since 2026-09-01 --format html -o trends
   its tables are checked against the expected columns, so a file that is not a
   `pb-history` file is refused and left untouched, and a newer format is refused rather than misread.
 
-Exit codes: `0` on success and `1` for an error, such as a missing file, fewer than
+Exit codes: `0` on success, `1` for an error, such as a missing file, fewer than
 two snapshots, or a profile that could not be fetched (the others are still
-recorded).
+recorded), and `2` when an `--alert` rule fired.
 
 ## Inspecting without writing
 
