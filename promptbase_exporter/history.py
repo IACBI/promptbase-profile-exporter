@@ -76,6 +76,10 @@ class HistoryError(RuntimeError):
     """The history file or the request cannot be used."""
 
 
+class NotEnoughHistory(HistoryError):
+    """The snapshots do not reach back far enough for the comparison asked for."""
+
+
 @dataclass(frozen=True)
 class Snapshot:
     id: int
@@ -302,7 +306,7 @@ def choose_baseline(
     at least that long before the latest snapshot.
     """
     if len(snapshots) < 2:
-        raise HistoryError(
+        raise NotEnoughHistory(
             f"need at least two snapshots to compare, found {len(snapshots)}: "
             "run pb-history snapshot again later"
         )
@@ -324,7 +328,7 @@ def choose_baseline(
         candidates = [snap for snap in earlier if snap.taken_at <= cutoff]
         if not candidates:
             oldest = (latest.taken_at - earlier[0].taken_at).total_seconds() / 86400
-            raise HistoryError(
+            raise NotEnoughHistory(
                 f"no snapshot is {days:g} days older than the latest; "
                 f"the oldest is {oldest:.1f} days older"
             )
@@ -444,6 +448,185 @@ def evaluate_alerts(
                 hits.append(AlertHit(rule.text, slug, after[slug].title,
                                      f"{rule.counter} {old} to {new} (+{gain}{rate})"))
     return hits
+
+
+GROWTH_COUNTERS = ("sales", "views", "favorites")
+
+
+@dataclass(frozen=True)
+class ProfileSummary:
+    """One profile's latest snapshot, reduced to figures that compare across profiles."""
+
+    profile: str
+    taken_at: datetime
+    listings: int
+    totals: dict[str, int]
+    average_rating: float
+    median_price: float
+    free_share: float
+    sales_per_listing: float
+    # Gain per day over the window, or None when the history does not reach back.
+    growth: dict[str, float] | None = None
+    growth_days: float = 0.0
+
+
+def summarize(
+    connection: sqlite3.Connection,
+    item_type: str,
+    profiles: Sequence[str] = (),
+    *,
+    days: float | None = None,
+) -> list[ProfileSummary]:
+    """Every profile in the file (or ``profiles``) side by side, most sales first."""
+    kind = ITEM_TYPE_PLURALS[item_type]
+    if days is not None:
+        try:
+            timedelta(days=days)
+        except (OverflowError, ValueError) as exc:
+            raise HistoryError(f"--days {days:g} is out of range") from exc
+    snapshots = list_snapshots(connection, None, item_type)
+    known = sorted({snap.profile for snap in snapshots})
+    if not known:
+        # An empty table would hide a wrong --item-type or file, and overwrite a
+        # scheduled output with nothing.
+        raise HistoryError(f"the file holds no snapshots of {kind}")
+    try:
+        wanted = list(dict.fromkeys(parse_profile_input(name) for name in profiles)) or known
+    except PromptBaseError as exc:
+        raise HistoryError(f"invalid --profile: {exc}") from None
+    missing = [name for name in wanted if name not in known]
+    if missing:
+        raise HistoryError(
+            f"no snapshots of {kind} for " + ", ".join(f"@{name}" for name in missing)
+        )
+    summaries = []
+    for name in wanted:
+        own = [snap for snap in snapshots if snap.profile == name]
+        latest = own[-1]
+        observations = load_observations(connection, latest.id)
+        totals = {c: int(_totals(observations)[c]) for c in COUNTERS}
+        prices = sorted(o.price for o in observations.values())
+        rated = [o.rating for o in observations.values() if o.rating > 0]
+        count = len(observations)
+        growth, growth_days = None, 0.0
+        if days is not None:
+            try:
+                baseline, _ = choose_baseline(own, days=days)
+            except NotEnoughHistory:
+                pass  # shown as n/a for this profile
+            else:
+                elapsed = (latest.taken_at - baseline.taken_at).total_seconds() / 86400
+                # Two snapshots in the same second (possible with --days 0) give no rate.
+                if elapsed > 0:
+                    growth_days = elapsed
+                    before = _totals(load_observations(connection, baseline.id))
+                    growth = {c: (totals[c] - before[c]) / elapsed for c in GROWTH_COUNTERS}
+        summaries.append(ProfileSummary(
+            profile=name,
+            taken_at=latest.taken_at,
+            listings=count,
+            totals=totals,
+            average_rating=sum(rated) / len(rated) if rated else 0.0,
+            median_price=_median(prices),
+            free_share=sum(1 for price in prices if price == 0) / count if count else 0.0,
+            sales_per_listing=totals["sales"] / count if count else 0.0,
+            growth=growth,
+            growth_days=growth_days,
+        ))
+    summaries.sort(key=lambda summary: (-summary.totals["sales"], summary.profile))
+    return summaries
+
+
+def _median(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    middle = len(values) // 2
+    if len(values) % 2:
+        return values[middle]
+    return (values[middle - 1] + values[middle]) / 2
+
+
+def _comparison_rows(summaries: Sequence[ProfileSummary], days: float | None) -> list[list[str]]:
+    """Header and one row per profile, as text, shared by the Markdown and HTML tables."""
+    header = ["Profile", "Listings", "Views", "Sales", "Favorites", "Reviews", "Rating",
+              "Median price", "Free", "Sales per listing"]
+    if days is not None:
+        header += [f"{counter.capitalize()} per day" for counter in GROWTH_COUNTERS]
+    rows = [header]
+    for summary in summaries:
+        row = [
+            f"@{summary.profile}", str(summary.listings),
+            *(str(summary.totals[c]) for c in ("views", "sales", "favorites", "reviews")),
+            f"{summary.average_rating:.2f}", _number(round(summary.median_price, 2)),
+            f"{summary.free_share:.0%}", f"{summary.sales_per_listing:.2f}",
+        ]
+        if days is not None:
+            row += ([f"{summary.growth[c]:.1f}" for c in GROWTH_COUNTERS] if summary.growth
+                    else ["n/a"] * len(GROWTH_COUNTERS))
+        rows.append(row)
+    return rows
+
+
+def render_comparison_markdown(
+    summaries: Sequence[ProfileSummary], item_type: str, days: float | None = None,
+) -> str:
+    rows = _comparison_rows(summaries, days)
+    lines = [f"# PromptBase profiles compared ({ITEM_TYPE_PLURALS[item_type]})", "",
+             "Each profile's latest snapshot."]
+    if days is not None:
+        lines[-1] += (f" Per-day figures cover at least {days:g} days; n/a means the "
+                      "history does not reach back that far.")
+    lines += ["", "| " + " | ".join(rows[0]) + " |",
+              "| --- |" + " ---: |" * (len(rows[0]) - 1)]
+    lines += ["| " + " | ".join(_cell(cell) for cell in row) + " |" for row in rows[1:]]
+    return "\n".join(lines) + "\n"
+
+
+def comparison_to_dict(
+    summaries: Sequence[ProfileSummary], item_type: str, days: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "item_type": item_type,
+        "days": days,
+        "profiles": [
+            {
+                "profile": summary.profile,
+                "taken_at": summary.taken_at.isoformat(),
+                "listings": summary.listings,
+                "totals": summary.totals,
+                "average_rating": round(summary.average_rating, 4),
+                "median_price": summary.median_price,
+                "free_share": round(summary.free_share, 4),
+                "sales_per_listing": round(summary.sales_per_listing, 4),
+                "per_day": (
+                    {c: round(v, 4) for c, v in summary.growth.items()}
+                    if summary.growth is not None else None
+                ),
+                "per_day_over_days": round(summary.growth_days, 3) if summary.growth else None,
+            }
+            for summary in summaries
+        ],
+    }
+
+
+def render_comparison_html(
+    summaries: Sequence[ProfileSummary], item_type: str, days: float | None = None,
+) -> str:
+    h = html.escape
+    rows = _comparison_rows(summaries, days)
+    title = f"PromptBase profiles compared ({ITEM_TYPE_PLURALS[item_type]})"
+    head = "".join(f"<th>{h(cell)}</th>" for cell in rows[0])
+    body = "".join(
+        "<tr>" + "".join(f"<td>{h(cell)}</td>" for cell in row) + "</tr>" for row in rows[1:]
+    )
+    return (
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        f"<title>{h(title)}</title><style>{_PAGE_STYLE}</style></head><body>"
+        f"<h1>{h(title)}</h1><p>Each profile's latest snapshot.</p>"
+        f'<div class="scroll"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div></body></html>\n"
+    )
 
 
 def describe_duration(days: float) -> str:
@@ -599,6 +782,16 @@ def _span(series: list[tuple[datetime, dict[str, int]]], counter: str) -> str:
     return f": {series[0][1][counter]} to {series[-1][1][counter]} over {len(series)} snapshots"
 
 
+_PAGE_STYLE = (
+    ":root{color-scheme:light dark;--line:#8884}body{font:16px/1.5 system-ui,sans-serif;"
+    "max-width:920px;margin:2rem auto;padding:0 1rem}table{border-collapse:collapse;width:100%}"
+    "td,th{border-top:1px solid var(--line);padding:.4rem .5rem;text-align:right}"
+    "td:first-child,th:first-child{text-align:left}.chart{width:100%;max-width:360px;height:auto}"
+    "figure{display:inline-block;margin:0 1rem 1rem 0}code{font-size:.85em}"
+    ".scroll{overflow-x:auto}figcaption{font-size:.85em}"
+)
+
+
 def render_html(report: Report) -> str:
     h = html.escape
     kind = ITEM_TYPE_PLURALS[report.item_type]
@@ -638,12 +831,7 @@ def render_html(report: Report) -> str:
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         f"<title>PromptBase trends: {h(_heading(report))}</title><style>"
-        ":root{color-scheme:light dark;--line:#8884}body{font:16px/1.5 system-ui,sans-serif;"
-        "max-width:920px;margin:2rem auto;padding:0 1rem}table{border-collapse:collapse;width:100%}"
-        "td,th{border-top:1px solid var(--line);padding:.4rem .5rem;text-align:right}"
-        "td:first-child,th:first-child{text-align:left}.chart{width:100%;max-width:360px;height:auto}"
-        "figure{display:inline-block;margin:0 1rem 1rem 0}code{font-size:.85em}"
-        ".scroll{overflow-x:auto}figcaption{font-size:.85em}"
+        f"{_PAGE_STYLE}"
         "</style></head><body>"
         f"<h1>PromptBase trends: {h(_heading(report))}</h1>"
         f"<p>From snapshot {report.baseline.id} ({h(report.baseline.taken_at.isoformat())}) to "
@@ -741,6 +929,16 @@ def build_parser() -> argparse.ArgumentParser:
              "or price. Repeatable.",
     )
 
+    compare = commands.add_parser("compare", help="Compare profiles side by side.")
+    compare.add_argument("--db", type=Path, required=True)
+    compare.add_argument("--item-type", choices=ITEM_TYPES, default="prompt")
+    compare.add_argument("--profile", action="append", default=[], dest="profiles",
+                         help="A profile to include (repeatable); every profile by default.")
+    compare.add_argument("--days", type=_days,
+                         help="Add per-day growth over at least this many days.")
+    compare.add_argument("--format", choices=REPORT_FORMATS, default="markdown")
+    compare.add_argument("-o", "--output", type=Path, help="Write it here, not to stdout.")
+
     listing = commands.add_parser("list", help="List the snapshots in a history file.")
     listing.add_argument("--db", type=Path, required=True)
     return parser
@@ -834,6 +1032,28 @@ def _report_command(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def _compare_command(args: argparse.Namespace) -> int:
+    connection = connect(args.db, create=False)
+    try:
+        summaries = summarize(connection, args.item_type, args.profiles, days=args.days)
+    finally:
+        connection.close()
+    if args.format == "json":
+        data = comparison_to_dict(summaries, args.item_type, args.days)
+        text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    elif args.format == "html":
+        text = render_comparison_html(summaries, args.item_type, args.days)
+    else:
+        text = render_comparison_markdown(summaries, args.item_type, args.days)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8", newline="\n")
+        print(f"Wrote {args.format} comparison -> {args.output}")
+    else:
+        sys.stdout.write(text)
+    return EXIT_SUCCESS
+
+
 def _list_command(args: argparse.Namespace) -> int:
     connection = connect(args.db, create=False)
     try:
@@ -850,7 +1070,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for ``pb-history``."""
     make_output_safe()
     args = build_parser().parse_args(argv)
-    handlers = {"snapshot": _snapshot_command, "report": _report_command, "list": _list_command}
+    handlers = {"snapshot": _snapshot_command, "report": _report_command,
+                "compare": _compare_command, "list": _list_command}
     try:
         return handlers[args.command](args)
     except (HistoryError, sqlite3.Error, OSError) as exc:
