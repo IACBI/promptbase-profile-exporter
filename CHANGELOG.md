@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.14.2 - 2026-10-01
+
 ### Changed
 
 - Comparing catalogs (`--compare`, `--update-file`, `pb-diff`) is about 16x faster on
