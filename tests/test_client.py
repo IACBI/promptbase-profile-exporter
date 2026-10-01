@@ -3,6 +3,7 @@ import http.client
 import io
 import json
 import threading
+import time
 import unittest
 import urllib.error
 from email.message import Message
@@ -720,6 +721,23 @@ class ItemTypeFetchTests(unittest.TestCase):
                           return_value=[] if other == "fetch_prompt_items" else {}), \
                     self.assertRaisesRegex(PromptBaseError, "503"):
                 fetch_prompts("@acb")
+
+    def test_an_items_error_is_not_held_up_by_a_stalled_details_query(self):
+        release = threading.Event()
+        self.addCleanup(release.set)  # let the abandoned worker finish
+
+        def stalled(*_args):
+            release.wait(30)
+            return {}
+
+        failure = PromptBaseError("PromptBase query failed: HTTP Error 404")
+        with patch("promptbase_exporter.client.resolve_profile", return_value=self._profile), \
+                patch("promptbase_exporter.client.fetch_prompt_items", side_effect=failure), \
+                patch("promptbase_exporter.client.fetch_prompt_details", side_effect=stalled):
+            start = time.monotonic()
+            with self.assertRaisesRegex(PromptBaseError, "404"):
+                fetch_prompts("@acb")
+            self.assertLess(time.monotonic() - start, 2)
 
     def test_apps_without_a_type_field_are_not_schema_drift(self):
         apps = [{"slug": f"a{i}", "title": "A", "domain": "text", "created": i} for i in range(5)]
