@@ -144,9 +144,11 @@ class WebTests(unittest.TestCase):
                     build_request_config({"profile": "acb", field: value})
 
     def test_build_request_config_rejects_invalid_dates(self):
+        # The year-limit values used to escape as OverflowError: a 500, not a 400.
         for field in ("since", "until"):
-            with self.assertRaises(WebInputError):
-                build_request_config({"profile": "acb", field: "not-a-date"})
+            for value in ("not-a-date", "9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"):
+                with self.subTest(field=field, value=value), self.assertRaises(WebInputError):
+                    build_request_config({"profile": "acb", field: value})
 
     def test_render_form_contains_expected_controls(self):
         html = render_form(ExportRequest(profile_input="@acb"))

@@ -61,6 +61,13 @@ class LoadConfigTests(unittest.TestCase):
             path = write_config(directory, "c.json", {"mode": "all"})
             self.assertEqual(load_config(path), {"mode": "all"})
 
+    def test_a_byte_order_mark_is_accepted(self):
+        # Windows Notepad saves UTF-8 with a BOM.
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "c.json"
+            path.write_bytes(b"\xef\xbb\xbf" + b'{"mode": "all"}')
+            self.assertEqual(load_config(path), {"mode": "all"})
+
     @unittest.skipUnless(HAS_TOML, "needs Python 3.11+")
     def test_reads_toml(self):
         with TemporaryDirectory() as directory:
@@ -225,6 +232,20 @@ class ConfigInTheCommandTests(unittest.TestCase):
         self.assertEqual((code, stdout), (0, ""))
         self.assertEqual(written, ["acb_all_prompts.json"])
         self.assertEqual(fetch.call_args.args[0], "@acb")
+
+    def test_an_exclusive_option_on_the_command_line_replaces_the_files(self):
+        # argparse refuses --free-only (file) with --paid-only (typed); the file gives way.
+        free = record("f", price=0.0)
+        paid = record("p", price=3.0)
+        with TemporaryDirectory() as directory, self.fetch(free, paid):
+            config = write_config(directory, "c.json", {
+                "profiles": ["@acb"], "free_only": True, "quiet": True,
+            })
+            code, stdout, stderr = run(["--config", str(config), "--paid", "--verbose",
+                                        "--dry-run"])
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("Price filter: paid only", stdout)  # --verbose beat quiet too
+        self.assertIn("Selected after filters: 1", stdout)
 
     def test_the_command_line_overrides_the_file(self):
         with TemporaryDirectory() as directory, self.fetch():

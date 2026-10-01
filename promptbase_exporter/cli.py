@@ -12,7 +12,14 @@ from typing import Any
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
-from .config import ConfigError, check_arguments, find_config_path, load_config, split_config
+from .config import (
+    ConfigError,
+    check_arguments,
+    find_config_path,
+    load_config,
+    split_config,
+    without_overridden,
+)
 from .console import make_output_safe, printable
 from .dates import parse_datetime_ms
 from .diffing import (
@@ -315,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
     # The file's options come first, so the command line overrides them. Intermixed
     # parsing lets profiles and options alternate: `pb @a --mode all @b`.
+    config_arguments = without_overridden(config_arguments, raw_argv, parser)
     args = parser.parse_intermixed_args([*config_arguments, *raw_argv])
     if not args.profiles:
         if not config_profiles:
@@ -602,6 +610,10 @@ def normalize_options(args: argparse.Namespace) -> RunOptions:
         and args.min_price > args.max_price
     ):
         raise ValueError("--min-price cannot be greater than --max-price")
+    if args.compare and args.update_file:
+        # --update-file already compares with the file it rewrites; a second
+        # catalog would be ignored without a word.
+        raise ValueError("--compare and --update-file cannot be used together")
     if args.output_file and args.update_file:
         raise ValueError("--output-file and --update-file cannot be used together")
     if args.timestamp_filenames and (args.output_file or args.update_file):
