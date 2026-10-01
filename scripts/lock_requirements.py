@@ -30,11 +30,15 @@ PYTHONS = ("3.10", "3.11", "3.12", "3.13", "3.14")
 
 
 def linux(python: str) -> dict[str, str]:
+    # Every marker variable is set: Marker.evaluate() fills any that is missing from
+    # the machine running this script, which would make the lock depend on it.
     return {
         "python_version": python, "python_full_version": f"{python}.0",
+        "implementation_name": "cpython", "implementation_version": f"{python}.0",
+        "platform_python_implementation": "CPython",
         "sys_platform": "linux", "platform_system": "Linux", "os_name": "posix",
-        "platform_machine": "x86_64", "implementation_name": "cpython",
-        "platform_python_implementation": "CPython", "extra": "",
+        "platform_machine": "x86_64", "platform_release": "", "platform_version": "",
+        "extra": "",
     }
 
 
@@ -69,32 +73,74 @@ def choose(name: str, specifier: SpecifierSet, python: str) -> str:
 
 
 def resolve(top: dict[str, tuple[str, set[str]]], env: dict[str, str]) -> dict[str, tuple]:
-    """``{name: (version, via)}`` for ``top`` and everything it needs in ``env``."""
-    found: dict[str, tuple[str, set[str]]] = {}
+    """``{name: (version, via)}`` for ``top`` and everything it needs in ``env``.
+
+    Every constraint met on the way is kept. When one rules out a version already
+    chosen, the walk starts again with all of them, so the next choice comes from
+    their intersection; a package reached again with new extras gets the
+    dependencies of those extras too.
+    """
+    constraints: dict[str, SpecifierSet] = {}
+    for _attempt in range(100):
+        found = _walk(top, env, constraints)
+        if found is not None:
+            return found
+    raise SystemExit("the requirements did not settle after 100 attempts")
+
+
+def _walk(
+    top: dict[str, tuple[str, set[str]]],
+    env: dict[str, str],
+    constraints: dict[str, SpecifierSet],
+) -> dict[str, tuple] | None:
+    """One pass; ``None`` when a new constraint invalidated an earlier choice."""
+    found: dict[str, tuple[str, set[str], set[str]]] = {}
     pending = [(name, SpecifierSet(f"=={version}"), extras, None)
                for name, (version, extras) in top.items()]
     while pending:
         name, specifier, extras, parent = pending.pop()
         key = canonicalize_name(name)
+        before = constraints.get(key, SpecifierSet())
+        constraints[key] = before & specifier
         if key in found:
-            version, via = found[key]
-            if Version(version) not in specifier:
-                raise SystemExit(f"{name} {version} conflicts with {specifier} from {parent}")
+            version, via, done = found[key]
+            if Version(version) not in constraints[key]:
+                return None
             if parent:
                 via.add(parent)
+            new = extras - done
+            if new:
+                done |= new
+                pending += _dependencies(key, version, env, new, only_extras=True)
             continue
-        version = top[key][0] if key in top else choose(name, specifier, env["python_version"])
-        found[key] = (version, {parent} if parent else set())
-        for line in metadata(name, version)["info"].get("requires_dist") or []:
-            requirement = Requirement(line)
-            wanted = ["", *sorted(extras)]
-            if requirement.marker and not any(
-                requirement.marker.evaluate({**env, "extra": extra}) for extra in wanted
-            ):
-                continue
-            pending.append((requirement.name, requirement.specifier,
-                            set(requirement.extras), key))
-    return found
+        version = top[key][0] if key in top else choose(
+            name, constraints[key], env["python_version"]
+        )
+        found[key] = (version, {parent} if parent else set(), set(extras))
+        pending += _dependencies(key, version, env, set(extras), only_extras=False)
+    return {key: (version, via) for key, (version, via, _done) in found.items()}
+
+
+def _dependencies(
+    key: str, version: str, env: dict[str, str], extras: set[str], *, only_extras: bool,
+) -> list[tuple[str, SpecifierSet, set[str], str]]:
+    """The requirements of ``key`` that apply in ``env`` with ``extras``.
+
+    With ``only_extras``, only those the extras add: the base ones are already queued.
+    """
+    wanted = sorted(extras) if only_extras else ["", *sorted(extras)]
+    result = []
+    for line in metadata(key, version)["info"].get("requires_dist") or []:
+        requirement = Requirement(line)
+        if requirement.marker is None:
+            applies = not only_extras
+        else:
+            applies = any(requirement.marker.evaluate({**env, "extra": extra})
+                          for extra in wanted)
+        if applies:
+            result.append((requirement.name, requirement.specifier,
+                           set(requirement.extras), key))
+    return result
 
 
 def hashes(name: str, version: str) -> list[str]:
