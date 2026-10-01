@@ -13,14 +13,17 @@ python -m pip install -e ".[dev]"
 ```
 
 The `dev` extra installs the tooling only (ruff, mypy, coverage, build,
-twine). The exporter itself must keep running on the Python standard library
-alone.
+twine), at their newest versions. CI installs the exact versions in
+`requirements-dev.txt` instead, so a new linter release cannot fail a pull request
+by itself; Dependabot proposes updates weekly. To match CI exactly, run
+`python -m pip install -e . -r requirements-dev.txt`. The exporter itself must keep
+running on the Python standard library alone.
 
 ## Checks
 
 CI runs these on Python 3.10 through 3.14 (Ubuntu), plus the test suite on
 Windows and macOS with the oldest and newest Python, and `main` only accepts a
-pull request once the required ones pass. A nightly `canary` workflow repeats
+pull request once all of them pass. A nightly `canary` workflow repeats
 the live export and opens an issue if PromptBase data stops working. Run the
 checks locally before you push:
 
