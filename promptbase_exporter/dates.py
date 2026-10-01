@@ -14,7 +14,7 @@ def parse_datetime_ms(value: str, *, end_of_day: bool) -> int:
     if not raw:
         raise ValueError("date value cannot be empty")
     try:
-        if re_full_date(raw):
+        if len(raw) == 10 and raw[4] == raw[7] == "-":  # a bare YYYY-MM-DD date
             parsed_date = date.fromisoformat(raw)
             parsed_datetime = datetime.combine(
                 parsed_date,
@@ -27,12 +27,9 @@ def parse_datetime_ms(value: str, *, end_of_day: bool) -> int:
                 parsed_datetime = parsed_datetime.replace(tzinfo=timezone.utc)
             else:
                 parsed_datetime = parsed_datetime.astimezone(timezone.utc)
-    except ValueError as exc:
+    # OverflowError: a time near year 1 or 9999 whose offset moves it past the limit.
+    except (ValueError, OverflowError) as exc:
         raise ValueError(
             f"invalid date/datetime '{value}'. Use YYYY-MM-DD or ISO datetime."
         ) from exc
     return int(parsed_datetime.timestamp() * 1000)
-
-
-def re_full_date(value: str) -> bool:
-    return len(value) == 10 and value[4] == "-" and value[7] == "-"

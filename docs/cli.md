@@ -78,9 +78,11 @@ pb @a --config promptbase.toml @b           # profiles and options may alternate
   not supported.
 - **Precedence:** the file supplies defaults and anything on the command line
   overrides it. `diff_output` is repeatable, so the command line adds to the
-  file's reports rather than replacing them. An on/off option set in the file
-  cannot be switched off from the command line, and two options that exclude each
-  other (`free_only` and `--paid-only`) conflict; edit the file or use another.
+  file's reports rather than replacing them. When the command line sets an option
+  that excludes one from the file (`--paid-only` against `free_only`, `--verbose`
+  against `quiet`), the command line's wins. An on/off option set in the file
+  cannot be switched off from the command line; edit the file or use another.
+- **Encoding:** UTF-8, with or without a byte order mark (Windows Notepad adds one).
 - **Paths** in the file are relative to the directory you run `pb` from, as they
   are on the command line, not to the file.
 - **Validation:** the file goes through the same checks as the command line
@@ -440,6 +442,9 @@ reads the catalog back by that extension:
 ```bash
 pb @acb --mode all --update-file exports/acb_all_prompts.json
 ```
+
+`--update-file` compares with the file it rewrites, so it cannot be combined with
+`--compare`.
 
 Add `--fail-on-diff` to exit with code `2` when the catalog changed, which lets a
 CI job flag catalog drift. A change means a prompt was added or removed, or its
