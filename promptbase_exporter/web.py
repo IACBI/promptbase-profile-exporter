@@ -806,7 +806,7 @@ def render_form(
         </div>
         <div class="full">
           <label for="output_dir">Output directory</label>
-          <input id="output_dir" name="output_dir" value="{_h(str(request.output_dir))}">
+          <input id="output_dir" name="output_dir" value="{_h(_shown_path(request.output_dir))}">
         </div>
         <div class="full">
           <label for="compare_file">Compare with existing catalog (optional)</label>
@@ -919,7 +919,7 @@ def _render_file_row(item: ExportedFile) -> str:
         "<tr>"
         f"<td>{_h(item.mode)}</td>"
         f"<td>{item.count}</td>"
-        f"<td><code>{_h(str(item.path))}</code></td>"
+        f"<td><code>{_h(_shown_path(item.path))}</code></td>"
         f"{download_cell}"
         "</tr>"
     )
@@ -1011,12 +1011,13 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             self._send_html(render_form(request, error=str(exc)), status=502)
         except OSError as exc:
             self._send_html(
-                render_form(request, error=f"Could not write export: {exc}"),
+                render_form(request, error=f"Could not write export: {_describe_os_error(exc)}"),
                 status=500,
             )
         except Exception as exc:  # pragma: no cover - last-resort web boundary
+            # The type only: an arbitrary message could carry server paths.
             self._send_html(
-                render_form(request, error=f"Unexpected error: {exc}"),
+                render_form(request, error=f"Unexpected error ({type(exc).__name__})."),
                 status=500,
             )
 
@@ -1105,6 +1106,13 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        """The server's own errors (501 for an unsupported method, 400 for a bad request
+        line) as plain text with the same security headers as every other response."""
+        reason = message or self.responses.get(code, ("Error",))[0]
+        self.close_connection = True
+        self._send_text(f"{code} {reason}\n", status=code)
+
     def _send(self, body: str, content_type: str, *, status: int) -> None:
         data = body.encode("utf-8")
         self.send_response(status)
@@ -1121,7 +1129,8 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
-        self.wfile.write(data)
+        if self.command != "HEAD":  # a HEAD response has headers only
+            self.wfile.write(data)
 
 
 # An empty host is deliberately absent: socket.bind treats "" as INADDR_ANY,
@@ -1237,6 +1246,25 @@ def _parse_optional_date(value: str, name: str, *, end_of_day: bool) -> int | No
         return parse_datetime_ms(value, end_of_day=end_of_day)
     except ValueError as exc:
         raise WebInputError(f"{name.title()} date is invalid: {exc}") from exc
+
+
+def _shown_path(path: Path) -> str:
+    """``path`` as the form takes it: relative to the working directory, which keeps
+    where the server lives out of the page."""
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix() or "."
+    except (OSError, ValueError):
+        return path.name
+
+
+def _describe_os_error(exc: OSError) -> str:
+    """The reason and the file, relative to the working directory: on a server
+    reachable from other hosts, the page must not show where the server lives."""
+    reason = exc.strerror or type(exc).__name__
+    if not exc.filename:
+        return f"{reason}."
+    name = Path(str(exc.filename))
+    return f"{reason} ({_shown_path(name)})."
 
 
 def _resolve_compare_path(raw: str, mode: str, *, exposed: bool = False) -> Path:
