@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A comparison no longer depends on the order of the records. A new listing that
+  shared an existing listing's title, if it came first, used to be reported as a
+  change to that listing, and the unchanged original as added. Now every slug match
+  is made before any title match, a title only pairs records when one side has no
+  slug (a TXT catalog), and each old record is paired once; two old TXT records
+  with the same title used to leave one of them unmatched. Neither live profile
+  checked (@acb, @emanema) has repeated titles today; property tests found it.
+
+### Changed
+
+- Development only: property tests compare random catalogs that were changed in
+  known ways (new listings, some reusing a title; removals; edits; counter moves;
+  re-wrapped text; TXT catalogs with repeated titles) and require the diff to
+  report exactly those changes, count each record once, and mirror when the sides
+  are swapped.
+
 ## 0.13.0 - 2026-10-01
 
 ### Added
