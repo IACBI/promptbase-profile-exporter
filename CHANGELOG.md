@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
   with `2` when any rule fires, so a scheduled workflow can open an issue or send
   a message.
 
+### Changed
+
+- Development only: CodeQL scans the Python code and the GitHub Actions workflows
+  (security-extended queries) on every pull request, on `main`, and weekly; the
+  OpenSSF Scorecard grades the repository's supply-chain practices weekly and
+  feeds the new README badge.
+
 ## 0.13.0 - 2026-10-01
 
 ### Added
