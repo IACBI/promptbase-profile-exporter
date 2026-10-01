@@ -224,6 +224,96 @@ How it works and what to know:
 - `--days 7` instead of the default compares with a snapshot at least a week old,
   once the history reaches back that far.
 
+## Publish a dashboard with GitHub Pages
+
+The same schedule can publish what it finds as a small website: a trends page, the
+searchable catalog, and an index linking the two. Every page is a single
+self-contained file that loads nothing from other sites, so GitHub Pages serves it
+as is.
+
+```yaml
+name: promptbase-dashboard
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "git+https://github.com/IACBI/promptbase-profile-exporter@v0.13.0"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: history.sqlite
+          key: promptbase-history-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: promptbase-history-
+      - run: pb-history snapshot @acb --db history.sqlite
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: history.sqlite
+          key: promptbase-history-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Build the site
+        run: |
+          set -euo pipefail
+          mkdir site
+          pb @acb --mode all --format html --output-file site/catalog.html --quiet
+          if [[ "$(pb-history list --db history.sqlite | wc -l)" -ge 2 ]]; then
+            pb-history report --db history.sqlite --format html -o site/trends.html
+            trends='<li><a href="trends.html">What moved since the previous snapshot</a></li>'
+          else
+            trends='<li>Trends start with the second run.</li>'
+          fi
+          cat > site/index.html <<HTML
+          <!doctype html>
+          <html lang="en"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>PromptBase dashboard</title>
+          <style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}</style>
+          </head><body><h1>PromptBase dashboard</h1><ul>
+          $trends
+          <li><a href="catalog.html">The full catalog, searchable</a></li>
+          </ul></body></html>
+          HTML
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write  # publish the site
+      id-token: write  # prove the deployment comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+```
+
+Before the first run, set the repository's Pages source to **GitHub Actions**
+(Settings, Pages). Then:
+
+- The site is public. That is no exposure here, because every value comes from
+  PromptBase's public pages, but publish only profiles you are happy to show.
+- The build job holds only read permission. Pages write and the OIDC token stay in
+  the deploy job, which runs only GitHub's deploy action.
+- The history lives in the Actions cache, with the same limits as in the previous
+  section.
+
 ## Inputs
 
 | Input | Default | Description |

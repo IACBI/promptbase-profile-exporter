@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- The GitHub Action guide shows how to publish a dashboard on GitHub Pages every
+  day: the trends report, the searchable catalog, and an index linking them. Its
+  build step was run as written, with and without an earlier snapshot, and the
+  pages were checked in a browser (the catalog's search works, nothing is loaded
+  from other sites).
+
 ### Fixed
 
 - A comparison no longer depends on the order of the records. A new listing that
