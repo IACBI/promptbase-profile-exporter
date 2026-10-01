@@ -44,19 +44,29 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `models.py` — `Profile` and `PromptRecord` (frozen dataclasses + derived
   properties like `url`, `created_iso`, `is_text`/`is_image`/`is_free`).
 - `formatting.py` — filtering, sorting, the per-format writers (txt,
-  markdown, json, csv with optional `--csv-safe`, html), atomic writes, and
-  `count_written_records` (post-write validation).
+  markdown, json, ndjson, csv with optional `--csv-safe`, html), atomic writes,
+  and `count_written_records` (post-write validation).
 - `pipeline.py` — `Selection` (filter → sort → limit), `split_modes`, and
   `without_description`, shared by `cli.py` and `web.py`. Add a new filter here once;
   `SurfacesAgreeTests` fails if the CLI and the web form drift apart.
 - `diffing.py` — catalog loading and comparison (`--compare`/`--update-file`,
   `pb-diff`) and the Markdown/JSON diff reports.
-- `diff.py` — `python -m promptbase_exporter.diff` entry point for `pb-diff`.
+- `diff.py` — `python -m promptbase_exporter.diff` entry point for `pb-diff`, whose
+  body is `cli.diff_main`.
 - `convert.py` — `pb-convert`: rewrite a saved JSON/CSV/HTML catalog in another
   format offline. It must match a direct export byte for byte and never invent
   missing values (TXT/Markdown sources are refused).
 - `web.py` — stdlib `http.server` UI; mirrors CLI options as a form.
 - `__main__.py` — `python -m promptbase_exporter` entry point.
+
+Outside the package:
+- `scripts/lock_requirements.py` — regenerates the hash-pinned `requirements-dev.txt`,
+  `requirements-release.txt` (which also pins the build backend; releases build with
+  `--no-isolation`), and `requirements-fuzz.txt` that CI installs with
+  `--require-hashes`.
+- `fuzz/fuzz_parsers.py` — Atheris harness for the catalog, config, and remote-text
+  parsers (`--smoke N` runs it without Atheris).
+- `site/` — the GitHub Pages landing page; `pages.yml` adds a live demo catalog.
 
 `action.yml` is the composite GitHub Action; it must stay in sync with the CLI.
 

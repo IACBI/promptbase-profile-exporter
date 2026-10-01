@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- A project site on GitHub Pages, https://iacbi.github.io/promptbase-profile-exporter/,
+  with a searchable catalog and a trends page rebuilt every day from a public profile
+  by the dashboard recipe in docs/github-action.md.
+
 ### Changed
 
 - `--layout files` leaves a file alone when it already holds exactly the new text,
@@ -18,6 +24,20 @@ All notable changes to this project will be documented in this file.
     HTML writer is about 30% faster.
   - Reading back an HTML catalog (`--compare`, validation) is twice as fast.
   - Reading a TXT catalog is about three times as fast.
+
+### Security
+
+- Release files are built with a hash-pinned setuptools (`python -m build
+  --no-isolation`); the build used to fetch whatever setuptools PyPI served at
+  release time, and the result was then attested.
+- The Action no longer upgrades pip from PyPI before installing the exporter.
+- `--layout files` names a prompt whose slug starts with a Windows device name and a
+  dot (`con.x`) `con_.x`, not `con.x_`: Windows before 11 opens the device for both.
+- Titles printed to the terminal and written into diff and `pb-history` reports drop
+  bidirectional control characters, which can make text display in another order
+  than it reads.
+- A diff report (`--diff-output`) is written atomically and replaces a symbolic link
+  at its path instead of writing through it.
 
 ## 0.14.2 - 2026-10-01
 

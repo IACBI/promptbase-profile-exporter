@@ -482,6 +482,19 @@ class DiffReportTests(unittest.TestCase):
                 markdown_path.read_text(encoding="utf-8").startswith("# PromptBase Catalog Diff")
             )
 
+    def test_a_report_replaces_a_symbolic_link_instead_of_writing_through_it(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "elsewhere.txt"
+            target.write_text("keep", encoding="utf-8")
+            try:
+                (root / "diff.md").symlink_to(target)
+            except OSError:
+                self.skipTest("creating symbolic links is not permitted here")
+            write_diff_report(root / "diff.md", self._diff())
+            self.assertFalse((root / "diff.md").is_symlink())
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
 
 class StrictLoadTests(unittest.TestCase):
     def test_non_record_entries_are_skipped_unless_strict(self):

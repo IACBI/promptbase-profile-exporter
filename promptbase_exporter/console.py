@@ -25,7 +25,13 @@ def make_output_safe() -> None:
             reconfigure(errors="replace")
 
 
-_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# C0 and C1 controls, and the bidirectional controls (the Arabic letter mark, the
+# marks, embeddings, overrides, and isolates) that can make a line display
+# in another order than it reads ("Trojan Source").
+_CONTROL_CHARACTERS = re.compile(
+    r"[\x00-\x1f\x7f-\x9f"
+    r"\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+)
 
 
 def printable(text: object) -> str:
@@ -34,6 +40,6 @@ def printable(text: object) -> str:
     Whitespace, newlines included, collapses to single spaces, so a listing title
     cannot fake extra lines or a workflow command (a GitHub Actions log line that
     starts with ``::``); the remaining control characters, such as the escape that
-    starts a terminal sequence, are removed.
+    starts a terminal sequence, and the bidirectional controls are removed.
     """
     return _CONTROL_CHARACTERS.sub("", " ".join(str(text).split()))

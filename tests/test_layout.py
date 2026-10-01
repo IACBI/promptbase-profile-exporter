@@ -103,6 +103,13 @@ class SafeStemTests(unittest.TestCase):
         self.assertEqual(safe_stem("console"), "console")
         self.assertEqual(safe_stem("com10"), "com10")
 
+    def test_a_device_name_before_a_dot_gets_the_suffix_there(self):
+        # Windows before 11 opens the device for "con.x" and "nul.tar.gz" too.
+        self.assertEqual(safe_stem("con.x"), "con_.x")
+        self.assertEqual(safe_stem("NUL.tar.gz"), "NUL_.tar.gz")
+        self.assertEqual(safe_stem("con_.x"), "con_.x")
+        self.assertEqual(safe_stem("icon.x"), "icon.x")
+
     def test_a_long_slug_is_shortened(self):
         self.assertEqual(len(safe_stem("a" * 500)), 100)
 

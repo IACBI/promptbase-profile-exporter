@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="Export a public PromptBase profile's prompts into TXT, Markdown, JSON, NDJSON, CSV, or searchable HTML catalogs, and track them over time.">
+<title>PromptBase Profile Exporter</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231b2a41'/%3E%3Cpath d='M4 5h8M4 8h8M4 11h5' stroke='%23f2d649' stroke-width='1.6'/%3E%3C/svg%3E">
+<style>
+:root {
+  --ink: #1b2a41;
+  --paper: #fbfbf8;
+  --muted: #56627a;
+  --rule: #d9dde4;
+  --link: #0b6e78;
+  --mark: #f2d649;
+  --code-bg: #eef1f5;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6eaf0;
+    --paper: #14213a;
+    --muted: #a3afc2;
+    --rule: #2c3b57;
+    --link: #6fd3da;
+    --mark: #f2d649;
+    --code-bg: #1c2b47;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1.0625rem/1.6 var(--sans);
+}
+main { max-width: 44rem; margin: 0 auto; padding: 3.5rem 1rem 2rem; }
+a { color: var(--link); text-underline-offset: 0.18em; }
+a:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; border-radius: 2px; }
+code, pre { font-family: var(--mono); font-size: 0.9em; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 0.9rem 1rem; border-radius: 4px; overflow-x: auto; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 1.75rem; color: var(--muted); }
+h2 { font-size: 1.3rem; line-height: 1.3; margin: 2.75rem 0 0.75rem; }
+p { margin: 0 0 1rem; }
+
+.command {
+  font-family: var(--mono);
+  font-size: clamp(1.6rem, 6.4vw, 2.9rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0 0 1.5rem;
+  overflow-wrap: anywhere;
+}
+.command .prompt { color: var(--muted); user-select: none; }
+.command .arg { box-shadow: inset 0 -0.32em 0 var(--mark); }
+@media (prefers-color-scheme: dark) {
+  .command .arg { box-shadow: inset 0 -0.32em 0 rgba(242, 214, 73, 0.45); }
+}
+.lede { font-size: 1.2rem; max-width: 36rem; }
+
+.outputs { list-style: none; padding: 0; margin: 1.5rem 0 0; border-top: 1px solid var(--rule); }
+.outputs li { display: grid; grid-template-columns: 9.5rem 1fr; gap: 1rem; padding: 0.55rem 0; border-bottom: 1px solid var(--rule); }
+.outputs .file { font-family: var(--mono); font-size: 0.9rem; padding-top: 0.15rem; overflow-wrap: anywhere; }
+@media (max-width: 30rem) {
+  .outputs li { grid-template-columns: 1fr; gap: 0.1rem; }
+}
+
+.demo { margin-top: 1rem; }
+.demo a { font-weight: 600; }
+.small { color: var(--muted); font-size: 0.95rem; }
+footer { max-width: 44rem; margin: 0 auto; padding: 2rem 1rem 3rem; color: var(--muted); font-size: 0.95rem; border-top: 1px solid var(--rule); }
+footer p { margin: 0.25rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PromptBase Profile Exporter</h1>
+
+  <p class="command" aria-label="pb @acb --format html"><span class="prompt">$ </span>pb <span class="arg">@acb</span> --format html</p>
+
+  <p class="lede">Turns a public PromptBase profile into a catalog you own: every prompt's title, description, price, and counters, in the format your next tool reads.</p>
+
+  <ul class="outputs" aria-label="What it writes">
+    <li><span class="file">catalog.html</span><span>One self-contained page you can search; it loads nothing from other sites.</span></li>
+    <li><span class="file">catalog.json</span><span>Every field, for scripts. NDJSON too, one record per line.</span></li>
+    <li><span class="file">catalog.csv</span><span>For spreadsheets, with formula protection when you ask for it.</span></li>
+    <li><span class="file">catalog.md</span><span>For notes and wikis, or one Markdown file per prompt with front matter.</span></li>
+    <li><span class="file">catalog.txt</span><span>Titles and descriptions, nothing else.</span></li>
+  </ul>
+
+  <h2>See it on a real profile</h2>
+  <p>These pages are rebuilt every day from the public profile <a href="https://promptbase.com/profile/acb">@acb</a> by this site's own workflow, the same recipe the docs give you.</p>
+  <ul class="demo">
+    <li><a href="catalog.html">The searchable catalog</a></li>
+    <li><a href="trends.html">What changed since the previous daily snapshot</a></li>
+  </ul>
+  <p class="small">Last build: __BUILT__</p>
+
+  <h2>Install</h2>
+  <p>It needs Python 3.10 or newer and nothing else: the standard library only.</p>
+<pre><code>git clone https://github.com/IACBI/promptbase-profile-exporter.git
+cd promptbase-profile-exporter
+uv tool install .            # or: python -m pip install -e .</code></pre>
+
+  <h2>Run it the way you work</h2>
+  <p><strong>From the command line</strong>, with <code>pb</code>. Compare against last week's catalog with <code>--compare</code>, refresh one in place with <code>--update-file</code>, or convert a saved one offline with <code>pb-convert</code>. <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/cli.md">CLI guide</a></p>
+  <p><strong>In the browser</strong>, with <code>pb-web</code>: a local form with a preview, bound to your own machine. <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/web-ui.md">Web UI guide</a></p>
+  <p><strong>On a schedule</strong>, with the GitHub Action: export every day, get the changes in the run summary, keep a history of sales and views, or publish a dashboard like this one. <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/github-action.md">Action guide</a></p>
+
+  <h2>What it reads</h2>
+  <p>Only what PromptBase already shows anyone: no account, no cookies, no private endpoints. Every release is built in public and signed, and you can check where a file came from with <code>gh attestation verify</code>.</p>
+</main>
+<footer>
+  <p><a href="https://github.com/IACBI/promptbase-profile-exporter">Source on GitHub</a>, <a href="https://github.com/IACBI/promptbase-profile-exporter/releases/latest">latest release</a>, <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/CHANGELOG.md">changelog</a></p>
+  <p>MIT license. Made by 𝓐.𝓒.𝓑. Not affiliated with PromptBase.</p>
+</footer>
+</body>
+</html>

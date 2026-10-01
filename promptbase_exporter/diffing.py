@@ -13,6 +13,7 @@ from typing import Any
 from .console import printable
 from .formatting import (
     UTF8_BOM,
+    _atomic_write_text,
     csv_unescape_formula,
     escape_markdown,
     load_html_catalog_data,
@@ -229,7 +230,9 @@ def write_diff_report(path: Path, diff: CatalogDiff) -> Path:
     else:
         content = format_diff_report(diff, markdown=path.suffix.lower() in {".md", ".markdown"})
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="\n")
+    # Atomic like the catalogs: a failed write never leaves half a report, and a
+    # symbolic link at the path is replaced, not written through.
+    _atomic_write_text(path, content)
     return path
 
 
