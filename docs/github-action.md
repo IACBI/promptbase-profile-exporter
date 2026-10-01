@@ -189,13 +189,13 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: history.sqlite
-          key: promptbase-history-${{ github.run_id }}
+          key: promptbase-history-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: promptbase-history-
       - run: pb-history snapshot @acb --db history.sqlite
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: history.sqlite
-          key: promptbase-history-${{ github.run_id }}
+          key: promptbase-history-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Report what moved since the previous run
         run: |
           set -euo pipefail
@@ -208,16 +208,19 @@ jobs:
 
 How it works and what to know:
 
-- A cache entry cannot be overwritten, so each run saves under a new key and the
-  next run restores the newest one through `restore-keys`. The snapshot is saved
+- A cache entry cannot be overwritten, so each run, and each re-run of it, saves
+  under a new key, and the next run restores the newest one through `restore-keys`. The snapshot is saved
   before the report, so a failed report does not lose it.
 - The Markdown report escapes every title and value taken from PromptBase, so it
   is safe to append to the summary page.
 - GitHub removes a cache entry nobody has read for 7 days, and the oldest entries
   once a repository's caches pass 10 GB. A daily run keeps the newest entry alive,
-  but a long pause loses the history. To keep it for good, upload `history.sqlite`
-  as an artifact as well, or commit it to a branch of its own. That works for a
-  small profile: a snapshot takes about 100 bytes per listing.
+  but a long pause loses the history. An artifact is no lasting backup either: it
+  is deleted after the repository's retention period (90 days at most for a
+  public repository). To keep the history for good, commit `history.sqlite` to a
+  branch of its own after each snapshot. That suits a small profile: a snapshot
+  takes about 100 bytes per listing, about 9 MB a year of daily snapshots for 250
+  listings.
 - `--days 7` instead of the default compares with a snapshot at least a week old,
   once the history reaches back that far.
 

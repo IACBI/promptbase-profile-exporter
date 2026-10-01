@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Each release now carries a wheel and an sdist, built by a GitHub Actions workflow
+  from the release tag with a signed build provenance attestation;
+  `gh attestation verify` checks a downloaded file (see SECURITY.md). There is
+  still no PyPI package.
+
 ### Deprecated
 
 - Python 3.10 reaches end of life on 31 October 2026 (PEP 619). This is the last
@@ -45,6 +52,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Development only: CI installs exact versions of its tools from
+  `requirements-dev.txt` (Dependabot updates them), checks out without keeping the
+  token in `.git/config`, and every test job, Windows and macOS included, is now
+  required before a pull request can merge.
 - The GitHub Action guide shows a scheduled `pb-history` workflow that keeps the
   history in the Actions cache and posts each report to the run's summary page;
   its commands were run as written from a clean install of v0.12.1. The nightly
