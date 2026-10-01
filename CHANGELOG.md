@@ -15,14 +15,6 @@ All notable changes to this project will be documented in this file.
   as the Markdown report already did; a history file with an unreadable snapshot
   time is an error, not a traceback.
 
-### Security
-
-- The web UI no longer shows the server's absolute paths: the output directory and
-  the written files are shown relative to the working directory, and a failed write
-  reports the reason and the relative file instead of the full OS error.
-- Errors the HTTP server produces itself (501 for an unsupported method such as PUT
-  or OPTIONS, 400 for a malformed request) now carry the same security headers as
-  every other response.
 - A description that starts with a bulleted list is read back from a Markdown
   catalog. Its "- item" lines were taken for more metadata, so the description came
   back empty and `--compare` or `--update-file` reported a change that never
@@ -33,6 +25,15 @@ All notable changes to this project will be documented in this file.
   U+FFFD in its place; every writer used to fail after building the whole catalog.
 - A CSV tag that itself looks like a JSON list (`["a"]`) is written in the JSON form,
   so it reads back as written; `pb-convert` turned it into `a`.
+
+### Security
+
+- The web UI no longer shows the server's absolute paths: the output directory and
+  the written files are shown relative to the working directory, and a failed write
+  reports the reason and the relative file instead of the full OS error.
+- Errors the HTTP server produces itself (501 for an unsupported method such as PUT
+  or OPTIONS, 400 for a malformed request) now carry the same security headers as
+  every other response.
 
 ## 0.14.1 - 2026-10-01
 
