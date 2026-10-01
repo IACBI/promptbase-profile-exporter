@@ -2,6 +2,7 @@ import importlib
 import io
 import json
 import os
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -312,6 +313,21 @@ class WriteFilesTests(unittest.TestCase):
                 self.skipTest("creating symbolic links is not permitted here")
             write_markdown_files(root, "acb", "all", [make("one")])
             self.assertFalse((folder / "one.md").is_symlink())
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs named pipes")
+    def test_a_named_pipe_in_the_way_is_replaced_without_being_read(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / folder_name("acb", "all")
+            folder.mkdir()
+            os.mkfifo(folder / "one.md")
+            worker = threading.Thread(
+                target=write_markdown_files, args=(root, "acb", "all", [make("one")]), daemon=True
+            )
+            worker.start()
+            worker.join(10)
+            self.assertFalse(worker.is_alive(), "reading the pipe blocked the export")
+            self.assertTrue((folder / "one.md").is_file())
 
     def test_count_files_ignores_missing_empty_and_directories(self):
         with TemporaryDirectory() as directory:

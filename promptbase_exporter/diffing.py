@@ -5,7 +5,6 @@ import io
 import json
 import math
 import re
-from bisect import bisect_left
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -240,14 +239,15 @@ _TXT_BOUNDARY = re.compile(r"(?m)^\d+\.\s*\nTitle:")
 
 
 def _parse_text_catalog(text: str) -> list[dict[str, str]]:
-    # Find every boundary once and slice between them; a lazy description that
-    # tested for the next record at every character was three times slower.
-    boundaries = [match.start() for match in _TXT_BOUNDARY.finditer(text)]
+    # Find the header, then the next boundary, and slice between them; a lazy
+    # description that tested for the next record at every character was three
+    # times slower. Boundary matches cannot overlap (one holds no line that starts
+    # with a digit), so searching from each header finds the same ones.
     records = []
     position = 0
     while (header := _TXT_HEADER.search(text, position)) is not None:
-        index = bisect_left(boundaries, header.end())
-        position = boundaries[index] if index < len(boundaries) else len(text)
+        boundary = _TXT_BOUNDARY.search(text, header.end())
+        position = boundary.start() if boundary is not None else len(text)
         records.append(
             {
                 "title": header.group("title").strip(),

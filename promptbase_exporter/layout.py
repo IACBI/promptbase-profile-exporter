@@ -191,8 +191,14 @@ def write_markdown_files(
 def _write_if_changed(path: Path, content: str) -> None:
     data = _encoded(content)
     try:
-        # A symbolic link is replaced as before, never left pointing elsewhere.
-        if not path.is_symlink() and path.read_bytes() == data:
+        status = path.lstat()
+        # Only a regular file of the same size is read and compared: a symbolic link
+        # is replaced as before, and reading a FIFO or a device could block.
+        if (
+            stat.S_ISREG(status.st_mode)
+            and status.st_size == len(data)
+            and path.read_bytes() == data
+        ):
             return
     except OSError:
         pass  # missing or unreadable: write it, and let that report any error
