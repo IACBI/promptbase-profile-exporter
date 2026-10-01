@@ -131,29 +131,16 @@ def compare_catalog_records(
     current: list[dict[str, Any]],
 ) -> CatalogDiff:
     """Compare two catalogs of record dicts, e.g. two files from load_catalog."""
-    previous_by_slug = {
-        _slug_key(record): index
-        for index, record in enumerate(previous)
-        if _slug_key(record)
-    }
-    previous_by_title = {
-        _title_key(record): index
-        for index, record in enumerate(previous)
-        if _title_key(record)
-    }
-
-    used_previous: set[int] = set()
+    matches = _pair_records(previous, current)
+    used_previous = {index for index in matches if index is not None}
     added: list[dict[str, Any]] = []
     changed: list[ChangedRecord] = []
     unchanged = 0
 
-    for record in current:
-        previous_index = _match_previous(record, previous, previous_by_slug, previous_by_title)
-        if previous_index is None or previous_index in used_previous:
+    for record, previous_index in zip(current, matches, strict=True):
+        if previous_index is None:
             added.append(record)
             continue
-
-        used_previous.add(previous_index)
         previous_record = previous[previous_index]
         changed_fields = _changed_fields(previous_record, record)
         if changed_fields:
@@ -311,24 +298,60 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _match_previous(
-    record: dict[str, Any],
+def _pair_records(
     previous: list[dict[str, Any]],
-    previous_by_slug: dict[str, int],
-    previous_by_title: dict[str, int],
-) -> int | None:
-    slug = _slug_key(record)
-    if slug and slug in previous_by_slug:
-        return previous_by_slug[slug]
-    title = _title_key(record)
-    if title and title in previous_by_title:
-        index = previous_by_title[title]
-        # An app often shares a prompt's title. A record whose kind is unknown (a TXT
-        # catalog stores no URL) still matches by title alone.
-        kinds = {_known_kind(record), _known_kind(previous[index])} - {""}
-        if len(kinds) <= 1:
-            return index
-    return None
+    current: list[dict[str, Any]],
+) -> list[int | None]:
+    """For each current record, the index of its previous record, or None if it is new.
+
+    Every slug match is made before any title match, so a new listing that happens
+    to share a title cannot claim the previous record that another listing matches
+    by slug, whatever order the records are in. Each previous record is used once.
+    """
+    matches: list[int | None] = [None] * len(current)
+    used: set[int] = set()
+    by_slug: dict[str, int] = {}
+    for index, record in enumerate(previous):
+        key = _slug_key(record)
+        if key:
+            by_slug.setdefault(key, index)
+    for position, record in enumerate(current):
+        found = by_slug.get(_slug_key(record)) if _slug_key(record) else None
+        if found is not None and found not in used:
+            matches[position] = found
+            used.add(found)
+
+    by_title: dict[str, list[int]] = {}
+    for index, record in enumerate(previous):
+        title = _title_key(record)
+        if title and index not in used:
+            by_title.setdefault(title, []).append(index)
+    # Records that repeat a title are paired with an identical old record first, so
+    # their order cannot turn two unchanged records into two changes.
+    for exact in (True, False):
+        for position, record in enumerate(current):
+            title = _title_key(record)
+            if matches[position] is not None or not title:
+                continue
+            for index in by_title.get(title, ()):
+                if (
+                    index not in used
+                    and _same_listing_by_title(record, previous[index])
+                    and (not exact or not _changed_fields(previous[index], record))
+                ):
+                    matches[position] = index
+                    used.add(index)
+                    break
+    return matches
+
+
+def _same_listing_by_title(record: dict[str, Any], previous: dict[str, Any]) -> bool:
+    # Two records that both carry a slug are told apart by it; the title is only a
+    # fallback for a side that has none (a TXT catalog). An app often shares a
+    # prompt's title, so kinds must agree where both are known.
+    if _slug_key(record) and _slug_key(previous):
+        return False
+    return len({_known_kind(record), _known_kind(previous)} - {""}) <= 1
 
 
 def _changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
