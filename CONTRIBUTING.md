@@ -109,7 +109,7 @@ promptbase_exporter/
   __main__.py     # `python -m promptbase_exporter` entry point
 tests/            # unittest suite
 fuzz/             # Atheris fuzz harness (fuzz_parsers.py)
-scripts/          # lock_requirements.py: regenerates the hashed requirements-*.txt
+scripts/          # lock_requirements.py (hashed requirements-*.txt), check_release.py (release rules)
 site/             # GitHub Pages landing page (published by pages.yml)
 docs/             # CLI, web UI, and GitHub Action guides
 action.yml        # composite GitHub Action

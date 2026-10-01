@@ -25,7 +25,7 @@ minor for new features).
 
 ## 3. Promote the changelog
 
-In `CHANGELOG.md`, rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` (today, UTC)
+In `CHANGELOG.md`, rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` (today in UTC: `date -u +%F`, not the local date)
 and add a fresh empty `## Unreleased` heading above it.
 
 ## 4. Sync the pinned Action examples
@@ -44,6 +44,7 @@ python -m ruff check .
 python -m mypy
 python -m coverage run -m unittest discover -s tests
 python -m coverage report
+python scripts/check_release.py
 python -m build
 python -m twine check dist/*
 ```
