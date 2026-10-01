@@ -7,6 +7,7 @@ Export a public PromptBase profile's prompts into clean TXT, Markdown, JSON, NDJ
 [![release](https://img.shields.io/github/v/release/IACBI/promptbase-profile-exporter)](https://github.com/IACBI/promptbase-profile-exporter/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/IACBI/promptbase-profile-exporter/badge)](https://scorecard.dev/viewer/?uri=github.com/IACBI/promptbase-profile-exporter)
 
 **Read this in:** [English](#english) · [Türkçe](#turkce)
 
