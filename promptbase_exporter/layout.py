@@ -22,9 +22,9 @@ from pathlib import Path
 from .formatting import (
     EXPORT_FORMATS,
     FORMAT_EXTENSIONS,
-    _atomic_write_text,
+    _atomic_write_bytes,
+    _encoded,
     _safe_username,
-    _storable,
     record_to_dict,
 )
 from .models import ITEM_TYPE_PLURALS, PromptRecord
@@ -189,13 +189,14 @@ def write_markdown_files(
 
 
 def _write_if_changed(path: Path, content: str) -> None:
+    data = _encoded(content)
     try:
         # A symbolic link is replaced as before, never left pointing elsewhere.
-        if not path.is_symlink() and path.read_bytes() == _storable(content).encode("utf-8"):
+        if not path.is_symlink() and path.read_bytes() == data:
             return
     except OSError:
         pass  # missing or unreadable: write it, and let that report any error
-    _atomic_write_text(path, content)
+    _atomic_write_bytes(path, data)
 
 
 def count_files(directory: Path, names: Sequence[str]) -> int:

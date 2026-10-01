@@ -288,14 +288,14 @@ class WriteFilesTests(unittest.TestCase):
         self.assertIn("views: 7", text)
 
     def test_a_failed_write_is_reported(self):
-        def failing(path, content):
+        def failing(path, data):
             if path.name == "two.md":
                 raise PermissionError(13, "Permission denied", str(path))
-            original(path, content)
+            original(path, data)
 
-        original = layout_module._atomic_write_text
+        original = layout_module._atomic_write_bytes
         with TemporaryDirectory() as directory:
-            with patch.object(layout_module, "_atomic_write_text", failing):
+            with patch.object(layout_module, "_atomic_write_bytes", failing):
                 with self.assertRaises(PermissionError):
                     write_markdown_files(Path(directory), "acb", "all", [make("one"), make("two")])
 

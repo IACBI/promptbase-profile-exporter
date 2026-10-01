@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .console import printable
@@ -83,10 +83,7 @@ UTF8_BOM = "\ufeff"
 # The HTML export embeds the full records as JSON in this element so the
 # catalog can be loaded back for --compare/--update-file.
 HTML_DATA_ELEMENT_ID = "promptbase-catalog-data"
-_HTML_DATA_RE = re.compile(
-    rf'<script type="application/json" id="{HTML_DATA_ELEMENT_ID}">(?P<data>.*?)</script>',
-    re.DOTALL,
-)
+_HTML_DATA_START = f'<script type="application/json" id="{HTML_DATA_ELEMENT_ID}">'
 
 
 def parse_csv_option(value: str | None) -> set[str]:
@@ -224,6 +221,8 @@ def format_records_as_markdown(
 
 
 def _markdown_extra_lines(record: PromptRecord, extra_fields: Sequence[str]) -> list[str]:
+    if not extra_fields:
+        return []
     values = record_to_dict(record, extra_fields)
     labels = {
         "tags": "Tags",
@@ -295,26 +294,28 @@ def record_to_dict(
         "rating": record.rating,
         "reviews": record.reviews,
     }
-    extra_values: dict[str, dict[str, object]] = {
-        "tags": {"tags": list(record.tags)},
-        "engine": {"engine": record.engine},
-        "nsfw": {"nsfw": record.nsfw},
-        "featured": {"featured": record.featured},
-        "updated": {"updated": record.updated, "updated_iso": ms_to_iso_or_none(record.updated)},
-        "last_sale": {
-            "last_sale": record.last_sale,
-            "last_sale_iso": ms_to_iso_or_none(record.last_sale),
-        },
-        "unique_sales": {"unique_sales": record.unique_sales},
-    }
     if record.item_type != "prompt":
         # A prompt catalog keeps its original columns; the other kinds say
         # what they are, since their slugs are only unique within a kind.
         data["item_type"] = record.item_type
-    for name in EXTRA_FIELDS:  # canonical order, whatever order was requested
-        if name in extra_fields:
-            data.update(extra_values[name])
+    if extra_fields:
+        for name in EXTRA_FIELDS:  # canonical order, whatever order was requested
+            if name in extra_fields:
+                data.update(_extra_values(record, name))
     return data
+
+
+def _extra_values(record: PromptRecord, name: str) -> dict[str, object]:
+    if name == "tags":
+        return {"tags": list(record.tags)}
+    if name == "updated":
+        return {"updated": record.updated, "updated_iso": ms_to_iso_or_none(record.updated)}
+    if name == "last_sale":
+        return {
+            "last_sale": record.last_sale,
+            "last_sale_iso": ms_to_iso_or_none(record.last_sale),
+        }
+    return {name: getattr(record, name)}  # engine, nsfw, featured, unique_sales
 
 
 def format_records_as_json(
@@ -518,7 +519,10 @@ def format_records_as_html(
     file can be loaded back by the diff tooling.
     """
     items: list[str] = []
+    rows: list[dict[str, object]] = []
     for record in records:
+        values = record_to_dict(record, extra_fields)
+        rows.append(values)
         description = record.description.replace("\r\n", "\n").replace("\r", "\n").strip()
         facts = " · ".join(
             [
@@ -528,7 +532,7 @@ def format_records_as_html(
                 record.created_iso[:10] if record.created_iso else "unknown date",
                 f"{record.views} views",
                 f"{record.sales} sales",
-                *_html_extra_facts(record, extra_fields),
+                *_html_extra_facts(values),
             ]
         )
         items.append(
@@ -538,9 +542,7 @@ def format_records_as_html(
             f'<div class="description">{_h(description)}</div>'
             "</article></li>"
         )
-    data = json.dumps(
-        [record_to_dict(record, extra_fields) for record in records], ensure_ascii=False
-    ).replace("<", "\\u003c")
+    data = json.dumps(rows, ensure_ascii=False).replace("<", "\\u003c")
     count = len(records)
     noun = ITEM_TYPE_PLURALS[item_type]
     return (
@@ -559,8 +561,8 @@ def format_records_as_html(
     )
 
 
-def _html_extra_facts(record: PromptRecord, extra_fields: Sequence[str]) -> list[str]:
-    values = record_to_dict(record, extra_fields)
+def _html_extra_facts(values: Mapping[str, object]) -> list[str]:
+    """The requested extra fields of one record (``record_to_dict``) for its facts line."""
     facts = []
     if values.get("engine"):
         facts.append(f"engine {values['engine']}")
@@ -583,10 +585,13 @@ def _html_extra_facts(record: PromptRecord, extra_fields: Sequence[str]) -> list
 
 def load_html_catalog_data(text: str) -> list[object]:
     """Return the records embedded in an HTML export by :func:`format_records_as_html`."""
-    match = _HTML_DATA_RE.search(text)
-    if match is None:
+    # The writer escapes every "<" inside the JSON, so the first "</script>" after
+    # the opening tag is its end.
+    start = text.find(_HTML_DATA_START)
+    end = text.find("</script>", start + len(_HTML_DATA_START)) if start >= 0 else -1
+    if end < 0:
         raise ValueError("HTML catalog has no embedded PromptBase catalog data.")
-    data = json.loads(match.group("data"))
+    data = json.loads(text[start + len(_HTML_DATA_START) : end])
     if not isinstance(data, list):
         raise ValueError("HTML catalog data must be a list of records.")
     return data
@@ -714,13 +719,13 @@ def write_rendered(output_path: Path, content: str, *, overwrite: bool) -> Path:
     if not overwrite:
         # Exclusive create: no window between an existence check and the write.
         try:
-            handle = output_path.open("x", encoding="utf-8", newline="\n")
+            handle = output_path.open("xb")
         except FileExistsError:
             raise FileExistsError(f"Output file already exists: {output_path}") from None
         created = os.fstat(handle.fileno())
         try:
             with handle:
-                handle.write(_storable(content))
+                handle.write(_encoded(content))
         except BaseException:
             # A truncated leftover would make every retry fail with "already
             # exists". Remove it only if the path is still the file created
@@ -749,6 +754,18 @@ def _storable(content: str) -> str:
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
+    _atomic_write_bytes(path, _encoded(content))
+
+
+def _encoded(content: str) -> bytes:
+    """``content`` as UTF-8; a lone surrogate, which UTF-8 cannot hold, becomes U+FFFD."""
+    try:
+        return content.encode("utf-8")
+    except UnicodeEncodeError:
+        return _storable(content).encode("utf-8")
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
     # Write beside the target and swap it in, so a failed write (disk full,
     # interrupted run) never leaves a truncated catalog: --update-file
     # rewrites what may be the user's only copy.
@@ -756,8 +773,8 @@ def _atomic_write_text(path: Path, content: str) -> None:
     # carry over to the catalog. Exclusive create keeps the umask default.
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with temp_path.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(_storable(content))
+        with temp_path.open("xb") as handle:
+            handle.write(data)
         if path.exists():
             shutil.copymode(path, temp_path)
         os.replace(temp_path, path)

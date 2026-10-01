@@ -528,7 +528,8 @@ def summarize(
         own = [snap for snap in snapshots if snap.profile == name]
         latest = own[-1]
         observations = load_observations(connection, latest.id)
-        totals = {c: int(_totals(observations)[c]) for c in COUNTERS}
+        summed = _totals(observations)
+        totals = {c: int(summed[c]) for c in COUNTERS}
         prices = sorted(o.price for o in observations.values())
         rated = [o.rating for o in observations.values() if o.rating > 0]
         count = len(observations)
