@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A time stored as epoch milliseconds is now converted by counting from the epoch,
+  not with `fromtimestamp`, which depends on the platform: a catalog holding a time
+  outside years 1 to 9999 (a corrupt or hand-edited file) made every writer, and so
+  `pb-convert`, stop with an `OverflowError`, and on Windows any time before 1970
+  failed. Such a time is now unknown, like a missing one. For every real time the
+  text is unchanged (checked on all 4,826 timestamps of two live profiles and
+  200,000 random ones). Found by the weekly-length Atheris run.
+
+### Fixed
+
 - Found by the new fuzzing:
   - A CSV catalog with a row longer than its header is now an error that names the
     line. With `--compare-csv-safe` or `--from-csv-safe` it used to end in an

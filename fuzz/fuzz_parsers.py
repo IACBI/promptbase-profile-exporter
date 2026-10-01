@@ -197,6 +197,8 @@ def seeds() -> list[bytes]:
     row = json.dumps(formatting.record_to_dict(record))
     result += [
         bytes([1]) + row.encode(),
+        # A time beyond time_t made every writer raise OverflowError (found by Atheris).
+        bytes([1]) + row.replace('"created": 1700000000000', '"created": ' + "9" * 17).encode(),
         bytes([2]) + b"=SUM(A1) <b>x</b> ~/a/../b CON.txt",
         bytes([2]) + b"'an apostrophe first, ''twice, '=both",
         bytes([3]) + b"https://promptbase.com/profile/acb",
