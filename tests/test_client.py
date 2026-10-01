@@ -531,10 +531,12 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(self._open_once(gzip.compress(body), content_encoding="gzip"), [])
 
     def test_deeply_nested_json_is_an_error_not_a_crash(self):
-        deep = b"[" * 100_000 + b"]" * 100_000
-        with patch("promptbase_exporter.client.MAX_RESPONSE_BYTES", 10**6), \
+        # Whether real input this deep overflows the C parser depends on the
+        # platform's stack (it does on Windows, not on Linux with Python 3.14), so
+        # the parser's RecursionError is raised directly.
+        with patch("promptbase_exporter.client.json.loads", side_effect=RecursionError), \
                 patch("promptbase_exporter.client.urllib.request.urlopen") as urlopen:
-            urlopen.return_value = self._response(deep)
+            urlopen.return_value = self._response(b"[[[]]]")
             with self.assertRaisesRegex(PromptBaseError, "nested too deeply"):
                 _open_json_with_retry(MagicMock())
 

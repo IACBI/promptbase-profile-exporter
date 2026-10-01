@@ -153,4 +153,4 @@ jobs:
             SINCE= UNTIL= COMPARE= DIFF_OUTPUT= FAIL_ON_DIFF=false TIMESTAMP_FILENAMES=false \
             ALLOW_MISSING_DESCRIPTIONS=false /bin/bash export-step.sh)
           echo "$out"
-          test "$(echo "$out" | head -3 | tr '\n' ' ')" = "@acb emanema @other "
+          test "$(echo "$out" | tail -4 | tr '\n' ' ')" = "-- @acb emanema @other "
