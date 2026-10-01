@@ -76,6 +76,10 @@ class HistoryError(RuntimeError):
     """The history file or the request cannot be used."""
 
 
+class NotEnoughHistory(HistoryError):
+    """The snapshots do not reach back far enough for the comparison asked for."""
+
+
 @dataclass(frozen=True)
 class Snapshot:
     id: int
@@ -302,7 +306,7 @@ def choose_baseline(
     at least that long before the latest snapshot.
     """
     if len(snapshots) < 2:
-        raise HistoryError(
+        raise NotEnoughHistory(
             f"need at least two snapshots to compare, found {len(snapshots)}: "
             "run pb-history snapshot again later"
         )
@@ -324,7 +328,7 @@ def choose_baseline(
         candidates = [snap for snap in earlier if snap.taken_at <= cutoff]
         if not candidates:
             oldest = (latest.taken_at - earlier[0].taken_at).total_seconds() / 86400
-            raise HistoryError(
+            raise NotEnoughHistory(
                 f"no snapshot is {days:g} days older than the latest; "
                 f"the oldest is {oldest:.1f} days older"
             )
@@ -474,14 +478,26 @@ def summarize(
     days: float | None = None,
 ) -> list[ProfileSummary]:
     """Every profile in the file (or ``profiles``) side by side, most sales first."""
+    kind = ITEM_TYPE_PLURALS[item_type]
+    if days is not None:
+        try:
+            timedelta(days=days)
+        except (OverflowError, ValueError) as exc:
+            raise HistoryError(f"--days {days:g} is out of range") from exc
     snapshots = list_snapshots(connection, None, item_type)
     known = sorted({snap.profile for snap in snapshots})
-    wanted = list(dict.fromkeys(parse_profile_input(name) for name in profiles)) or known
+    if not known:
+        # An empty table would hide a wrong --item-type or file, and overwrite a
+        # scheduled output with nothing.
+        raise HistoryError(f"the file holds no snapshots of {kind}")
+    try:
+        wanted = list(dict.fromkeys(parse_profile_input(name) for name in profiles)) or known
+    except PromptBaseError as exc:
+        raise HistoryError(f"invalid --profile: {exc}") from None
     missing = [name for name in wanted if name not in known]
     if missing:
         raise HistoryError(
-            f"no snapshots of {ITEM_TYPE_PLURALS[item_type]} for "
-            + ", ".join(f"@{name}" for name in missing)
+            f"no snapshots of {kind} for " + ", ".join(f"@{name}" for name in missing)
         )
     summaries = []
     for name in wanted:
@@ -496,12 +512,15 @@ def summarize(
         if days is not None:
             try:
                 baseline, _ = choose_baseline(own, days=days)
-            except HistoryError:
-                pass  # not enough history for this profile: shown as such
+            except NotEnoughHistory:
+                pass  # shown as n/a for this profile
             else:
-                growth_days = (latest.taken_at - baseline.taken_at).total_seconds() / 86400
-                before = _totals(load_observations(connection, baseline.id))
-                growth = {c: (totals[c] - before[c]) / growth_days for c in GROWTH_COUNTERS}
+                elapsed = (latest.taken_at - baseline.taken_at).total_seconds() / 86400
+                # Two snapshots in the same second (possible with --days 0) give no rate.
+                if elapsed > 0:
+                    growth_days = elapsed
+                    before = _totals(load_observations(connection, baseline.id))
+                    growth = {c: (totals[c] - before[c]) / elapsed for c in GROWTH_COUNTERS}
         summaries.append(ProfileSummary(
             profile=name,
             taken_at=latest.taken_at,

@@ -482,6 +482,29 @@ class CompareTests(unittest.TestCase):
         self.assertIn("<td>@small</td>", page)
         self.assertNotIn("<script", page)
 
+    def test_two_snapshots_in_the_same_second_give_no_rate(self):
+        store(self.db, "twin", [(0, [rec("t", sales=1)]), (0, [rec("t", sales=2)])])
+        twin = next(s for s in self.summaries(days=0) if s.profile == "twin")
+        self.assertIsNone(twin.growth)
+
+    def test_bad_input_is_an_error_not_a_traceback_or_an_empty_table(self):
+        for profile in ("https://example.com/x", "   "):
+            with self.subTest(profile=profile), \
+                    self.assertRaisesRegex(history.HistoryError, "invalid --profile"):
+                self.summaries(profile)
+        with self.assertRaisesRegex(history.HistoryError, "out of range"):
+            self.summaries(days=1e308)
+        with closing(history.connect(self.db, create=False)) as connection, \
+                self.assertRaisesRegex(history.HistoryError, "no snapshots of bundles"):
+            history.summarize(connection, "bundle")
+        for argv in (["--profile", "https://example.com/x"], ["--days", "1e308"],
+                     ["--item-type", "app"]):
+            with self.subTest(argv=argv):
+                code, _, err = run(["compare", "--db", str(self.db), *argv])
+                self.assertEqual(code, 1)
+                self.assertIn("error:", err)
+                self.assertNotIn("Traceback", err)
+
     def test_profile_names_are_escaped(self):
         store(self.db, "<b>x</b>|y", [(0, [rec("q")])])
         summaries = self.summaries()
