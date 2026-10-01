@@ -33,6 +33,12 @@ COUNTERS = ("views", "sales", "downloads", "favorites", "reviews")
 REPORT_FORMATS = ("markdown", "json", "html")
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
+# An --alert rule fired: the report was still written, as with pb --fail-on-diff.
+EXIT_ALERT = 2
+ALERT_EVENTS = ("new", "removed", "price")
+_ALERT_RULE = re.compile(
+    r"(?P<counter>" + "|".join(COUNTERS) + r")\+(?P<amount>\d+(?:\.\d+)?)(?P<percent>%)?"
+)
 
 _SCHEMA = """
 CREATE TABLE snapshots (
@@ -102,6 +108,24 @@ class Mover:
 
 
 @dataclass(frozen=True)
+class AlertRule:
+    """One ``--alert``: a counter that rose enough, or a kind of event."""
+
+    text: str
+    counter: str = ""
+    amount: float = 0.0
+    percent: bool = False
+
+
+@dataclass(frozen=True)
+class AlertHit:
+    rule: str
+    slug: str
+    title: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class Report:
     profile: str
     item_type: str
@@ -114,6 +138,8 @@ class Report:
     removed: list[Observation]
     price_changes: list[tuple[Observation, Observation]]
     series: list[tuple[datetime, dict[str, int]]] = field(default_factory=list)
+    alert_rules: tuple[str, ...] = ()
+    alerts: list[AlertHit] = field(default_factory=list)
 
     @property
     def days(self) -> float:
@@ -324,6 +350,7 @@ def build_report(
     metric: str = "sales",
     top: int = 10,
     series: list[tuple[datetime, dict[str, int]]] | None = None,
+    alerts: Sequence[AlertRule] = (),
 ) -> Report:
     if metric not in COUNTERS:
         raise HistoryError(f"unknown metric {metric!r}: use one of {', '.join(COUNTERS)}")
@@ -354,7 +381,69 @@ def build_report(
         removed=[before[slug] for slug in sorted(set(before) - set(after))],
         price_changes=price_changes,
         series=series or [],
+        alert_rules=tuple(rule.text for rule in alerts),
+        alerts=evaluate_alerts(alerts, before, after),
     )
+
+
+def parse_alert(text: str) -> AlertRule:
+    """``views+50%``, ``sales+1``, or one of ``new``, ``removed``, ``price``."""
+    rule = text.strip().lower()
+    if rule in ALERT_EVENTS:
+        return AlertRule(rule)
+    match = _ALERT_RULE.fullmatch(rule)
+    if not match or float(match["amount"]) <= 0:
+        raise HistoryError(
+            f"invalid alert {text!r}: use COUNTER+N or COUNTER+N% with N above 0 "
+            f"(counters: {', '.join(COUNTERS)}), or one of {', '.join(ALERT_EVENTS)}"
+        )
+    return AlertRule(rule, match["counter"], float(match["amount"]), bool(match["percent"]))
+
+
+def evaluate_alerts(
+    rules: Sequence[AlertRule],
+    before: dict[str, Observation],
+    after: dict[str, Observation],
+) -> list[AlertHit]:
+    """Every listing that meets a rule, in rule order, then by slug.
+
+    A percentage needs a baseline above zero: a listing that had none before has no
+    meaningful rate of growth, so an absolute rule covers it.
+    """
+    hits: list[AlertHit] = []
+    common = sorted(set(before) & set(after))
+    for rule in rules:
+        if rule.text == "new":
+            hits += [AlertHit(rule.text, slug, after[slug].title, "new listing")
+                     for slug in sorted(set(after) - set(before))]
+        elif rule.text == "removed":
+            hits += [AlertHit(rule.text, slug, before[slug].title, "no longer listed")
+                     for slug in sorted(set(before) - set(after))]
+        elif rule.text == "price":
+            for slug in common:
+                old, new = before[slug], after[slug]
+                if (old.price, old.discount) != (new.price, new.discount):
+                    hits.append(AlertHit(
+                        rule.text, slug, new.title,
+                        f"price {_number(old.price)} to {_number(new.price)}, "
+                        f"discount {_number(old.discount)} to {_number(new.discount)}",
+                    ))
+        else:
+            for slug in common:
+                old = getattr(before[slug], rule.counter)
+                new = getattr(after[slug], rule.counter)
+                gain = new - old
+                if gain <= 0:
+                    continue
+                if rule.percent:
+                    if old <= 0 or gain * 100 < rule.amount * old:
+                        continue
+                elif gain < rule.amount:
+                    continue
+                rate = f", +{gain * 100 / old:.0f}%" if old > 0 else ""
+                hits.append(AlertHit(rule.text, slug, after[slug].title,
+                                     f"{rule.counter} {old} to {new} (+{gain}{rate})"))
+    return hits
 
 
 def describe_duration(days: float) -> str:
@@ -405,6 +494,15 @@ def render_markdown(report: Report) -> str:
         f"{report.latest.id} ({report.latest.taken_at.isoformat()}): "
         f"{describe_duration(report.days)}.",
         "",
+    ]
+    if report.alert_rules:
+        lines += [f"## Alerts ({len(report.alerts)})", ""]
+        lines += [
+            f"- {_code(hit.rule)}: {_cell(hit.title)} ({_code(hit.slug)}): {_cell(hit.detail)}"
+            for hit in report.alerts
+        ] or [f"None of the rules fired ({', '.join(report.alert_rules)})."]
+        lines.append("")
+    lines += [
         "| Measure | Before | Now | Change |",
         "| --- | ---: | ---: | ---: |",
     ]
@@ -456,6 +554,11 @@ def report_to_dict(report: Report) -> dict[str, Any]:
                    for m in report.movers],
         "new": [obs(o) for o in report.new],
         "removed": [obs(o) for o in report.removed],
+        "alerts": {
+            "rules": list(report.alert_rules),
+            "hits": [{"rule": hit.rule, "slug": hit.slug, "title": hit.title,
+                      "detail": hit.detail} for hit in report.alerts],
+        },
         "price_changes": [
             {"slug": after.slug, "title": after.title,
              "price": {"before": before.price, "after": after.price},
@@ -520,6 +623,12 @@ def render_html(report: Report) -> str:
          h(_number(m.price))]
         for m in report.movers
     ]) or f'<tr><td colspan="{len(COUNTERS) + 2}">No {h(kind)} gained {h(report.metric)}.</td></tr>'
+    alerts = ""
+    if report.alert_rules:
+        alerts = f"<h2>Alerts ({len(report.alerts)})</h2><ul>" + ("".join(
+            f"<li><code>{h(hit.rule)}</code>: {h(hit.title)} <code>{h(hit.slug)}</code>: "
+            f"{h(hit.detail)}</li>" for hit in report.alerts
+        ) or f"<li>None of the rules fired ({h(', '.join(report.alert_rules))}).</li>") + "</ul>"
     charts = "".join(
         f"<figure><figcaption>{h(c)}{h(_span(report.series, c))}</figcaption>"
         f"{_chart(report.series, c)}</figure>"
@@ -540,7 +649,7 @@ def render_html(report: Report) -> str:
         f"<p>From snapshot {report.baseline.id} ({h(report.baseline.taken_at.isoformat())}) to "
         f"snapshot {report.latest.id} ({h(report.latest.taken_at.isoformat())}): "
         f"{h(describe_duration(report.days))}.</p>"
-        f"{charts}"
+        f"{alerts}{charts}"
         '<div class="scroll"><table><thead><tr><th>Measure</th><th>Before</th><th>Now</th>'
         f"<th>Change</th></tr></thead><tbody>{totals}</tbody></table></div>"
         f"<h2>Top movers by {h(report.metric)}</h2>"
@@ -582,6 +691,13 @@ def _days(text: str) -> float:
     return value
 
 
+def _alert(text: str) -> AlertRule:
+    try:
+        return parse_alert(text)
+    except HistoryError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
 def _positive_int(text: str) -> int:
     try:
         value = int(text)
@@ -619,6 +735,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="How many top movers to list (default 10).")
     report.add_argument("--format", choices=REPORT_FORMATS, default="markdown")
     report.add_argument("-o", "--output", type=Path, help="Write the report here, not to stdout.")
+    report.add_argument(
+        "--alert", action="append", type=_alert, default=[], metavar="RULE",
+        help="Exit with code 2 when a listing meets RULE: views+50%%, sales+1, new, removed, "
+             "or price. Repeatable.",
+    )
 
     listing = commands.add_parser("list", help="List the snapshots in a history file.")
     listing.add_argument("--db", type=Path, required=True)
@@ -696,6 +817,7 @@ def _report_command(args: argparse.Namespace) -> int:
             load_observations(connection, baseline.id), load_observations(connection, latest.id),
             metric=args.metric, top=args.top,
             series=totals_series(connection, latest.profile, latest.item_type),
+            alerts=args.alert,
         )
     finally:
         connection.close()
@@ -706,6 +828,9 @@ def _report_command(args: argparse.Namespace) -> int:
         print(f"Wrote {args.format} report -> {args.output}")
     else:
         sys.stdout.write(text)
+    if report.alerts:
+        print(f"{len(report.alerts)} alert(s) fired", file=sys.stderr)
+        return EXIT_ALERT
     return EXIT_SUCCESS
 
 

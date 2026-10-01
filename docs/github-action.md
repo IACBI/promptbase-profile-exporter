@@ -223,6 +223,10 @@ How it works and what to know:
   listings.
 - `--days 7` instead of the default compares with a snapshot at least a week old,
   once the history reaches back that far.
+- To be told when something happens, add rules to the report command, for example
+  `--alert sales+1 --alert new`. The step then fails with exit code `2` when a rule
+  fires, after the report is written, and GitHub notifies you of the failed run;
+  the summary page shows which listings fired which rule.
 
 ## Publish a dashboard with GitHub Pages
 
@@ -257,13 +261,13 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: history.sqlite
-          key: promptbase-history-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: promptbase-history-
+          key: promptbase-dashboard-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: promptbase-dashboard-
       - run: pb-history snapshot @acb --db history.sqlite
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: history.sqlite
-          key: promptbase-history-${{ github.run_id }}-${{ github.run_attempt }}
+          key: promptbase-dashboard-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Build the site
         run: |
           set -euo pipefail
@@ -312,7 +316,11 @@ Before the first run, set the repository's Pages source to **GitHub Actions**
 - The build job holds only read permission. Pages write and the OIDC token stay in
   the deploy job, which runs only GitHub's deploy action.
 - The history lives in the Actions cache, with the same limits as in the previous
-  section.
+  section. Its keys start with `promptbase-dashboard-`, not the trends example's
+  `promptbase-history-`: the cache is shared by every workflow in a repository, so
+  with one prefix for both, each could restore the other's newest snapshot and
+  compare snapshots taken minutes apart. Running both, each keeps its own
+  history; to keep a single one, use only this workflow.
 
 ## Inputs
 

@@ -373,6 +373,67 @@ class RenderTests(unittest.TestCase):
             history.render(report, "pdf")
 
 
+class AlertTests(unittest.TestCase):
+    report = ReportTests.report
+
+    def hits(self, before, after, *rules):
+        report = self.report(before, after, alerts=[history.parse_alert(r) for r in rules])
+        return [(hit.rule, hit.slug) for hit in report.alerts]
+
+    def test_rules_are_parsed_and_bad_ones_rejected(self):
+        rule = history.parse_alert("Views+50%")
+        self.assertEqual((rule.counter, rule.amount, rule.percent), ("views", 50.0, True))
+        self.assertEqual(history.parse_alert("sales+1").percent, False)
+        self.assertEqual(history.parse_alert("new").counter, "")
+        for bad in ("views", "views+0", "views-5", "rating+1", "views+5%%", "everything", ""):
+            with self.subTest(rule=bad), self.assertRaisesRegex(history.HistoryError, "invalid"):
+                history.parse_alert(bad)
+
+    def test_an_absolute_rule_counts_the_gain(self):
+        before = [rec("a", sales=1), rec("b", sales=3), rec("c", sales=5)]
+        after = [rec("a", sales=2), rec("b", sales=3), rec("c", sales=4)]
+        self.assertEqual(self.hits(before, after, "sales+1"), [("sales+1", "a")])
+        self.assertEqual(self.hits(before, after, "sales+2"), [])
+
+    def test_a_percentage_needs_a_baseline_above_zero(self):
+        before = [rec("a", views=100), rec("b", views=100), rec("c", views=0)]
+        after = [rec("a", views=150), rec("b", views=149), rec("c", views=40)]
+        self.assertEqual(self.hits(before, after, "views+50%"), [("views+50%", "a")])
+        # From zero there is no rate; an absolute rule catches it.
+        self.assertIn(("views+40", "c"), self.hits(before, after, "views+40"))
+
+    def test_events_and_rule_order(self):
+        before = [rec("a"), rec("gone"), rec("p", price=2.0)]
+        after = [rec("a", favorites=1), rec("fresh"), rec("p", price=3.0)]
+        self.assertEqual(
+            self.hits(before, after, "removed", "new", "price", "favorites+1"),
+            [("removed", "gone"), ("new", "fresh"), ("price", "p"), ("favorites+1", "a")],
+        )
+
+    def test_each_format_shows_the_alerts_first_and_escaped(self):
+        before = [rec("a", sales=1, title="<b>Bold</b> [x](y)")]
+        after = [rec("a", sales=3, title="<b>Bold</b> [x](y)")]
+        report = self.report(before, after, alerts=[history.parse_alert("sales+1")])
+        markdown = history.render_markdown(report)
+        self.assertLess(markdown.index("## Alerts (1)"), markdown.index("| Measure |"))
+        self.assertIn(r"\<b\>Bold\</b\> \[x\](y)", markdown)
+        self.assertIn("sales 1 to 3 (+2, +200%)", markdown)
+        data = json.loads(history.render_json(report))
+        self.assertEqual(data["alerts"]["rules"], ["sales+1"])
+        self.assertEqual(data["alerts"]["hits"][0]["slug"], "a")
+        page = history.render_html(report)
+        self.assertIn("<h2>Alerts (1)</h2>", page)
+        self.assertNotIn("<b>Bold</b>", page)
+
+    def test_rules_that_do_not_fire_are_reported_as_such(self):
+        report = self.report([rec("a")], [rec("a")], alerts=[history.parse_alert("new")])
+        self.assertIn("None of the rules fired (new).", history.render_markdown(report))
+        plain = self.report([rec("a")], [rec("a")])
+        self.assertNotIn("Alerts", history.render_markdown(plain))
+        self.assertEqual(json.loads(history.render_json(plain))["alerts"],
+                         {"rules": [], "hits": []})
+
+
 class CommandTests(unittest.TestCase):
     def fetch(self, *records, profile="acb"):
         return patch(
@@ -547,6 +608,23 @@ class CommandTests(unittest.TestCase):
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(run(argv)[0], 2)
+
+    def test_a_fired_alert_exits_with_two_after_writing_the_report(self):
+        with TemporaryDirectory() as directory:
+            db = str(Path(directory) / "h.sqlite")
+            store(db, "acb", [(0, [rec("a", sales=1)]), (1, [rec("a", sales=2)])])
+            fired, out, err = run(["report", "--db", db, "--alert", "sales+1", "--alert", "new"])
+            quiet, _, _ = run(["report", "--db", db, "--alert", "sales+5"])
+            target = Path(directory) / "r.json"
+            to_file, _, _ = run(["report", "--db", db, "--alert", "sales+1",
+                                 "--format", "json", "-o", str(target)])
+            written = json.loads(target.read_text(encoding="utf-8"))
+            bad, _, bad_err = run(["report", "--db", db, "--alert", "views+0"])
+        self.assertEqual((fired, quiet, to_file, bad), (2, 0, 2, 2))
+        self.assertIn("## Alerts (1)", out)
+        self.assertIn("1 alert(s) fired", err)
+        self.assertEqual(len(written["alerts"]["hits"]), 1)
+        self.assertIn("invalid alert", bad_err)
 
     def test_version(self):
         code, stdout, _ = run(["--version"])
