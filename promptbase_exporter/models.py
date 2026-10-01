@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # The kinds of PromptBase listing the exporter can read, and how each is
 # written in filenames and headings. The kind is also the URL path:
@@ -78,10 +78,24 @@ class PromptRecord:
         return self.price == 0
 
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 def _ms_to_iso(milliseconds: int) -> str:
-    return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc).isoformat()
+    """An epoch-milliseconds time as ISO 8601 UTC, or "" outside years 1 to 9999.
+
+    Counted from the epoch rather than with ``fromtimestamp``, which depends on the
+    platform's ``time_t`` (Windows refuses times before 1970) and overflows on a
+    corrupt catalog's huge value; for real times the two give the same text.
+    """
+    try:
+        return (_EPOCH + timedelta(milliseconds=milliseconds)).isoformat()
+    except OverflowError:
+        return ""
 
 
 def ms_to_iso_or_none(milliseconds: int | None) -> str | None:
     """ISO 8601 UTC text for an epoch-milliseconds value, or None if unknown."""
-    return None if milliseconds is None else _ms_to_iso(milliseconds)
+    if milliseconds is None:
+        return None
+    return _ms_to_iso(milliseconds) or None  # out of range is as unknown as missing
