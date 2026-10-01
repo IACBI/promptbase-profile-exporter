@@ -4,15 +4,37 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `pb-history report --alert RULE` flags the listings that moved enough to act on:
+  a counter's gain (`sales+1`, `views+50%`) or an event (`new`, `removed`, `price`).
+  The hits come first in the Markdown, HTML, and JSON report, and the command exits
+  with `2` when any rule fires, so a scheduled workflow can open an issue or send
+  a message.
+
+### Fixed
+
+- A comparison no longer depends on the order of the records. A new listing that
+  shared an existing listing's title, if it came first, used to be reported as a
+  change to that listing, and the unchanged original as added. Now every slug match
+  is made before any title match, a title only pairs records when one side has no
+  slug (a TXT catalog), and each old record is paired once; two old TXT records
+  with the same title used to leave one of them unmatched. Records that share a
+  title are paired with an identical old record first, so reordering them is not
+  reported as a change. Neither live profile
+  checked (@acb, @emanema) has repeated titles today; property tests found it.
+
 ### Changed
 
 - A profile's listings and their descriptions are fetched at the same time instead
   of one after the other, at most two connections at once. Fetching @emanema's
   2,683 prompts went from 29.4 to 18.3 seconds (median of 3 live runs, same records
   either way); a small profile like @acb is not measurably faster.
-
-### Changed
-
+- Development only: property tests compare random catalogs that were changed in
+  known ways (new listings, some reusing a title; removals; edits; counter moves;
+  re-wrapped text; TXT catalogs with repeated titles) and require the diff to
+  report exactly those changes, count each record once, and mirror when the sides
+  are swapped.
 - Development only: CodeQL scans the Python code and the GitHub Actions workflows
   (security-extended queries) on every pull request, on `main`, and weekly; the
   OpenSSF Scorecard grades the repository's supply-chain practices weekly and
