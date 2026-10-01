@@ -12,6 +12,28 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `pb-history` writes numbers in full: a gain of 2,000,100 views read `+2.0001e+06`
+  in the Markdown and HTML reports, and no digit of a small price is rounded away.
+- Two first `pb-history snapshot` runs at the same time on a new file (two
+  scheduled jobs) no longer fail: the check and the creation of the file's tables
+  run under one write lock. Five of six concurrent runs used to stop with an error.
+- A `pb-history` HTML report keeps titles on one line and drops control characters,
+  as the Markdown report already did; a history file with an unreadable snapshot
+  time is an error, not a traceback.
+- `--since` or `--until` with an offset that moves the time past year 1 or 9999
+  (`0001-01-01T00:00:00+05:00`) is now an invalid date: the command line stopped
+  with an `OverflowError` traceback and the web UI answered with an error 500.
+- `--compare` together with `--update-file` is refused. `--update-file` compares with
+  the file it rewrites, so the other catalog was ignored without a word.
+- A response that is not UTF-8 (from a proxy or a captive portal, say) is retried
+  and then reported like any unreadable response, not a traceback; an infinite
+  or NaN number in PromptBase's data (a count, price, or rating) is reported as bad
+  data instead of a crash or an invalid `Infinity` in a JSON export.
+- `@` (or `@@`) alone is an empty profile, not a query for a user with no name.
+- A `--config` file saved with a byte order mark is read (Windows Notepad adds one),
+  and an option on the command line now replaces one from the file that it excludes
+  (`--paid-only` over `free_only`, `--verbose` over `quiet`), as "the command line
+  wins" promised; argparse used to stop with a usage error.
 - A description that starts with a bulleted list is read back from a Markdown
   catalog. Its "- item" lines were taken for more metadata, so the description came
   back empty and `--compare` or `--update-file` reported a change that never
@@ -22,6 +44,16 @@ All notable changes to this project will be documented in this file.
   U+FFFD in its place; every writer used to fail after building the whole catalog.
 - A CSV tag that itself looks like a JSON list (`["a"]`) is written in the JSON form,
   so it reads back as written; `pb-convert` turned it into `a`.
+
+### Security
+
+- The web UI no longer shows the server's absolute paths: the output directory and
+  the written files are shown relative to the working directory, and a failed write
+  reports the reason and the relative file instead of the full OS error. The same
+  holds for a written file that fails its check and an unreadable comparison catalog.
+- Errors the HTTP server produces itself (501 for an unsupported method such as PUT
+  or OPTIONS, 400 for a malformed request) now carry the same security headers as
+  every other response.
 
 ## 0.14.1 - 2026-10-01
 

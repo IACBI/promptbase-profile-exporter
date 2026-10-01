@@ -1,6 +1,7 @@
 import io
 import json
 import sqlite3
+import threading
 import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import date, datetime, timedelta, timezone
@@ -522,6 +523,67 @@ class CompareTests(unittest.TestCase):
         self.assertIn("# PromptBase profiles compared (prompts)", out)
         self.assertEqual([p["profile"] for p in written["profiles"]], ["small"])
         self.assertIn("no snapshots", err)
+
+
+class AuditFindingTests(unittest.TestCase):
+    """Each misreported, crashed, or raced before it was fixed."""
+
+    def test_large_changes_are_written_in_full(self):
+        self.assertEqual(history._delta(100.0, 2_000_200.0), "+2000100")
+        self.assertEqual(history._delta(5.0, 4.5), "-0.5")
+        self.assertEqual(history._number(1_234_567.5), "1234567.5")
+        self.assertEqual(history._number(4.95), "4.95")
+        self.assertEqual(history._number(3.0), "3")
+        self.assertEqual(history._number(0.0000004), "0.0000004")
+        self.assertEqual(history._delta(0.0000001, 0.0000005), "+0.0000004")
+
+    def test_first_snapshots_at_the_same_time_share_one_new_file(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "race.sqlite"
+            errors = []
+            start = threading.Barrier(8)
+
+            def open_it():
+                start.wait()
+                try:
+                    history.connect(path, create=True).close()
+                except Exception as exc:  # collected and asserted below
+                    errors.append(exc)
+
+            workers = [threading.Thread(target=open_it) for _ in range(8)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(30)
+            with closing(history.connect(path, create=False)) as connection:
+                self.assertEqual(history.list_snapshots(connection), [])
+        self.assertEqual(errors, [])
+
+    def test_the_html_report_keeps_titles_on_one_line_without_control_characters(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "h.sqlite"
+            title = "x" + chr(27) + "[31m" + chr(10) + "y"
+            base, latest = store(path, "acb", [(0, [rec("a", title=title)]),
+                                               (1, [rec("a", title=title, sales=2)])])
+            with closing(history.connect(path, create=False)) as connection:
+                report = history.build_report(
+                    base, latest, history.load_observations(connection, base.id),
+                    history.load_observations(connection, latest.id),
+                )
+        page = history.render_html(report)
+        self.assertNotIn(chr(27), page)
+        self.assertIn("x[31m y", page)
+
+    def test_an_unreadable_snapshot_time_is_an_error_not_a_traceback(self):
+        with TemporaryDirectory() as directory:
+            db = Path(directory) / "h.sqlite"
+            store(db, "acb", [(0, [rec("a")])])
+            with closing(sqlite3.connect(db)) as raw:
+                raw.execute("UPDATE snapshots SET taken_at = 'garbage'")
+                raw.commit()
+            code, _, stderr = run(["list", "--db", str(db)])
+        self.assertEqual(code, 1)
+        self.assertIn("unreadable time: 'garbage'", stderr)
 
 
 class CommandTests(unittest.TestCase):

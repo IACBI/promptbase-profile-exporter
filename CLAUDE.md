@@ -126,5 +126,6 @@ These touch several files; the `.claude/skills/` skills encode the full steps:
   `Content-Security-Policy: sandbox`, because HTML exports are served too.
 - The compare/write/validate phase of an export runs under `_EXPORT_LOCK` so
   concurrent requests cannot interleave writes to the same files.
-- Every response carries the security headers in `_send`. New endpoints must
-  keep equivalent protections.
+- Every response carries the security headers in `_send`; `send_error` routes the
+  server's own errors through it too. Pages show paths relative to the working
+  directory (`_shown_path`). New endpoints must keep equivalent protections.

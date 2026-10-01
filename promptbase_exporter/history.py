@@ -19,6 +19,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -178,6 +179,23 @@ def connect(path: Path, *, create: bool) -> sqlite3.Connection:
 
 def _prepare(connection: sqlite3.Connection, path: Path, create: bool) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
+    if not create:
+        _check(connection, path, create)
+        return
+    # Two first snapshots at once (two scheduled jobs) must not both find an empty
+    # file and create the schema: the check and the creation run under one write
+    # lock, and the second sees the first's tables.
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        _check(connection, path, create)
+    except BaseException:
+        connection.rollback()
+        raise
+    connection.commit()
+
+
+def _check(connection: sqlite3.Connection, path: Path, create: bool) -> None:
+    """Accept a pb-history file, or (with ``create``) give an empty one the schema."""
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version == SCHEMA_VERSION:
         # The version number alone proves nothing: any SQLite file can carry it.
@@ -195,9 +213,11 @@ def _prepare(connection: sqlite3.Connection, path: Path, create: bool) -> None:
         raise HistoryError(f"{path} is a SQLite file, but not a pb-history file")
     if not create:
         raise HistoryError(f"{path} is empty: take a snapshot first")
-    with connection:
-        connection.executescript(_SCHEMA)
-        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    # Statement by statement: executescript() would commit first and drop the lock.
+    for statement in _SCHEMA.split(";"):
+        if statement.strip():
+            connection.execute(statement)
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def _has_expected_schema(connection: sqlite3.Connection) -> bool:
@@ -238,7 +258,11 @@ def record_snapshot(
 
 
 def _snapshot(row: Sequence[Any]) -> Snapshot:
-    return Snapshot(int(row[0]), datetime.fromisoformat(row[1]), row[2], row[3], int(row[4]))
+    try:
+        taken_at = datetime.fromisoformat(row[1])
+    except (TypeError, ValueError):
+        raise HistoryError(f"snapshot {row[0]} has an unreadable time: {row[1]!r}") from None
+    return Snapshot(int(row[0]), taken_at, row[2], row[3], int(row[4]))
 
 
 def list_snapshots(
@@ -612,7 +636,9 @@ def comparison_to_dict(
 def render_comparison_html(
     summaries: Sequence[ProfileSummary], item_type: str, days: float | None = None,
 ) -> str:
-    h = html.escape
+    def h(value: object) -> str:
+        return html.escape(printable(value))
+
     rows = _comparison_rows(summaries, days)
     title = f"PromptBase profiles compared ({ITEM_TYPE_PLURALS[item_type]})"
     head = "".join(f"<th>{h(cell)}</th>" for cell in rows[0])
@@ -642,12 +668,19 @@ def describe_duration(days: float) -> str:
 
 
 def _number(value: float) -> str:
-    return f"{value:g}" if value != int(value) else str(int(value))
+    """``2000100``, ``4.95``, ``0.0000004``: in full, never ``2.0001e+06``."""
+    if value == int(value):
+        return str(int(value))
+    # repr is the shortest text that reads back as ``value``; Decimal only drops
+    # its exponent, so no digit is rounded away.
+    return format(Decimal(repr(value)), "f")
 
 
 def _delta(before: float, after: float) -> str:
     change = after - before
-    return "0" if change == 0 else f"{change:+g}"
+    if change == 0:
+        return "0"
+    return ("+" if change > 0 else "-") + _number(abs(change))
 
 
 def _code(text: object) -> str:
@@ -793,7 +826,9 @@ _PAGE_STYLE = (
 
 
 def render_html(report: Report) -> str:
-    h = html.escape
+    def h(value: object) -> str:
+        return html.escape(printable(value))
+
     kind = ITEM_TYPE_PLURALS[report.item_type]
 
     def rows(cells: list[list[str]]) -> str:

@@ -561,6 +561,21 @@ class NewOptionValidationTests(unittest.TestCase):
         self.assertIn("--format json does not match the --update-file extension .csv", stderr)
         self.assertEqual(original, "title\n")
 
+    def test_compare_and_update_file_together_are_refused(self):
+        # --update-file compares with the file it rewrites; --compare used to be ignored.
+        with TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.json"
+            old.write_text("[]", encoding="utf-8")
+            catalog = Path(tmp) / "catalog.json"
+            catalog.write_text("[]", encoding="utf-8")
+            exit_code, stderr = self._run_expecting_failure(
+                ["@acb", "--mode", "all", "--compare", str(old), "--update-file", str(catalog)]
+            )
+            untouched = catalog.read_text(encoding="utf-8")
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("--compare and --update-file cannot be used together", stderr)
+        self.assertEqual(untouched, "[]")
+
     def test_update_file_accepts_a_matching_format(self):
         with TemporaryDirectory() as tmp:
             catalog = Path(tmp) / "catalog.md"
