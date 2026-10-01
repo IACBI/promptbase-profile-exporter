@@ -268,6 +268,10 @@ def _parse_markdown_catalog(text: str) -> list[dict[str, str]]:
                 metadata[key.strip().lower()] = value.strip()
                 continue
             if in_metadata and not line.strip():
+                # The writer puts one blank line between the metadata list and the
+                # description; after it, "- item" lines are the description's own.
+                if metadata:
+                    in_metadata = False
                 continue
             in_metadata = False
             body_lines.append(line)

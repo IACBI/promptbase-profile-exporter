@@ -4,6 +4,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from promptbase_exporter.convert import (
     main,
@@ -301,18 +302,28 @@ class ReviewFindingsTests(unittest.TestCase):
 
     def test_a_failed_check_never_replaces_an_existing_destination(self):
         rows = self._rows()
-        rows[0]["title"] = ""  # a blank title cannot be counted back out of a TXT file
         with TemporaryDirectory() as directory:
             source = self._json_source(directory, rows)
             destination = Path(directory) / "out.txt"
             destination.write_text("keep me", encoding="utf-8")
-            exit_code, _, stderr = run([str(source), "-o", str(destination), "--overwrite"])
+            # A blank title used to make the TXT count come up short; that is fixed, so
+            # the check's failure is forced here.
+            with patch("promptbase_exporter.convert.count_written_records", return_value=1):
+                exit_code, _, stderr = run([str(source), "-o", str(destination), "--overwrite"])
             kept = destination.read_text(encoding="utf-8")
             leftovers = sorted(p.name for p in Path(directory).iterdir())
         self.assertEqual(exit_code, 1)
         self.assertIn("validation failed", stderr)
         self.assertEqual(kept, "keep me")
         self.assertEqual(leftovers, ["out.txt", "src.json"])  # no temp files left behind
+
+    def test_a_blank_title_converts_to_txt(self):
+        rows = self._rows()
+        rows[0]["title"] = ""
+        with TemporaryDirectory() as directory:
+            source = self._json_source(directory, rows)
+            exit_code, _, stderr = run([str(source), "-f", "txt", "--quiet"])
+        self.assertEqual(exit_code, 0, stderr)
 
     def test_entries_that_are_not_records_are_refused_not_dropped(self):
         for label, export_format, write_source in (
