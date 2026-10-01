@@ -144,6 +144,17 @@ class ExportStepTests(unittest.TestCase):
         self.assertIn("Report truncated", tail)
         self.assertEqual(self.outputs_dict()["added"], "1")  # the JSON report is complete
 
+    def test_profiles_follow_a_double_dash(self):
+        result = self.run_step(PROFILE_URL="@acb, -tricky", UPDATE_FILE="c.json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = self.passed_args()
+        self.assertEqual(args[-3:], ["--", "@acb", "-tricky"])
+
+    def test_a_newline_in_a_path_input_cannot_add_an_output(self):
+        script = ACTION.read_text(encoding="utf-8")
+        self.assertIn("artifact_path<<", script)
+        self.assertNotIn('echo "artifact_path=', script)
+
     def test_options_are_passed_to_the_exporter_only_when_set(self):
         self.run_step()
         defaults = self.passed_args()

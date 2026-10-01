@@ -47,11 +47,18 @@ The workflow runs manually from the Actions tab and every Monday at 05:00 UTC. T
 The examples pin the action to a published release tag, which is the
 recommended way to use it: a workflow keeps behaving the same until you choose
 to upgrade. `@main` also works and always tracks the latest code, but it can
-change under you. For the strongest guarantee, pin the full commit SHA of a
-release, as GitHub recommends for third-party actions:
+change under you. A tag can be moved, though; for the strongest guarantee, pin
+the full commit SHA of a release, as GitHub recommends for third-party actions,
+with the version in a comment so Dependabot can still update it:
 
 ```yaml
-- uses: IACBI/promptbase-profile-exporter@v0.12.1
+- uses: IACBI/promptbase-profile-exporter@<full-commit-sha> # v0.12.1
+```
+
+The release's commit SHA is what the tag points to:
+
+```bash
+git ls-remote https://github.com/IACBI/promptbase-profile-exporter "refs/tags/v0.12.1^{}"
 ```
 
 ## Commit exports back to the repository
@@ -133,14 +140,18 @@ jobs:
           CHANGED: ${{ steps.update.outputs.changed }}
         run: |
           set -euo pipefail
-          branch="catalog-refresh-$GITHUB_RUN_ID"
+          # The attempt number keeps a re-run from colliding with a branch that an
+          # earlier attempt already pushed.
+          branch="catalog-refresh-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
           git add catalog/
           git commit -m "Refresh PromptBase catalog"
           git push -u origin "$branch"
-          gh pr create --base "$GITHUB_REF_NAME" --head "$branch"             --title "Refresh PromptBase catalog"             --body "Added $ADDED, removed $REMOVED, changed $CHANGED. The run's summary page has the full diff."
+          gh pr create --base "$GITHUB_REF_NAME" --head "$branch" \
+            --title "Refresh PromptBase catalog" \
+            --body "Added $ADDED, removed $REMOVED, changed $CHANGED. The run's summary page has the full diff."
 ```
 
 `update-file` rewrites the catalog in the workflow's checkout, so the job
@@ -205,8 +216,9 @@ later step with `if: always()` can still read them.
 
 With `compare` or `update-file`, the action also writes the diff report (the
 Markdown form of `diff-json`) to the workflow run's summary page, so you can see
-what changed without opening a log. A report over 900 KB is cut, with a note to
-use `diff-json` for the full diff. Set `step-summary: false` to turn it off.
+what changed without opening a log. A report over 900 KB is cut, with a note: the full
+report is always in the step's log, and the `diff-output` input keeps it as a file
+(`diff-json` points to a temporary file that is gone when the job ends). Set `step-summary: false` to turn it off.
 
 Reference them from later steps via `steps.<step-id>.outputs.output-dir`:
 

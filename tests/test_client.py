@@ -503,6 +503,61 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
 
+    def _open_once(self, body, **headers):
+        with patch("promptbase_exporter.client.urllib.request.urlopen") as urlopen, \
+                patch("promptbase_exporter.client.time.sleep"), \
+                patch("promptbase_exporter.client.MAX_RESPONSE_BYTES", 1000):
+            urlopen.return_value = self._response(body, **headers)
+            try:
+                return _open_json_with_retry(MagicMock())
+            finally:
+                self.calls = urlopen.call_count
+
+    def test_an_oversized_body_is_refused_without_a_retry(self):
+        with self.assertRaisesRegex(PromptBaseError, "over 0 MiB"):
+            self._open_once(b"[" + b"1," * 600 + b"1]")
+        self.assertEqual(self.calls, 1)
+
+    def test_a_small_gzip_body_that_inflates_past_the_cap_is_refused(self):
+        bomb = gzip.compress(b"[" + b" " * 5000 + b"]")
+        self.assertLess(len(bomb), 1000)
+        with self.assertRaisesRegex(PromptBaseError, "over 0 MiB"):
+            self._open_once(bomb, content_encoding="gzip")
+        self.assertEqual(self.calls, 1)
+
+    def test_every_gzip_member_is_decoded(self):
+        split = gzip.compress(b'[{"document": ') + gzip.compress(b"7}]")
+        self.assertEqual(self._open_once(split, content_encoding="gzip"), [{"document": 7}])
+
+    def test_the_cap_covers_all_gzip_members_together(self):
+        members = gzip.compress(b"[" + b" " * 600) + gzip.compress(b" " * 600 + b"]")
+        with self.assertRaisesRegex(PromptBaseError, "over 0 MiB"):
+            self._open_once(members, content_encoding="gzip")
+
+    def test_a_body_at_the_cap_is_read(self):
+        body = b"[" + b" " * 998 + b"]"
+        self.assertEqual(self._open_once(body), [])
+        self.assertEqual(self._open_once(gzip.compress(body), content_encoding="gzip"), [])
+
+    def test_deeply_nested_json_is_an_error_not_a_crash(self):
+        # Whether real input this deep overflows the C parser depends on the
+        # platform's stack (it does on Windows, not on Linux with Python 3.14), so
+        # the parser's RecursionError is raised directly.
+        with patch("promptbase_exporter.client.json.loads", side_effect=RecursionError), \
+                patch("promptbase_exporter.client.urllib.request.urlopen") as urlopen:
+            urlopen.return_value = self._response(b"[[[]]]")
+            with self.assertRaisesRegex(PromptBaseError, "nested too deeply"):
+                _open_json_with_retry(MagicMock())
+
+    def test_a_deeply_nested_document_is_an_error_not_a_crash(self):
+        value = {"stringValue": "x"}
+        for _ in range(5000):
+            value = {"mapValue": {"fields": {"k": value}}}
+        with patch("promptbase_exporter.client._open_json_with_retry",
+                   return_value=[{"document": {"fields": {"title": value}}}]), \
+                self.assertRaisesRegex(PromptBaseError, "nested too deeply"):
+            _run_query("Items", [field_filter("uid", "EQUAL", {"stringValue": "u"})])
+
 
 class ExtraFieldsFetchTests(unittest.TestCase):
     _profile = Profile(username="acb", uid="uid-1")
@@ -632,6 +687,17 @@ class ItemTypeFetchTests(unittest.TestCase):
         with patch("promptbase_exporter.client._run_query_all", side_effect=query):
             self.assertEqual(fetch_prompt_items(self._profile, (), "prompt")[0]["title"], "P")
             self.assertEqual(fetch_prompt_items(self._profile, (), "app")[0]["title"], "A")
+
+    def test_apps_without_a_type_field_are_not_schema_drift(self):
+        apps = [{"slug": f"a{i}", "title": "A", "domain": "text", "created": i} for i in range(5)]
+        with patch("promptbase_exporter.client._run_query_all", return_value=apps):
+            self.assertEqual(len(fetch_prompt_items(self._profile, (), "app")), 5)
+            # The same documents as prompts or bundles are missing a field they need.
+            for item_type in ("prompt", "bundle"):
+                with self.subTest(item_type=item_type), self.assertRaisesRegex(
+                    PromptBaseError, "type"
+                ):
+                    fetch_prompt_items(self._profile, (), item_type)
 
 
 if __name__ == "__main__":

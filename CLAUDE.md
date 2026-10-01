@@ -118,7 +118,8 @@ These touch several files; the `.claude/skills/` skills encode the full steps:
   `_confine_to_cwd`, which checks containment lexically *before* `resolve()`:
   on Windows, resolving a UNC path (`//host/share`) contacts that host over SMB.
 - The optional comparison catalog is confined the same way
-  (`_resolve_compare_path`), must have a catalog extension, and is only read.
+  (`_resolve_compare_path`), must have a catalog extension, and is only read; on a
+  non-loopback bind it must also match `_EXPORT_FILENAME_RE`.
 - `GET /download` only serves files inside that directory whose names match the
   exporter's own pattern (`_EXPORT_FILENAME_RE`) — it must not become an
   arbitrary file read. Downloads are attachments with

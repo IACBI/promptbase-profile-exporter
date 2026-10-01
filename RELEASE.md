@@ -20,8 +20,9 @@ Then update:
 - `pyproject.toml`: `version = "X.Y.Z"`
 - `CHANGELOG.md`: rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` (UTC) and
   add a fresh, empty `## Unreleased` above it
-- every `@vX.Y.Z` Action pin in `README.md` (both languages) and
-  `docs/github-action.md`
+- every reference to the previous version in `README.md` (both languages) and
+  `docs/github-action.md`: the `@vX.Y.Z` Action pins, the `# vX.Y.Z` comment of the
+  commit-SHA example, and its `git ls-remote` tag
 
 ## 2. Validate
 

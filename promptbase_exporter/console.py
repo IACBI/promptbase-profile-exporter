@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import sys
 
 
@@ -22,3 +23,17 @@ def make_output_safe() -> None:
             continue
         with contextlib.suppress(OSError, ValueError):
             reconfigure(errors="replace")
+
+
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def printable(text: object) -> str:
+    """Remote text made safe to print on one line of a terminal or a CI log.
+
+    Whitespace, newlines included, collapses to single spaces, so a listing title
+    cannot fake extra lines or a workflow command (a GitHub Actions log line that
+    starts with ``::``); the remaining control characters, such as the escape that
+    starts a terminal sequence, are removed.
+    """
+    return _CONTROL_CHARACTERS.sub("", " ".join(str(text).split()))

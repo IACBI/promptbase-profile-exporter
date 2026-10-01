@@ -13,7 +13,7 @@ from typing import Any
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
 from .config import ConfigError, check_arguments, find_config_path, load_config, split_config
-from .console import make_output_safe
+from .console import make_output_safe, printable
 from .dates import parse_datetime_ms
 from .diffing import (
     CatalogDiff,
@@ -386,7 +386,7 @@ def export_profile(
             file=sys.stderr,
         )
         for record in missing_descriptions[:10]:
-            print(f"  - {record.title} ({record.slug})", file=sys.stderr)
+            print(f"  - {printable(record.title)} ({printable(record.slug)})", file=sys.stderr)
         return EXIT_ERROR
 
     modes = split_modes(args.mode)
@@ -822,7 +822,7 @@ def count_by(records: list[PromptRecord], attribute: str) -> dict[str, int]:
 def print_counts(title: str, counts: dict[str, int]) -> None:
     print(f"{title}:")
     for key, value in counts.items():
-        print(f"  {key}: {value}")
+        print(f"  {printable(key)}: {value}")
 
 
 def print_planned_outputs(records: list[PromptRecord], modes: Sequence[str]) -> None:

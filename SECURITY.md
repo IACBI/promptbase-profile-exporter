@@ -7,8 +7,8 @@ release is supported; please upgrade before reporting.
 
 | Version | Supported |
 | --- | --- |
-| 0.9.x | Yes |
-| < 0.9 | No |
+| The [latest release](https://github.com/IACBI/promptbase-profile-exporter/releases/latest) | Yes |
+| Any earlier release | No |
 
 ## Reporting a vulnerability
 

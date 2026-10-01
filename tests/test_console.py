@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from promptbase_exporter import convert
 from promptbase_exporter.cli import diff_main, main
-from promptbase_exporter.console import make_output_safe
+from promptbase_exporter.console import make_output_safe, printable
 from promptbase_exporter.models import Profile, PromptRecord
 from promptbase_exporter.web import main as web_main
 from tests.scratch import use_scratch_working_directory
@@ -95,6 +95,36 @@ class EveryEntryPointSurvivesLegacyOutputTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 web_main(["--version"])
             self.assertEqual(out.errors, "replace")
+
+
+
+class PrintableTests(unittest.TestCase):
+    def test_remote_text_stays_on_one_line_without_control_characters(self):
+        esc, bell = chr(27), chr(7)
+        hostile = f"Nice\n::error title=x::fake\r\n## Heading{esc}]8;;https://e{bell}link{esc}[2J"
+        text = printable(hostile)
+        self.assertNotIn("\n", text)
+        self.assertNotIn(esc, text)
+        self.assertNotIn(bell, text)
+        self.assertEqual(text, "Nice ::error title=x::fake ## Heading]8;;https://elink[2J")
+
+    def test_ordinary_text_is_unchanged(self):
+        self.assertEqual(printable(EMOJI_TITLE), EMOJI_TITLE)
+        self.assertEqual(printable("  padded  "), "padded")
+
+    def test_missing_descriptions_are_listed_one_per_line(self):
+        record = PromptRecord(
+            title="Two\n::warning::lines", description="", slug="two", prompt_type="gpt",
+            domain="text", created=1, price=0.0,
+        )
+        stderr = io.StringIO()
+        with patch("promptbase_exporter.cli.fetch_prompts",
+                   return_value=(Profile("acb", "u"), [record])), \
+                patch("sys.stderr", stderr), patch("sys.stdout", io.StringIO()):
+            code = main(["@acb", "--dry-run"])
+        self.assertEqual(code, 1)
+        self.assertIn("  - Two ::warning::lines (two)\n", stderr.getvalue())
+        self.assertNotIn("\n::warning", stderr.getvalue())
 
 
 if __name__ == "__main__":

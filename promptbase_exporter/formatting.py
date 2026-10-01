@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
+from .console import printable
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, PromptRecord, ms_to_iso_or_none
 
 EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html", "ndjson")
@@ -239,6 +240,20 @@ def _markdown_extra_lines(record: PromptRecord, extra_fields: Sequence[str]) -> 
             # Empty stays empty, like Domain and Type above.
             lines.append(f"- {label}: {_single_line(_cell_text(values[key]))}".rstrip())
     return lines
+
+
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]<>&|~!#])")
+
+
+def escape_markdown(text: object) -> str:
+    """Remote text made safe for one Markdown line or table cell.
+
+    Whitespace, newlines included, collapses to single spaces, so a title cannot
+    start a heading or a new block. Backslash-escaping ``<`` and ``&`` keeps it from
+    becoming raw HTML (``<!--`` would hide everything after it on GitHub), and the
+    brackets keep it from becoming a link, in renderers that allow either.
+    """
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", printable(text))
 
 
 def _cell_text(value: object) -> str:

@@ -203,7 +203,8 @@ class PreviewOverHttpTests(unittest.TestCase):
             with urllib.request.urlopen(request, timeout=10) as response:
                 return response.status, response.read().decode()
         except urllib.error.HTTPError as error:
-            return error.code, error.read().decode()
+            with error:
+                return error.code, error.read().decode()
 
     def test_the_preview_button_previews_and_writes_nothing(self):
         # The web form accepts only output directories inside the working directory,
@@ -239,6 +240,7 @@ class OpenBrowserTests(unittest.TestCase):
         self.assertEqual(browser_url("::1", 8765), "http://[::1]:8765/")
         for wildcard in ("", "0.0.0.0"):  # reached through loopback
             self.assertEqual(browser_url(wildcard, 80), "http://127.0.0.1:80/")
+        self.assertEqual(browser_url("::", 80), "http://[::1]:80/")
 
     def fake_server(self, port=9001):
         server = MagicMock()

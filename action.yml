@@ -257,7 +257,10 @@ runs:
           artifact_path="${WORKING_DIRECTORY%/}/${target#./}"
         fi
 
-        echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
+        # The path comes from inputs; a newline in it must not add another output,
+        # so use the multi-line form with a delimiter that cannot be in the value.
+        delimiter="ghadelimiter_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        printf 'artifact_path<<%s\n%s\n%s\n' "$delimiter" "$artifact_path" "$delimiter" >> "$GITHUB_OUTPUT"
 
     - name: Export PromptBase profile
       id: export
@@ -329,7 +332,6 @@ runs:
         fi
 
         args=(
-          "${profiles[@]}"
           "--mode" "$MODE"
           "--output-dir" "$OUTPUT_DIR"
           "--sort" "$SORT"
@@ -455,7 +457,8 @@ runs:
         fi
 
         set +e
-        promptbase-export "${args[@]}"
+        # Profiles go after "--", so one that starts with "-" is never read as an option.
+        promptbase-export "${args[@]}" -- "${profiles[@]}"
         status=$?
         set -e
 
@@ -465,7 +468,7 @@ runs:
           if [[ "$(wc -c < "$diff_md")" -gt 900000 ]]; then
             {
               head -c 900000 "$diff_md"
-              printf '\n\n_Report truncated: see the diff-json output for the full diff._\n'
+              printf '\n\n_Report truncated. The full report is in the log of this step; set the diff-output input to keep it as a file._\n'
             } >> "$GITHUB_STEP_SUMMARY"
           else
             cat "$diff_md" >> "$GITHUB_STEP_SUMMARY"

@@ -441,8 +441,11 @@ reads the catalog back by that extension:
 pb @acb --mode all --update-file exports/acb_all_prompts.json
 ```
 
-Add `--fail-on-diff` to exit with code `2` when anything changed, which lets a
-CI job flag catalog drift. With `--update-file`, the file is still rewritten
+Add `--fail-on-diff` to exit with code `2` when the catalog changed, which lets a
+CI job flag catalog drift. A change means a prompt was added or removed, or its
+title, description, type, domain, or price changed. Counters (views, sales,
+downloads, favorites, rating, reviews) move on almost every run, so they are not
+compared; `pb-history` tracks those. With `--update-file`, the file is still rewritten
 before the command exits with `2`.
 
 `--compare`, `--update-file`, and `--output-file` each produce a single

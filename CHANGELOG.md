@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Security
+
+- Text from PromptBase can no longer change how a report renders. Titles and values
+  in a Markdown diff report (`--diff-output report.md`, and the Action's run summary)
+  are escaped, so a title cannot add links or headings or hide the rest of the
+  report behind `<!--`. Titles printed to the terminal or a CI log are kept on one
+  line with control characters removed, so a title cannot fake extra log lines, a
+  GitHub Actions workflow command (`::error::`), or a terminal escape sequence.
+- Responses from PromptBase are capped at 64 MiB, compressed or not (a real page is
+  well under 1 MiB), and a response or document nested too deeply is a clean error
+  instead of a traceback.
+- On a web server bound beyond loopback, the comparison catalog must be named like
+  an export, as downloads already were, so another machine cannot read values from
+  other JSON or CSV files in the working directory or probe which files exist.
+- The Action passes profiles after `--`, so a profile value that starts with `-`
+  is never read as an option, and writes its artifact path output in the delimited
+  form, so a newline in a path input cannot add another output.
+
+### Fixed
+
+- Comparisons keep listing kinds apart: a prompt and an app are no longer paired
+  because they share a slug or, more often, a title. Comparing @acb's prompts with
+  its apps used to report 132 "changed" listings; it now reports 243 removed and 211
+  added. A TXT catalog, which records no kind, still matches by title.
+- An app is no longer required to carry a `type` field: apps have no model type, so
+  a future response without one is not reported as schema drift.
+- In a `pb-history` Markdown report, a slug containing backticks can no longer end
+  its code span early.
+- `pb-web --open` on a server bound to `::` opens `http://[::1]:port/`.
+- In the Action, a cut-off run summary now points to the full report in the step's
+  log and the `diff-output` input; it used to point to a temporary file that is
+  deleted when the job ends.
+
 ### Changed
 
 - Documentation only: the README (both languages) now lists `pb-history`, the web UI's
@@ -15,9 +48,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - A CSV catalog is now read with its line breaks intact: a description or title
-  with `\r\n` or `\r` inside a quoted cell used to come back as `\n`, so `--compare`,
-  `--update-file`, `pb-diff`, and `pb-convert` could see a change that never
-  happened. None of the profiles checked live (`@acb`, `@emanema`) has such a
+  with `\r\n` or `\r` inside a quoted cell used to come back as `\n`, so `pb-convert`
+  wrote a different catalog than a direct export. (Comparisons were not affected:
+  they already treat every line break alike. An earlier version of this note said
+  they were.) None of the profiles checked live (`@acb`, `@emanema`) has such a
   value today; it was found by the new round-trip fuzz test.
 - A CSV export now quotes a cell that contains a lone carriage return on every
   supported Python. Python 3.10, 3.11, and 3.13 left it unquoted, so a reader took
@@ -364,6 +398,12 @@ All notable changes to this project will be documented in this file.
 
 ## 0.7.0 - 2026-06-01
 
+### Added
+
+- Type hints are shipped with the package (a `py.typed` marker), so mypy and other
+  checkers use them in projects that import the exporter.
+- Python 3.13 is supported and tested.
+
 ### Fixed
 
 - Stop the Markdown export validation check from over-counting prompts whose
@@ -376,6 +416,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Date parsing lives in its own module, shared by the command line and the web UI,
+  instead of the web UI importing it from the command-line module.
 - Report file-write failures (directory exports, single-file exports, and diff
   reports) as clear `error:` messages with exit code 1 instead of raw
   tracebacks.

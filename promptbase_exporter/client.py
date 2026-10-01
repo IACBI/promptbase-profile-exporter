@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gzip
 import http.client
 import json
 import time
@@ -32,12 +31,22 @@ TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 DEFAULT_PAGE_SIZE = 300
 MAX_PAGES = 100
 MAX_RETRIES = 3
+# Far above a real page (300 records with descriptions is a few MB), but a bound,
+# so a broken or hostile response cannot exhaust memory, compressed or not.
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 # Small pause between successive pages of a paginated query. Single-page
 # fetches (the common case) never wait; multi-page fetches stay polite to the
 # public Firestore endpoint and reduce the chance of hitting rate limits.
 PAGE_DELAY_SECONDS = 0.2
 SCHEMA_DRIFT_MISSING_RATIO = 0.8
 PROMPT_ITEM_SCHEMA_FIELDS = {"slug", "title", "created", "domain", "type"}
+# Apps have no model type: PromptBase sends an empty "type" today, and an app
+# without one is not schema drift.
+ITEM_SCHEMA_FIELDS = {
+    "prompt": PROMPT_ITEM_SCHEMA_FIELDS,
+    "bundle": PROMPT_ITEM_SCHEMA_FIELDS,
+    "app": PROMPT_ITEM_SCHEMA_FIELDS - {"type"},
+}
 PROMPT_DETAIL_SCHEMA_FIELDS = {"slug", "description"}
 # Fields requested from each collection (a Firestore projection). Documents
 # carry many more, including large ones such as example outputs, so asking for
@@ -194,10 +203,13 @@ def _run_query(
         document = row.get("document") if isinstance(row, dict) else None
         if not document:
             continue
-        doc = {
-            key: firestore_value(item)
-            for key, item in document.get("fields", {}).items()
-        }
+        try:
+            doc = {
+                key: firestore_value(item)
+                for key, item in document.get("fields", {}).items()
+            }
+        except RecursionError:
+            raise PromptBaseError("PromptBase returned a document nested too deeply.") from None
         doc["_doc_name"] = document.get("name", "")
         docs.append(doc)
     return docs
@@ -226,7 +238,6 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
             urllib.error.URLError,
             json.JSONDecodeError,
             # A truncated or corrupt gzip body, the compressed IncompleteRead.
-            gzip.BadGzipFile,
             EOFError,
             zlib.error,
         ) as exc:
@@ -238,11 +249,43 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
 
 
 def _read_json(response: Any) -> Any:
-    """Decode a JSON response body, gunzipping it if the server compressed it."""
-    body = response.read()
+    """Decode a JSON response body, gunzipping it if the server compressed it.
+
+    Both the body and its decompressed form are capped at ``MAX_RESPONSE_BYTES``.
+    """
+    body = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise PromptBaseError(_too_large())
     if (response.headers.get("Content-Encoding") or "").strip().lower() == "gzip":
-        body = gzip.decompress(body)
-    return json.loads(body)
+        body = _gunzip(body)
+    try:
+        return json.loads(body)
+    except RecursionError:
+        raise PromptBaseError("PromptBase returned a response nested too deeply.") from None
+
+
+def _gunzip(body: bytes) -> bytes:
+    """Decompress every gzip member of ``body``, as ``gzip.decompress`` would, but stop
+    once the output would exceed ``MAX_RESPONSE_BYTES``."""
+    parts: list[bytes] = []
+    size = 0
+    remaining = body
+    while remaining:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        part = decoder.decompress(remaining, MAX_RESPONSE_BYTES + 1 - size)
+        size += len(part)
+        if size > MAX_RESPONSE_BYTES or decoder.unconsumed_tail:
+            raise PromptBaseError(_too_large())
+        if not decoder.eof:
+            # A truncated body: retried like the IncompleteRead it is.
+            raise EOFError("compressed response ended early")
+        parts.append(part)
+        remaining = decoder.unused_data
+    return b"".join(parts)
+
+
+def _too_large() -> str:
+    return f"PromptBase returned a response over {MAX_RESPONSE_BYTES // (1024 * 1024)} MiB."
 
 
 def _run_query_all(
@@ -387,7 +430,7 @@ def fetch_prompt_items(
         ],
         fields=PROMPT_ITEM_FIELDS + tuple(EXTRA_FIELD_SOURCES[name] for name in extra_fields),
     )
-    _raise_if_schema_changed("Items", docs, PROMPT_ITEM_SCHEMA_FIELDS)
+    _raise_if_schema_changed("Items", docs, ITEM_SCHEMA_FIELDS[item_type])
 
     seen_slugs: set[str] = set()
     prompts: list[dict[str, Any]] = []
