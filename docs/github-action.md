@@ -223,6 +223,10 @@ How it works and what to know:
   listings.
 - `--days 7` instead of the default compares with a snapshot at least a week old,
   once the history reaches back that far.
+- To be told when something happens, add rules to the report command, for example
+  `--alert sales+1 --alert new`. The step then fails with exit code `2` when a rule
+  fires, after the report is written, and GitHub notifies you of the failed run;
+  the summary page shows which listings fired which rule.
 
 ## Inputs
 
