@@ -581,7 +581,8 @@ class CompareFileTests(unittest.TestCase):
         self.assertEqual(allowed.compare_path.name, "acb_all_prompts.json")
 
     def test_the_handler_knows_when_it_is_exposed(self):
-        for host, exposed in (("127.0.0.1", False), ("::1", False), ("0.0.0.0", True),
+        for host, exposed in (("127.0.0.1", False), ("::1", False), ("127.0.0.2", False),
+                              ("localhost", False), ("0.0.0.0", True), ("::", True),
                               ("192.168.1.5", True)):
             with self.subTest(host=host):
                 handler = _make_handler({}, address=(host, 8765))

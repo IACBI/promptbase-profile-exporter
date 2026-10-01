@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import ipaddress
 import math
 import os
 import re
@@ -1022,7 +1023,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
     def _exposed(self) -> bool:
         address = self.server.server_address
         host = address[0] if isinstance(address, tuple) else ""
-        return str(host) not in LOOPBACK_HOSTS
+        return not _is_loopback(str(host))
 
     def _expected_authorities(self) -> set[str]:
         """Host:port authorities this server legitimately answers to."""
@@ -1128,6 +1129,16 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
+def _is_loopback(host: str) -> bool:
+    """Whether ``host`` is a loopback address: all of 127.0.0.0/8, ::1, or localhost."""
+    if host.lower() in LOOPBACK_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 def _warn_if_exposed(host: str) -> None:
     """Warn when binding somewhere other than loopback.
 
@@ -1135,7 +1146,7 @@ def _warn_if_exposed(host: str) -> None:
     requests. On a non-loopback bind it becomes reachable by other hosts, so
     make the exposure explicit rather than silent.
     """
-    if host in LOOPBACK_HOSTS:
+    if _is_loopback(host):
         return
     print(
         f"WARNING: binding to {host!r} exposes the unauthenticated web UI "

@@ -257,18 +257,31 @@ def _read_json(response: Any) -> Any:
     if len(body) > MAX_RESPONSE_BYTES:
         raise PromptBaseError(_too_large())
     if (response.headers.get("Content-Encoding") or "").strip().lower() == "gzip":
-        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        data = decoder.decompress(body, MAX_RESPONSE_BYTES + 1)
-        if len(data) > MAX_RESPONSE_BYTES or decoder.unconsumed_tail:
-            raise PromptBaseError(_too_large())
-        if not decoder.eof:
-            # A truncated body: retried like the IncompleteRead it is.
-            raise EOFError("compressed response ended early")
-        body = data
+        body = _gunzip(body)
     try:
         return json.loads(body)
     except RecursionError:
         raise PromptBaseError("PromptBase returned a response nested too deeply.") from None
+
+
+def _gunzip(body: bytes) -> bytes:
+    """Decompress every gzip member of ``body``, as ``gzip.decompress`` would, but stop
+    once the output would exceed ``MAX_RESPONSE_BYTES``."""
+    parts: list[bytes] = []
+    size = 0
+    remaining = body
+    while remaining:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        part = decoder.decompress(remaining, MAX_RESPONSE_BYTES + 1 - size)
+        size += len(part)
+        if size > MAX_RESPONSE_BYTES or decoder.unconsumed_tail:
+            raise PromptBaseError(_too_large())
+        if not decoder.eof:
+            # A truncated body: retried like the IncompleteRead it is.
+            raise EOFError("compressed response ended early")
+        parts.append(part)
+        remaining = decoder.unused_data
+    return b"".join(parts)
 
 
 def _too_large() -> str:

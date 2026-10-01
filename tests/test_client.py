@@ -525,6 +525,15 @@ class RetryTests(unittest.TestCase):
             self._open_once(bomb, content_encoding="gzip")
         self.assertEqual(self.calls, 1)
 
+    def test_every_gzip_member_is_decoded(self):
+        split = gzip.compress(b'[{"document": ') + gzip.compress(b"7}]")
+        self.assertEqual(self._open_once(split, content_encoding="gzip"), [{"document": 7}])
+
+    def test_the_cap_covers_all_gzip_members_together(self):
+        members = gzip.compress(b"[" + b" " * 600) + gzip.compress(b" " * 600 + b"]")
+        with self.assertRaisesRegex(PromptBaseError, "over 0 MiB"):
+            self._open_once(members, content_encoding="gzip")
+
     def test_a_body_at_the_cap_is_read(self):
         body = b"[" + b" " * 998 + b"]"
         self.assertEqual(self._open_once(body), [])

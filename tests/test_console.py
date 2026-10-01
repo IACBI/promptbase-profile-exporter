@@ -97,9 +97,6 @@ class EveryEntryPointSurvivesLegacyOutputTests(unittest.TestCase):
             self.assertEqual(out.errors, "replace")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class PrintableTests(unittest.TestCase):
     def test_remote_text_stays_on_one_line_without_control_characters(self):
@@ -128,3 +125,7 @@ class PrintableTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("  - Two ::warning::lines (two)\n", stderr.getvalue())
         self.assertNotIn("\n::warning", stderr.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
