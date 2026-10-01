@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `pb-history report --alert RULE` flags the listings that moved enough to act on:
+  a counter's gain (`sales+1`, `views+50%`) or an event (`new`, `removed`, `price`).
+  The hits come first in the Markdown, HTML, and JSON report, and the command exits
+  with `2` when any rule fires, so a scheduled workflow can open an issue or send
+  a message.
+
 ### Fixed
 
 - A comparison no longer depends on the order of the records. A new listing that
