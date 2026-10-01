@@ -42,7 +42,7 @@ TAG = 'git ls-remote https://github.com/IACBI/promptbase-profile-exporter "refs/
 
 
 def make_tree(root, *, version="0.2.1", changelog=CHANGELOG, pyproject_version=None,
-              readme_pins=2, docs=None):
+              readme_en=1, readme_tr=1, docs=None):
     (root / "promptbase_exporter").mkdir()
     (root / "docs").mkdir()
     (root / "promptbase_exporter" / "__init__.py").write_text(
@@ -50,7 +50,11 @@ def make_tree(root, *, version="0.2.1", changelog=CHANGELOG, pyproject_version=N
     (root / "pyproject.toml").write_text(
         f'[project]\nname = "x"\nversion = "{pyproject_version or version}"\n', encoding="utf-8")
     (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
-    (root / "README.md").write_text(PIN.format(v=version) * readme_pins, encoding="utf-8")
+    (root / "README.md").write_text(
+        '<a id="top"></a>\n<a id="english"></a>\n' + PIN.format(v=version) * readme_en
+        + '<a id="turkce"></a>\n' + PIN.format(v=version) * readme_tr,
+        encoding="utf-8",
+    )
     pins = docs if docs is not None else (
         PIN.format(v=version) + SHA_PIN.format(v=version) + TAG.format(v=version))
     (root / "docs" / "github-action.md").write_text(pins, encoding="utf-8")
@@ -126,7 +130,7 @@ class ChangelogRuleTests(unittest.TestCase):
     def test_dates_must_be_present_and_valid_from_the_first_dated_release(self):
         missing = self.problems(CHANGELOG.replace("## 0.2.1 - 2026-09-30", "## 0.2.1"))
         self.assertEqual(missing, [])  # 0.2.1 predates 0.7.0, which began dating releases
-        late = "## Unreleased\n\n## 0.8.1\n\n### Fixed\n\n- x\n\n## 0.8.0 - 2026-09-28\n"
+        late = "## Unreleased\n\n## 0.8.1\n\n### Fixed\n\n- x\n\n## 0.8.0 - 2026-09-28\n\n- y\n"
         self.assertIn("has no date", self.script.check_changelog(late, (0, 8, 1), TODAY, {})[0])
         bad = late.replace("## 0.8.1", "## 0.8.1 - 2026-13-45")
         self.assertIn("not YYYY-MM-DD", self.script.check_changelog(bad, (0, 8, 1), TODAY, {})[0])
@@ -143,6 +147,32 @@ class ChangelogRuleTests(unittest.TestCase):
     def test_an_unrecognised_heading_is_reported(self):
         problems = self.problems(CHANGELOG + "\n## Version two\n")
         self.assertIn("unrecognised heading", "\n".join(problems))
+
+    def test_dates_are_the_dashed_form_only(self):
+        # Python 3.11+ reads "20261001" and "2026-W40-4" as dates; the heading must not.
+        for written in ("20261001", "2026-W40-4", "2026-10-1"):
+            text = (f"## Unreleased\n\n## 0.8.1 - {written}\n\n- x\n\n"
+                    "## 0.8.0 - 2026-09-28\n\n- y\n")
+            with self.subTest(written=written):
+                found = self.script.check_changelog(text, (0, 8, 1), TODAY, {})
+                self.assertIn("not YYYY-MM-DD", "\n".join(found))
+
+    def test_a_changelog_with_no_release_is_an_error(self):
+        problems = self.problems("# Changelog\n\n## Unreleased\n\n### Added\n\n- x\n")
+        self.assertEqual(
+            problems, ["CHANGELOG.md: no released section, but the package has a version"]
+        )
+
+    def test_a_release_heading_left_empty_is_an_error(self):
+        # The entries were not moved out of Unreleased when the release was cut.
+        text = ("## Unreleased\n\n### Added\n\n- a feature\n\n## 0.8.1 - 2026-09-30\n\n"
+                "## 0.8.0 - 2026-09-28\n\n- y\n")
+        problems = self.script.check_changelog(text, (0, 8, 1), TODAY, {})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("0.8.1 has no entries", problems[0])
+
+    def test_early_releases_may_have_no_entries(self):
+        self.assertEqual(self.problems("## Unreleased\n\n## 0.2.1\n\n## 0.2.0\n"), [])
 
     def test_headings_inside_a_release_do_not_leak_into_the_next(self):
         text = ("## Unreleased\n\n## 0.2.1 - 2026-09-30\n\n### Fixed\n\n- x\n\n"
@@ -177,10 +207,34 @@ class ConsistencyTests(unittest.TestCase):
             docs = PIN.format(v="0.2.1") + pin.format(v="0.1.0")
             self.assertIn("refers to v0.1.0", "\n".join(self.check(docs=docs)))
 
-    def test_a_readme_without_both_languages_pins_is_reported(self):
-        problems = self.check(readme_pins=1)
-        self.assertEqual(len(problems), 1)
-        self.assertIn("README.md: expected at least 2 version pins, found 1", problems[0])
+    def test_each_readme_language_needs_its_own_pin(self):
+        # Two pins in one language must not stand in for the other language's.
+        self.assertEqual(
+            self.check(readme_en=2, readme_tr=0),
+            ["README.md: the Turkish section has no version pin"],
+        )
+        self.assertEqual(
+            self.check(readme_en=0, readme_tr=2),
+            ["README.md: the English section has no version pin"],
+        )
+
+    def test_a_readme_without_the_section_anchors_is_reported(self):
+        with TemporaryDirectory() as directory:
+            make_tree(Path(directory))
+            (Path(directory) / "README.md").write_text(PIN.format(v="0.2.1"), encoding="utf-8")
+            problems = self.script.check(Path(directory), TODAY)
+        self.assertEqual(
+            problems, ["README.md: the English and Turkish section anchors are missing"]
+        )
+
+    def test_a_pin_must_match_the_whole_reference(self):
+        for ref in ("0.2.1-broken", "0.2.1.1", "0.2.10", "0.2.1+x"):
+            with self.subTest(ref=ref):
+                docs = PIN.format(v=ref)
+                self.assertEqual(
+                    self.check(docs=docs),
+                    [f"docs/github-action.md:1: refers to v{ref}, but the version is 0.2.1"],
+                )
 
     def test_third_party_action_pins_are_not_mistaken_for_ours(self):
         docs = (PIN.format(v="0.2.1")

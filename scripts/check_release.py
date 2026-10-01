@@ -12,7 +12,9 @@ RELEASE.md states, which a person has to follow by hand and twice got wrong:
 - a release dated after today in UTC is refused (a local date ahead of UTC is how a
   release gets the wrong day), and dates never increase going down the file;
 - a release that lists ``### Added`` or ``### Removed`` changes must bump the minor
-  version at least ("a minor release when it adds features").
+  version at least ("a minor release when it adds features");
+- a release from 0.7.0 on has entries under it, so promoting ``## Unreleased`` cannot
+  leave them behind, and the README shows the current pin in both languages.
 """
 
 from __future__ import annotations
@@ -38,18 +40,23 @@ FIRST_DATED: Version = (0, 7, 0)
 MINOR_HEADINGS = ("Added", "Removed")
 
 _SECTION = re.compile(r"^## (?:Unreleased|(\d+)\.(\d+)\.(\d+)(?: - (\S+))?)\s*$")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# The whole reference after the "v", so "v0.15.0-broken" or "v0.15.0.1" is a different
+# (wrong) pin and not a match for v0.15.0.
+_REF = r"v([0-9A-Za-z.+_-]+)"
 _PIN = re.compile(
-    r"promptbase-profile-exporter@(?:v(\d+\.\d+\.\d+)|<full-commit-sha> # v(\d+\.\d+\.\d+))"
-    r"|refs/tags/v(\d+\.\d+\.\d+)"
+    rf"promptbase-profile-exporter@(?:{_REF}|<full-commit-sha> # {_REF})|refs/tags/{_REF}"
 )
+_README_LANGUAGES = (("English", '<a id="english"></a>'), ("Turkish", '<a id="turkce"></a>'))
 
 
-@dataclass(frozen=True)
+@dataclass
 class Section:
     line: int
     version: Version | None  # None for "Unreleased"
     date_text: str | None
-    headings: tuple[str, ...]
+    headings: list[str]
+    entries: int = 0  # the "- " items under it
 
     @property
     def name(self) -> str:
@@ -74,12 +81,11 @@ def parse_changelog(text: str) -> tuple[list[Section], list[str]]:
                 problems.append(f"CHANGELOG.md:{number}: unrecognised heading {line!r}")
                 continue
             version = (int(match[1]), int(match[2]), int(match[3])) if match[1] else None
-            sections.append(Section(number, version, match[4], ()))
+            sections.append(Section(number, version, match[4], []))
         elif line.startswith("### ") and sections:
-            last = sections[-1]
-            sections[-1] = Section(
-                last.line, last.version, last.date_text, (*last.headings, line[4:].strip())
-            )
+            sections[-1].headings.append(line[4:].strip())
+        elif line.startswith("- ") and sections:
+            sections[-1].entries += 1
     return sections, problems
 
 
@@ -94,7 +100,7 @@ def check_changelog(
         problems.append("CHANGELOG.md: more than one '## Unreleased' section")
     released = [section for section in sections if section.version is not None]
     if not released:
-        return problems
+        return [*problems, "CHANGELOG.md: no released section, but the package has a version"]
     if released[0].version != current:
         problems.append(
             f"CHANGELOG.md: the newest release is {released[0].name}, "
@@ -117,6 +123,13 @@ def check_changelog(
                 f"CHANGELOG.md:{newer.line}: {newer.name} lists {kinds} changes after "
                 f"{older.name}, so it must be a minor release (a patch is for fixes only)"
             )
+    for section in released:
+        assert section.version  # noqa: S101 - narrowed by the filter above
+        if section.version >= FIRST_DATED and section.entries == 0:
+            problems.append(
+                f"CHANGELOG.md:{section.line}: {section.name} has no entries; "
+                "were they left under '## Unreleased'?"
+            )
     problems += _check_dates(released, today)
     return problems
 
@@ -134,6 +147,8 @@ def _check_dates(released: list[Section], today: date) -> list[str]:
                 )
             continue
         try:
+            if not _DATE.fullmatch(section.date_text):
+                raise ValueError(section.date_text)  # 3.11+ also reads "20261001"
             when = date.fromisoformat(section.date_text)
         except ValueError:
             problems.append(
@@ -173,23 +188,38 @@ def project_version(root: Path) -> Version:
 
 def check_pins(root: Path, current: Version) -> list[str]:
     """Every ``@vX.Y.Z`` example in the README (both languages) and the Action guide."""
-    problems: list[str] = []
     expected = ".".join(map(str, current))
-    # The README repeats its examples in English and in Turkish.
-    for name, at_least in (("README.md", 2), ("docs/github-action.md", 1)):
-        text = (root / name).read_text(encoding="utf-8")
-        found = 0
-        for number, line in enumerate(text.splitlines(), 1):
-            for match in _PIN.finditer(line):
-                found += 1
-                version = next(group for group in match.groups() if group)
-                if version != expected:
-                    problems.append(
-                        f"{name}:{number}: refers to v{version}, but the version is {expected}"
-                    )
-        if found < at_least:
-            problems.append(f"{name}: expected at least {at_least} version pins, found {found}")
-    return problems
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    problems, _ = _check_pin_text("README.md", readme, expected, at_least=0)
+    # The README repeats its examples in English and in Turkish: each language needs one.
+    cut = [readme.find(marker) for _, marker in _README_LANGUAGES]
+    if -1 in cut or cut != sorted(cut):
+        problems.append("README.md: the English and Turkish section anchors are missing")
+    else:
+        for (language, _), start, end in zip(
+            _README_LANGUAGES, cut, [*cut[1:], len(readme)], strict=True
+        ):
+            if not _PIN.search(readme[start:end]):
+                problems.append(f"README.md: the {language} section has no version pin")
+    guide = (root / "docs" / "github-action.md").read_text(encoding="utf-8")
+    more, _ = _check_pin_text("docs/github-action.md", guide, expected, at_least=1)
+    return [*problems, *more]
+
+
+def _check_pin_text(name: str, text: str, expected: str, at_least: int) -> tuple[list[str], int]:
+    problems: list[str] = []
+    found = 0
+    for number, line in enumerate(text.splitlines(), 1):
+        for match in _PIN.finditer(line):
+            found += 1
+            version = next(group for group in match.groups() if group)
+            if version != expected:
+                problems.append(
+                    f"{name}:{number}: refers to v{version}, but the version is {expected}"
+                )
+    if found < at_least:
+        problems.append(f"{name}: expected at least {at_least} version pins, found {found}")
+    return problems, found
 
 
 def check(root: Path = ROOT, today: date | None = None) -> list[str]:
