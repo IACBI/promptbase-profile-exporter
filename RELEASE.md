@@ -31,11 +31,17 @@ python -m ruff check .
 python -m mypy
 python -m coverage run -m unittest discover -s tests
 python -m coverage report
+python scripts/check_release.py
 python -m build
 python -m twine check dist/*
 python -m promptbase_exporter --version
 python -m promptbase_exporter @acb --dry-run
 ```
+
+`scripts/check_release.py` also runs in the test suite, so a pull request fails
+when the versions, the changelog, or the `@vX.Y.Z` pins disagree, when a release is
+dated after today in UTC (`date -u +%F` gives the date to write), or when a release
+that lists `### Added` or `### Removed` changes is only a patch.
 
 Remove `build/`, `dist/`, and `*.egg-info` afterwards.
 

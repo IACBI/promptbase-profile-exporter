@@ -66,6 +66,10 @@ Outside the package:
   `requirements-release.txt` (which also pins the build backend; releases build with
   `--no-isolation`), and `requirements-fuzz.txt` that CI installs with
   `--require-hashes`.
+- `scripts/check_release.py` — the release rules RELEASE.md states (matching versions and
+  `@vX.Y.Z` pins, UTC dates, a minor bump for `### Added`/`### Removed`); the test suite
+  runs it, so a release PR cannot get them wrong. A policy break that was already
+  published is recorded in its `KNOWN_EXCEPTIONS`, not hidden.
 - `fuzz/fuzz_parsers.py` — Atheris harness for the catalog, config, and remote-text
   parsers (`--smoke N` runs it without Atheris).
 - `site/` — the GitHub Pages landing page; `pages.yml` adds a live demo catalog.
