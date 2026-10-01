@@ -7,9 +7,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from promptbase_exporter.convert import record_from_dict
 from promptbase_exporter.diffing import compare_catalogs, load_catalog
 from promptbase_exporter.formatting import (
     EXPORT_FORMATS,
+    FORMAT_EXTENSIONS,
     HTML_DATA_ELEMENT_ID,
     RECORD_FIELDS,
     UTF8_BOM,
@@ -408,6 +410,51 @@ class CsvLineBreakTests(unittest.TestCase):
         self.assertNotIn("\r", text)
         self.assertTrue(text.endswith("\n"))
         self.assertEqual(text.count("\n"), 3)  # header and two rows
+
+
+class AuditFindingTests(unittest.TestCase):
+    """Each wrote, read, or validated a catalog wrongly before it was fixed."""
+
+    def record(self, **overrides):
+        values = {"title": "T", "description": "d", "slug": "t", "prompt_type": "gpt",
+                  "domain": "text", "created": 1, "price": 1.0}
+        values.update(overrides)
+        return PromptRecord(**values)
+
+    def test_a_description_that_starts_with_a_list_survives_markdown(self):
+        description = "- item one\n- item two\n\nThen prose."
+        with TemporaryDirectory() as directory:
+            path = write_export_to_path(Path(directory) / "c.md", [self.record(
+                description=description)], "markdown", overwrite=True)
+            rows = load_catalog(path)
+        self.assertEqual(rows[0]["description"], description)
+        self.assertEqual(rows[0]["slug"], "t")  # the metadata is still read
+
+    def test_a_blank_title_is_counted_in_a_txt_export(self):
+        with TemporaryDirectory() as directory:
+            path = write_export_to_path(Path(directory) / "c.txt",
+                                        [self.record(title=""), self.record(slug="u")],
+                                        "txt", overwrite=True)
+            self.assertEqual(count_written_records(path, "txt"), 2)
+
+    def test_a_lone_surrogate_is_written_as_a_replacement_character(self):
+        # JSON text can carry "\ud800"; UTF-8 cannot, and every writer used to fail.
+        lone = chr(0xD800)
+        with TemporaryDirectory() as directory:
+            for export_format in EXPORT_FORMATS:
+                with self.subTest(format=export_format):
+                    path = write_export_to_path(
+                        Path(directory) / f"c.{FORMAT_EXTENSIONS[export_format]}",
+                        [self.record(description=f"a{lone}b")], export_format, overwrite=True)
+                    self.assertIn("a" + chr(0xFFFD) + "b", path.read_text(encoding="utf-8"))
+
+    def test_a_tag_that_looks_like_json_round_trips_through_csv(self):
+        for tags in (('["a"]',), ("[x", "y]"), ("[", "]")):
+            with self.subTest(tags=tags), TemporaryDirectory() as directory:
+                path = write_export_to_path(Path(directory) / "c.csv",
+                                            [self.record(tags=tags)], "csv", overwrite=True,
+                                            extra_fields=("tags",))
+                self.assertEqual(record_from_dict(load_catalog(path)[0]).tags, tags)
 
 
 class CsvSafeTests(unittest.TestCase):
