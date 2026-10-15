@@ -6,121 +6,335 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="description" content="Export a public PromptBase profile's prompts into TXT, Markdown, JSON, NDJSON, CSV, or searchable HTML catalogs, and track them over time.">
+<meta property="og:title" content="PromptBase Profile Exporter">
+<meta property="og:description" content="Turn a public PromptBase profile into a catalog you own, in six formats, with history over time.">
+<meta property="og:type" content="website">
 <title>PromptBase Profile Exporter</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231b2a41'/%3E%3Cpath d='M4 5h8M4 8h8M4 11h5' stroke='%23f2d649' stroke-width='1.6'/%3E%3C/svg%3E">
 <style>
 :root {
   --ink: #1b2a41;
-  --paper: #fbfbf8;
+  --paper: #f6f7f4;
+  --surface: #ffffff;
   --muted: #56627a;
   --rule: #d9dde4;
   --link: #0b6e78;
-  --mark: #f2d649;
+  --accent: #f2d649;
   --code-bg: #eef1f5;
+  --term-bg: #1b2a41;
+  --term-ink: #e6eaf0;
+  --term-muted: #8d9bb3;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  --sans: Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Calibri, "DejaVu Sans", sans-serif;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ink: #e6eaf0;
-    --paper: #14213a;
+    --paper: #101b30;
+    --surface: #17243d;
     --muted: #a3afc2;
     --rule: #2c3b57;
     --link: #6fd3da;
-    --mark: #f2d649;
     --code-bg: #1c2b47;
+    --term-bg: #0a1322;
   }
 }
+:root[data-theme="dark"] {
+  --ink: #e6eaf0;
+  --paper: #101b30;
+  --surface: #17243d;
+  --muted: #a3afc2;
+  --rule: #2c3b57;
+  --link: #6fd3da;
+  --code-bg: #1c2b47;
+  --term-bg: #0a1322;
+}
+
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scroll-padding-top: 4rem; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font: 1.0625rem/1.6 var(--sans);
+  font: 1rem/1.65 var(--sans);
 }
-main { max-width: 44rem; margin: 0 auto; padding: 3.5rem 1rem 2rem; }
 a { color: var(--link); text-underline-offset: 0.18em; }
-a:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; border-radius: 2px; }
-code, pre { font-family: var(--mono); font-size: 0.9em; }
-code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
-pre { background: var(--code-bg); padding: 0.9rem 1rem; border-radius: 4px; overflow-x: auto; line-height: 1.5; }
-pre code { background: none; padding: 0; }
-h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 1.75rem; color: var(--muted); }
-h2 { font-size: 1.3rem; line-height: 1.3; margin: 2.75rem 0 0.75rem; }
+a:focus-visible, .skip:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; border-radius: 3px; }
+code, pre, .mono { font-family: var(--mono); font-size: 0.92em; }
+code { background: var(--code-bg); padding: 0.1em 0.38em; border-radius: 4px; }
 p { margin: 0 0 1rem; }
+h1, h2, h3 { line-height: 1.2; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.45rem, 3vw, 1.85rem); margin-bottom: 0.6rem; }
+h3 { font-size: 1.08rem; margin-bottom: 0.35rem; }
 
-.command {
-  font-family: var(--mono);
-  font-size: clamp(1.6rem, 6.4vw, 2.9rem);
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  margin: 0 0 1.5rem;
-  overflow-wrap: anywhere;
+.skip {
+  position: absolute; left: 1rem; top: -4rem; background: var(--surface); color: var(--ink);
+  padding: 0.5rem 0.9rem; border-radius: 4px; z-index: 10; text-decoration: none;
 }
-.command .prompt { color: var(--muted); user-select: none; }
-.command .arg { box-shadow: inset 0 -0.32em 0 var(--mark); }
+.skip:focus { top: 0.75rem; }
+
+.wrap { max-width: 68rem; margin: 0 auto; padding: 0 1.25rem; }
+
+header.site {
+  position: sticky; top: 0; z-index: 5;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--rule);
+}
+header.site .wrap { display: flex; align-items: center; gap: 1.5rem; min-height: 3.5rem; flex-wrap: wrap; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.brand { display: inline-flex; align-items: center; gap: 0.55rem; font-weight: 650; color: var(--ink); text-decoration: none; }
+.brand svg { width: 1.5rem; height: 1.5rem; flex: none; }
+nav.primary { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; margin-left: auto; font-size: 0.95rem; }
+nav.primary a { color: var(--muted); text-decoration: none; padding: 0.2rem 0; }
+nav.primary a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 0.25em; }
+
+.hero { padding: 4.5rem 0 3.5rem; }
+.eyebrow {
+  display: inline-flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; align-items: center;
+  font-size: 0.85rem; color: var(--muted); margin: 0 0 1.25rem; padding: 0.3rem 0.75rem;
+  border: 1px solid var(--rule); border-radius: 999px; background: var(--surface);
+}
+.eyebrow span + span::before { content: "·"; margin-right: 0.6rem; color: var(--muted); }
+.hero h1 {
+  font-size: clamp(2.2rem, 5.6vw, 3.5rem); font-weight: 700; letter-spacing: -0.03em; max-width: 16ch;
+}
+.hero .lede { font-size: clamp(1.1rem, 2.2vw, 1.3rem); color: var(--muted); max-width: 40rem; margin: 1.25rem 0 2rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 2.5rem; }
+.btn {
+  display: inline-block; padding: 0.7rem 1.15rem; border-radius: 6px; font-weight: 600;
+  text-decoration: none; border: 1px solid var(--ink); color: var(--ink);
+}
+.btn.primary { background: var(--ink); color: var(--paper); }
+.btn:hover { filter: brightness(1.08); }
 @media (prefers-color-scheme: dark) {
-  .command .arg { box-shadow: inset 0 -0.32em 0 rgba(242, 214, 73, 0.45); }
+  :root:not([data-theme="light"]) .btn.primary { background: var(--accent); border-color: var(--accent); color: #1b2a41; }
 }
-.lede { font-size: 1.2rem; max-width: 36rem; }
+:root[data-theme="dark"] .btn.primary { background: var(--accent); border-color: var(--accent); color: #1b2a41; }
 
-.outputs { list-style: none; padding: 0; margin: 1.5rem 0 0; border-top: 1px solid var(--rule); }
-.outputs li { display: grid; grid-template-columns: 9.5rem 1fr; gap: 1rem; padding: 0.55rem 0; border-bottom: 1px solid var(--rule); }
-.outputs .file { font-family: var(--mono); font-size: 0.9rem; padding-top: 0.15rem; overflow-wrap: anywhere; }
-@media (max-width: 30rem) {
-  .outputs li { grid-template-columns: 1fr; gap: 0.1rem; }
+.term {
+  background: var(--term-bg); color: var(--term-ink); border-radius: 10px; margin: 0;
+  box-shadow: 0 1px 0 rgba(0,0,0,.05), 0 12px 32px -18px rgba(27,42,65,.45);
+  overflow: hidden; max-width: 46rem;
 }
+.term .bar { display: flex; gap: 0.4rem; padding: 0.7rem 0.9rem; border-bottom: 1px solid rgba(255,255,255,.08); }
+.term .bar i { width: 0.65rem; height: 0.65rem; border-radius: 50%; background: #3a4a66; display: block; }
+.term pre { background: none; color: inherit; margin: 0; padding: 1.1rem 1.25rem 1.25rem; font-size: clamp(0.95rem, 2.4vw, 1.15rem); line-height: 1.6; overflow-x: auto; }
+.term .prompt { color: var(--term-muted); user-select: none; }
+.term .arg { color: var(--accent); }
+.term .flag { color: #8fd3ff; }
+.term .note { color: var(--term-muted); }
 
-.demo { margin-top: 1rem; }
-.demo a { font-weight: 600; }
-.small { color: var(--muted); font-size: 0.95rem; }
-footer { max-width: 44rem; margin: 0 auto; padding: 2rem 1rem 3rem; color: var(--muted); font-size: 0.95rem; border-top: 1px solid var(--rule); }
-footer p { margin: 0.25rem 0; }
+section { padding: 3.5rem 0; border-top: 1px solid var(--rule); }
+section > .lead { color: var(--muted); max-width: 42rem; margin: 0 0 2rem; }
+
+.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.card {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 1.25rem 1.3rem;
+  display: flex; flex-direction: column; gap: 0.35rem;
+}
+.card p { margin: 0; color: var(--muted); font-size: 0.97rem; }
+.card .tag { font-family: var(--mono); font-size: 0.82rem; color: var(--link); }
+.card .more { margin-top: auto; padding-top: 0.6rem; font-weight: 600; font-size: 0.95rem; }
+.card h3 a { color: var(--ink); text-decoration: none; }
+.card h3 a:hover { text-decoration: underline; }
+
+.formats .card { gap: 0.2rem; }
+.formats .card code { background: none; padding: 0; color: var(--ink); font-weight: 600; font-size: 1rem; }
+
+.demo-grid .card { border-left: 4px solid var(--accent); }
+.demo-grid .card .more a { text-decoration: none; }
+.demo-grid .card .more a:hover { text-decoration: underline; }
+.note-box {
+  margin-top: 1.25rem; padding: 0.9rem 1.1rem; border-radius: 8px; background: var(--code-bg); color: var(--muted); font-size: 0.95rem;
+}
+.note-box strong { color: var(--ink); }
+
+.steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 2.4rem 1fr; gap: 0.2rem 0.9rem; }
+.steps li::before {
+  content: counter(step); grid-row: span 2; width: 2.4rem; height: 2.4rem; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 700; background: var(--ink); color: var(--paper);
+}
+.steps p { margin: 0; color: var(--muted); }
+.steps pre { margin: 0.6rem 0 0; grid-column: 2; }
+pre {
+  background: var(--code-bg); padding: 0.85rem 1rem; border-radius: 8px; overflow-x: auto; line-height: 1.55; margin: 0;
+  border: 1px solid var(--rule);
+}
+pre code { background: none; padding: 0; }
+
+.trust ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.9rem; }
+.trust li { padding-left: 1.6rem; position: relative; color: var(--muted); }
+.trust li::before {
+  content: ""; position: absolute; left: 0.2rem; top: 0.55rem; width: 0.55rem; height: 0.55rem;
+  background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 1px var(--ink);
+}
+.trust strong { color: var(--ink); }
+
+footer.site { padding: 2.5rem 0 3rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.95rem; }
+footer.site .wrap { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; justify-content: space-between; align-items: baseline; }
+footer.site p { margin: 0; }
+footer.site nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
+
+@media (max-width: 40rem) {
+  .hero { padding: 2.75rem 0 2.25rem; }
+  nav.primary { margin-left: 0; width: 100%; gap: 0.25rem 0.9rem; }
+  nav.primary a { font-size: 0.9rem; }
+  section { padding: 2.5rem 0; }
+  .term pre { font-size: 0.9rem; }
+}
 </style>
 </head>
 <body>
-<main>
-  <h1>PromptBase Profile Exporter</h1>
+<a class="skip" href="#main">Skip to content</a>
 
-  <p class="command" aria-label="pb @acb --format html"><span class="prompt">$ </span>pb <span class="arg">@acb</span> --format html</p>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="PromptBase Profile Exporter, home">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect width="16" height="16" rx="3" fill="#1b2a41"/><path d="M4 5h8M4 8h8M4 11h5" stroke="#f2d649" stroke-width="1.6"/></svg>
+      PromptBase Profile Exporter
+    </a>
+    <nav class="primary" aria-label="Page sections">
+      <a href="#formats">Formats</a>
+      <a href="#run">Ways to run</a>
+      <a href="#demo">Live demo</a>
+      <a href="#install">Install</a>
+      <a href="#trust">Privacy</a>
+      <a href="https://github.com/IACBI/promptbase-profile-exporter">GitHub</a>
+    </nav>
+  </div>
+</header>
 
-  <p class="lede">Turns a public PromptBase profile into a catalog you own: every prompt's title, description, price, and counters, in the format your next tool reads.</p>
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <p class="eyebrow"><span>Open source</span><span>MIT license</span><span>Python 3.10+</span><span>Standard library only</span></p>
+      <h1>Own your PromptBase catalog.</h1>
+      <p class="lede">Turn a public PromptBase profile into a catalog you control: every prompt's title, description, price and counters, in the format your next tool reads, with history over time.</p>
+      <div class="actions">
+        <a class="btn primary" href="#demo">See a live catalog</a>
+        <a class="btn" href="#install">Install in a minute</a>
+      </div>
+      <figure class="term" aria-label="Example command">
+        <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+        <pre><code><span class="prompt">$ </span>pb <span class="arg">@acb</span> <span class="flag">--format html</span>
+<span class="note"># HTML page in ./exports</span></code></pre>
+      </figure>
+    </div>
+  </div>
 
-  <ul class="outputs" aria-label="What it writes">
-    <li><span class="file">catalog.html</span><span>One self-contained page you can search; it loads nothing from other sites.</span></li>
-    <li><span class="file">catalog.json</span><span>Every field, for scripts. NDJSON too, one record per line.</span></li>
-    <li><span class="file">catalog.csv</span><span>For spreadsheets, with formula protection when you ask for it.</span></li>
-    <li><span class="file">catalog.md</span><span>For notes and wikis, or one Markdown file per prompt with front matter.</span></li>
-    <li><span class="file">catalog.txt</span><span>Titles and descriptions, nothing else.</span></li>
-  </ul>
+  <section id="formats" aria-labelledby="formats-title">
+    <div class="wrap">
+      <h2 id="formats-title">Six formats, one source of truth</h2>
+      <p class="lead">Every format is built from the same listings. Pick the one your tool reads, or export all of them in one run.</p>
+      <div class="grid formats">
+        <article class="card"><code>catalog.html</code><p>One self-contained page you can search. It loads nothing from other sites.</p></article>
+        <article class="card"><code>catalog.json</code><p>Every field, for scripts and pipelines.</p></article>
+        <article class="card"><code>catalog.ndjson</code><p>One record per line, for streams and log tools.</p></article>
+        <article class="card"><code>catalog.csv</code><p>For spreadsheets, with formula protection when you ask for it.</p></article>
+        <article class="card"><code>catalog.md</code><p>For notes and wikis, or one Markdown file per prompt with front matter.</p></article>
+        <article class="card"><code>catalog.txt</code><p>Titles and descriptions as plain text, easy to read and diff.</p></article>
+      </div>
+    </div>
+  </section>
 
-  <h2>See it on a real profile</h2>
-  <p>These pages are rebuilt every day from the public profile <a href="https://promptbase.com/profile/acb">@acb</a> by this site's own workflow, the same recipe the docs give you.</p>
-  <ul class="demo">
-    <li><a href="catalog.html">The searchable catalog</a></li>
-    <li><a href="trends.html">What changed since the previous daily snapshot</a></li>
-  </ul>
-  <p class="small">Last build: __BUILT__</p>
+  <section id="run" aria-labelledby="run-title">
+    <div class="wrap">
+      <h2 id="run-title">Three ways to run it</h2>
+      <p class="lead">Use the command line for one-off work, the browser for a quick preview, or the GitHub Action to run on a schedule.</p>
+      <div class="grid">
+        <article class="card">
+          <h3><a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/cli.md">Command line</a></h3>
+          <p class="tag">pb</p>
+          <p>Compare against last week's catalog with <code>--compare</code>, refresh one in place with <code>--update-file</code>, or convert a saved catalog offline with <code>pb-convert</code>.</p>
+          <p class="more"><a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/cli.md">CLI guide</a></p>
+        </article>
+        <article class="card">
+          <h3><a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/web-ui.md">Web UI</a></h3>
+          <p class="tag">pb-web</p>
+          <p>A local form with a live preview, bound to your own machine and protected against cross-site and DNS-rebinding requests.</p>
+          <p class="more"><a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/web-ui.md">Web UI guide</a></p>
+        </article>
+        <article class="card">
+          <h3><a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/github-action.md">GitHub Action</a></h3>
+          <p class="tag">uses: IACBI/promptbase-profile-exporter</p>
+          <p>Export on a schedule, see the changes in the run summary, keep sales and views history, or publish a dashboard like the one below.</p>
+          <p class="more"><a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/github-action.md">Action guide</a></p>
+        </article>
+      </div>
+    </div>
+  </section>
 
-  <h2>Install</h2>
-  <p>It needs Python 3.10 or newer and nothing else: the standard library only.</p>
-<pre><code>git clone https://github.com/IACBI/promptbase-profile-exporter.git
-cd promptbase-profile-exporter
-uv tool install .            # or: python -m pip install -e .</code></pre>
+  <section id="demo" aria-labelledby="demo-title">
+    <div class="wrap">
+      <h2 id="demo-title">Live demo</h2>
+      <p class="lead">These pages are rebuilt every day from the public profile <a href="https://promptbase.com/profile/acb">@acb</a> by this site's own workflow, the same recipe the docs give you.</p>
+      <div class="grid demo-grid">
+        <article class="card">
+          <h3>The searchable catalog</h3>
+          <p>Every prompt of @acb on one page with a search box. Generated by <code>pb @acb --mode all --format html</code>.</p>
+          <p class="more"><a href="catalog.html">Open catalog.html</a></p>
+        </article>
+        <article class="card">
+          <h3>Trends</h3>
+          <p>How the counters moved since the previous daily snapshot, per listing and in total.</p>
+          <p class="more"><a href="trends.html">Open trends.html</a></p>
+        </article>
+      </div>
+      <p class="note-box"><strong>Last build:</strong> __BUILT__. Trends appear once the history holds two daily snapshots; until then the page says so.</p>
+    </div>
+  </section>
 
-  <h2>Run it the way you work</h2>
-  <p><strong>From the command line</strong>, with <code>pb</code>. Compare against last week's catalog with <code>--compare</code>, refresh one in place with <code>--update-file</code>, or convert a saved one offline with <code>pb-convert</code>. <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/cli.md">CLI guide</a></p>
-  <p><strong>In the browser</strong>, with <code>pb-web</code>: a local form with a preview, bound to your own machine. <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/web-ui.md">Web UI guide</a></p>
-  <p><strong>On a schedule</strong>, with the GitHub Action: export every day, get the changes in the run summary, keep a history of sales and views, or publish a dashboard like this one. <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/docs/github-action.md">Action guide</a></p>
+  <section id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <h2 id="install-title">Install</h2>
+      <p class="lead">Python 3.10 or newer is the only requirement. There are no third-party packages to install.</p>
+      <ol class="steps">
+        <li>
+          <h3>Get the source</h3>
+          <p>Clone the repository from GitHub, or download a release from the <a href="https://github.com/IACBI/promptbase-profile-exporter/releases/latest">latest release</a>.</p>
+          <pre><code>git clone https://github.com/IACBI/promptbase-profile-exporter.git
+cd promptbase-profile-exporter</code></pre>
+        </li>
+        <li>
+          <h3>Install the commands</h3>
+          <p>With <a href="https://docs.astral.sh/uv/">uv</a>, or with pip into the current environment.</p>
+          <pre><code>uv tool install .            # or: python -m pip install -e .</code></pre>
+        </li>
+        <li>
+          <h3>Export a profile</h3>
+          <p>Pass a username, an <code>@name</code> or a profile URL.</p>
+          <pre><code>pb @acb --format html</code></pre>
+        </li>
+      </ol>
+    </div>
+  </section>
 
-  <h2>What it reads</h2>
-  <p>Only what PromptBase already shows anyone: no account, no cookies, no private endpoints. Every release is built in public and signed, and you can check where a file came from with <code>gh attestation verify</code>.</p>
+  <section id="trust" class="trust" aria-labelledby="trust-title">
+    <div class="wrap">
+      <h2 id="trust-title">Privacy and trust</h2>
+      <p class="lead">It reads what PromptBase already shows anyone, and nothing it shouldn't.</p>
+      <ul>
+        <li><strong>No account, no cookies, no private endpoints.</strong> It reads the same public data the PromptBase website serves, and nothing else.</li>
+        <li><strong>Standard library only.</strong> The runtime has no third-party dependencies, so there is less code between you and your data to trust.</li>
+        <li><strong>Signed releases.</strong> Each release is built by a workflow and carries a build-provenance attestation. Check a download with <code>gh attestation verify</code>.</li>
+      </ul>
+    </div>
+  </section>
 </main>
-<footer>
-  <p><a href="https://github.com/IACBI/promptbase-profile-exporter">Source on GitHub</a>, <a href="https://github.com/IACBI/promptbase-profile-exporter/releases/latest">latest release</a>, <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/CHANGELOG.md">changelog</a></p>
-  <p>MIT license. Made by 𝓐.𝓒.𝓑. Not affiliated with PromptBase.</p>
+
+<footer class="site">
+  <div class="wrap">
+    <p>MIT license. Made by 𝓐.𝓒.𝓑. Not affiliated with PromptBase.</p>
+    <nav aria-label="Project links">
+      <a href="https://github.com/IACBI/promptbase-profile-exporter">Source on GitHub</a>
+      <a href="https://github.com/IACBI/promptbase-profile-exporter/releases/latest">Latest release</a>
+      <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/IACBI/promptbase-profile-exporter/blob/main/SECURITY.md">Security</a>
+    </nav>
+  </div>
 </footer>
 </body>
 </html>
