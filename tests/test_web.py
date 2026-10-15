@@ -985,7 +985,8 @@ class WildcardHostTests(unittest.TestCase):
         host = {"Host": "192.168.1.5:8765"}
         self.assertIsNone(_guard("0.0.0.0", {**host, "Origin": "http://192.168.1.5:8765"}))
         for origin in ("http://attacker.example:8765", "http://192.168.1.5:9999",
-                       "ftp://192.168.1.5:8765", "null"):
+                       "ftp://192.168.1.5:8765", "null",
+                       "http://203.0.113.5:8765"):  # another IP literal is another site
             with self.subTest(origin=origin):
                 self.assertIsNotNone(_guard("0.0.0.0", {**host, "Origin": origin}))
 

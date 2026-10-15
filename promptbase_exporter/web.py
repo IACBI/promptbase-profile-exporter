@@ -1105,7 +1105,16 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             parts = urllib.parse.urlsplit(origin)
         except ValueError:
             return False
-        return parts.scheme in {"http", "https"} and self._host_header_allowed(parts.netloc)
+        if parts.scheme not in {"http", "https"}:
+            return False
+        if parts.netloc in self._expected_authorities():
+            return True
+        # A wildcard bind accepts any IP literal as Host, so an Origin on another one is
+        # a different site: it must be the very authority the request was addressed to.
+        host_header = (self.headers.get("Host") or "").strip()
+        return bool(host_header) and parts.netloc == host_header and self._wildcard_ip_host(
+            parts.netloc
+        )
 
     def _reject_unsafe_request(self) -> str | None:
         """Return an error string if the request is cross-origin or rebound.
