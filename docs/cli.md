@@ -24,7 +24,8 @@ list for your version.
 
 ## Choosing a profile
 
-The only required argument is the profile. All of these are equivalent:
+The only required argument is the profile. A full URL must be on promptbase.com or
+www.promptbase.com; any other host is refused. All of these are equivalent:
 
 ```bash
 pb https://promptbase.com/profile/acb
@@ -153,6 +154,11 @@ Title: Minimalist Logo Designer
 Description:
 Creates clean, modern logo concepts.
 ```
+
+TXT has no way to quote a description, so a description containing a line that
+holds only a number and a period, followed by a `Title:` line, cannot be
+written in TXT. The export fails its check and reports it; use another format for
+that catalog.
 
 **Markdown** is a catalog that renders well on GitHub, with the key metadata
 per prompt:
@@ -448,6 +454,12 @@ pb @acb --mode all --update-file exports/acb_all_prompts.json
 `--update-file` compares with the file it rewrites, so it cannot be combined with
 `--compare`.
 
+Because the rewrite replaces the whole file, `--update-file` refuses a catalog that
+holds entries which are not records (for example a `null` or a number inside a JSON
+array, or a non-object line in NDJSON). It exits with code `1` and names the file
+before anything is written, so those entries are never silently dropped. `--compare`
+reads the same file without rewriting it and skips such entries.
+
 Add `--fail-on-diff` to exit with code `2` when the catalog changed, which lets a
 CI job flag catalog drift. A change means a prompt was added or removed, or its
 title, description, type, domain, or price changed. Counters (views, sales,
@@ -626,7 +638,7 @@ pb @acb --quiet          # print nothing except errors
 | `--compare` | none | Compare against an existing JSON, CSV, TXT, Markdown, or HTML catalog. |
 | `--diff-output` | none | Also write the comparison report to this path: JSON for `.json`, Markdown otherwise. Repeatable. Needs `--compare` or `--update-file`. |
 | `--fail-on-diff` | off | Exit with code `2` when the comparison finds changes. |
-| `--update-file` | none | Compare against an existing catalog and rewrite it in place. The rewrite is atomic, so a failed write leaves the old catalog intact. Needs `--mode all`, `text`, or `image`. |
+| `--update-file` | none | Compare against an existing catalog and rewrite it in place. The rewrite is atomic, so a failed write leaves the old catalog intact. Refuses (exit 1) a catalog with entries that are not records. Needs `--mode all`, `text`, or `image`. |
 | `--dry-run` | off | Fetch, filter, and validate without writing files. |
 | `--list-domains` | off | Print domain counts after filters, then exit. |
 | `--list-types` | off | Print PromptBase type counts after filters, then exit. |

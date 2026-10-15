@@ -1,6 +1,9 @@
+import http.client
 import io
 import os
+import shutil
 import socket
+import threading
 import unittest
 from contextlib import redirect_stderr
 from email.message import Message
@@ -14,8 +17,10 @@ from promptbase_exporter.web import (
     _EXPORT_FILENAME_RE,
     _EXPORT_LOCK,
     MAX_FORM_BYTES,
+    MAX_HANDLER_THREADS,
     ExportRequest,
     PromptBaseWebHandler,
+    WebExportResult,
     WebInputError,
     _ipv6_bind_address,
     _make_server,
@@ -359,7 +364,13 @@ class DownloadTests(unittest.TestCase):
         handler = _make_handler(headers or {"Host": "127.0.0.1:8765"})
         handler.path = path
         handler._send_text = MagicMock()
-        handler._send_download = MagicMock()
+        # Record what would be sent: the body is read while the handler still has the file.
+        handler.downloads = []
+        handler._send_download = MagicMock(
+            side_effect=lambda source, size, name, ctype: handler.downloads.append(
+                (source.read(), size, name, ctype)
+            )
+        )
         return handler
 
     @staticmethod
@@ -383,10 +394,45 @@ class DownloadTests(unittest.TestCase):
 
         handler._send_text.assert_not_called()
         handler._send_download.assert_called_once()
-        data, filename, content_type = handler._send_download.call_args.args
+        data, size, filename, content_type = handler.downloads[0]
         self.assertEqual(filename, "acb_all_prompts.json")
         self.assertIn("application/json", content_type)
         self.assertEqual(data, b'[{"title": "x"}]')
+        self.assertEqual(size, len(data))
+
+    def test_streams_the_file_without_reading_it_whole(self):
+        payload = bytes(range(256)) * 12_288  # 3 MiB, several copy buffers
+        with _in_directory():
+            Path("exports").mkdir()
+            Path("exports/acb_all_prompts.json").write_bytes(payload)
+            handler = _make_handler({"Host": "127.0.0.1:8765"})
+            handler.path = "/download?file=exports/acb_all_prompts.json"
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+            handler.wfile = io.BytesIO()
+            handler._send_text = MagicMock()
+            real_copy = shutil.copyfileobj
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("read whole")), \
+                    patch("promptbase_exporter.web.shutil.copyfileobj",
+                          side_effect=real_copy) as copy:
+                handler._handle_download()
+
+        copy.assert_called_once()
+        headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
+        self.assertEqual(headers["Content-Length"], str(len(payload)))
+        self.assertEqual(handler.wfile.getvalue(), payload)
+        handler._send_text.assert_not_called()
+
+    def test_a_file_that_cannot_be_opened_is_a_404(self):
+        with _in_directory():
+            Path("exports").mkdir()
+            Path("exports/acb_all_prompts.json").write_text("[]", encoding="utf-8")
+            handler = self._handler("/download?file=exports/acb_all_prompts.json")
+            with patch.object(Path, "open", side_effect=PermissionError(13, "denied")):
+                handler._handle_download()
+        handler._send_download.assert_not_called()
+        self.assertEqual(self._status(handler._send_text), 404)
 
     def test_rejects_path_traversal(self):
         handler = self._handler("/download?file=../../etc/passwd")
@@ -473,7 +519,7 @@ class DownloadTests(unittest.TestCase):
             handler = self._handler("/download?file=exports/acb_all_prompts.html")
             handler._handle_download()
 
-        _, filename, content_type = handler._send_download.call_args.args
+        _, _, filename, content_type = handler.downloads[0]
         self.assertEqual(filename, "acb_all_prompts.html")
         self.assertEqual(content_type, "text/html; charset=utf-8")
 
@@ -500,13 +546,31 @@ class DownloadHeaderTests(unittest.TestCase):
         handler.end_headers = MagicMock()
         handler.wfile = io.BytesIO()
 
-        handler._send_download(b"<p>x</p>", "acb_all_prompts.html", "text/html; charset=utf-8")
+        handler._send_download(
+            io.BytesIO(b"<p>x</p>"), 8, "acb_all_prompts.html", "text/html; charset=utf-8"
+        )
 
         headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
         self.assertEqual(headers["Content-Security-Policy"], "sandbox")
         self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(headers["Content-Length"], "8")
         self.assertEqual(handler.wfile.getvalue(), b"<p>x</p>")
+
+    def test_content_length_is_the_size_the_caller_gives(self):
+        # The header is the length the caller promised, so it can never disagree with
+        # the bytes that are sent, whatever the source holds.
+        handler = _make_handler({"Host": "127.0.0.1:8765"})
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = io.BytesIO()
+
+        handler._send_download(io.BytesIO(b"0123456789"), 4, "acb_all_prompts.txt", "text/plain")
+
+        headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
+        self.assertEqual(headers["Content-Length"], "4")
+        self.assertEqual(handler.wfile.getvalue(), b"0123456789")
 
 
 class NewWebOptionTests(unittest.TestCase):
@@ -846,6 +910,160 @@ class ItemTypeWebTests(unittest.TestCase):
         for name in ("acb_all_skills.json", "acb_all_prompt.json", "secrets.json",
                      "acb_all_apps.exe", "acb_other_apps.json"):
             self.assertFalse(_EXPORT_FILENAME_RE.match(name), name)
+
+
+class ClientDisconnectTests(unittest.TestCase):
+    BODY = b"profile=acb&mode=all"
+    RESULT = WebExportResult(
+        username="acb", total_records=1, selected_records=1, text_records=1,
+        image_records=0, other_records=0, files=(),
+    )
+
+    def _post(self, export, send_error):
+        """Run do_POST with run_export patched; return the handler after the request."""
+        handler = _make_handler({"Host": "127.0.0.1:8765", "Content-Length": str(len(self.BODY))})
+        handler.path = "/export"
+        handler.rfile = io.BytesIO(self.BODY)
+        handler._send_html = MagicMock(side_effect=send_error)
+        with patch("promptbase_exporter.web.run_export", **export):
+            handler.do_POST()
+        return handler
+
+    def test_a_disconnect_while_sending_the_result_is_not_sent_again(self):
+        for error in (BrokenPipeError(32, "Broken pipe"),
+                      ConnectionResetError(104, "Connection reset"),
+                      ConnectionAbortedError(103, "Connection aborted")):
+            with self.subTest(error=type(error).__name__):
+                handler = self._post({"return_value": self.RESULT}, send_error=error)
+                self.assertEqual(handler._send_html.call_count, 1)
+                self.assertTrue(handler.close_connection)
+
+    def test_a_disconnect_while_sending_an_error_page_is_not_sent_again(self):
+        handler = self._post(
+            {"side_effect": WebInputError("No approved prompts found.")},
+            send_error=BrokenPipeError(32, "Broken pipe"),
+        )
+        # Once, and as the 400 it was: not re-entered as a 500 "Could not write export".
+        self.assertEqual(handler._send_html.call_count, 1)
+        self.assertEqual(handler._send_html.call_args.kwargs["status"], 400)
+
+    def test_other_send_failures_still_propagate(self):
+        handler = _make_handler({"Host": "127.0.0.1:8765", "Content-Length": "0"})
+        handler.path = "/export"
+        handler.rfile = io.BytesIO(b"")
+        handler._send_html = MagicMock(side_effect=OSError(28, "No space left on device"))
+        with patch("promptbase_exporter.web.run_export", return_value=self.RESULT):
+            with self.assertRaises(OSError):
+                handler.do_POST()
+        self.assertEqual(handler._send_html.call_count, 1)
+
+
+def _guard(bind, headers):
+    """The request guard's verdict (None when allowed) for a server bound to ``bind``."""
+    address = (bind, 8765, 0, 0) if ":" in bind else (bind, 8765)
+    return _make_handler(headers, address=address)._reject_unsafe_request()
+
+
+class WildcardHostTests(unittest.TestCase):
+    def test_wildcard_bind_accepts_ip_literals_and_loopback_names(self):
+        hosts = ("192.168.1.5:8765", "192.168.1.5", "10.0.0.2:8765", "[fd00::5]:8765",
+                 "127.0.0.1:8765", "localhost:8765", "[::1]:8765")
+        for bind in ("0.0.0.0", "::", ""):
+            for host in hosts:
+                with self.subTest(bind=bind, host=host):
+                    self.assertIsNone(_guard(bind, {"Host": host}))
+
+    def test_wildcard_bind_still_refuses_dns_names_and_other_ports(self):
+        hosts = ("attacker.example:8765", "lan-box.local:8765", "192.168.1.5:9999",
+                 "[fd00::5]:9999", "fd00::5:8765", "192.168.1.5:")
+        for bind in ("0.0.0.0", "::", ""):
+            for host in hosts:
+                with self.subTest(bind=bind, host=host):
+                    self.assertIsNotNone(_guard(bind, {"Host": host}))
+
+    def test_wildcard_origin_must_match_scheme_host_and_port(self):
+        host = {"Host": "192.168.1.5:8765"}
+        self.assertIsNone(_guard("0.0.0.0", {**host, "Origin": "http://192.168.1.5:8765"}))
+        for origin in ("http://attacker.example:8765", "http://192.168.1.5:9999",
+                       "ftp://192.168.1.5:8765", "null"):
+            with self.subTest(origin=origin):
+                self.assertIsNotNone(_guard("0.0.0.0", {**host, "Origin": origin}))
+
+    def test_a_specific_lan_bind_answers_only_to_its_own_address(self):
+        self.assertIsNone(_guard("192.168.1.5", {"Host": "192.168.1.5:8765"}))
+        for host in ("10.0.0.9:8765", "localhost:8765", "127.0.0.1:8765", "0.0.0.0:8765"):
+            with self.subTest(host=host):
+                self.assertIsNotNone(_guard("192.168.1.5", {"Host": host}))
+
+    def test_a_loopback_bind_refuses_lan_and_wildcard_addresses(self):
+        for bind in ("127.0.0.1", "::1"):
+            for host in ("192.168.1.5:8765", "0.0.0.0:8765", "[fd00::5]:8765", "[::]:8765"):
+                with self.subTest(bind=bind, host=host):
+                    self.assertIsNotNone(_guard(bind, {"Host": host}))
+            for host in ("127.0.0.1:8765", "localhost:8765", "[::1]:8765"):
+                with self.subTest(bind=bind, host=host):
+                    self.assertIsNone(_guard(bind, {"Host": host}))
+
+
+class LiveHostHeaderTests(unittest.TestCase):
+    @staticmethod
+    def _download_status(bind, host):
+        """Status of a real request for /download (no file, so 400 means the host passed)."""
+        with _make_server(bind, 0) as server:
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", "/download", headers={"Host": f"{host}:{port}"})
+                status = conn.getresponse().status
+                conn.close()
+            finally:
+                server.shutdown()
+                thread.join(5)
+        return status
+
+    def test_a_wildcard_server_answers_a_lan_address_but_not_a_name(self):
+        self.assertEqual(self._download_status("0.0.0.0", "192.168.1.5"), 400)
+        self.assertEqual(self._download_status("0.0.0.0", "attacker.example"), 403)
+
+    def test_a_loopback_server_refuses_a_lan_address(self):
+        self.assertEqual(self._download_status("127.0.0.1", "192.168.1.5"), 403)
+        self.assertEqual(self._download_status("127.0.0.1", "localhost"), 400)
+
+
+class ConnectionCapTests(unittest.TestCase):
+    @staticmethod
+    def _drain(sock):
+        chunks = []
+        while chunk := sock.recv(4096):
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    def test_connections_beyond_the_cap_are_closed_without_a_response(self):
+        with _make_server("127.0.0.1", 0) as server:
+            port = server.server_address[1]
+            for _ in range(MAX_HANDLER_THREADS):
+                self.assertTrue(server._slots.acquire(blocking=False))
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+                    server.handle_request()
+                    self.assertEqual(client.recv(1), b"")
+            finally:
+                for _ in range(MAX_HANDLER_THREADS):
+                    server._slots.release()
+
+    def test_a_served_connection_gives_its_slot_back(self):
+        with _make_server("127.0.0.1", 0) as server:
+            port = server.server_address[1]
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+                client.sendall(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+                server.handle_request()
+                reply = self._drain(client)
+            self.assertTrue(reply.endswith(b"\r\n\r\nok\n"), reply)
+            # Every slot is free again: the handler thread released its own.
+            for _ in range(MAX_HANDLER_THREADS):
+                self.assertTrue(server._slots.acquire(timeout=5))
 
 
 if __name__ == "__main__":

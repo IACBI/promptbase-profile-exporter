@@ -9,7 +9,7 @@ branding:
 inputs:
   profile-url:
     description: >-
-      PromptBase profile URL, path, username, or @username. Separate several
+      promptbase.com profile URL, path, username, or @username. Separate several
       profiles with commas, spaces, or new lines to export each of them.
     required: true
   item-type:
@@ -86,7 +86,8 @@ inputs:
   update-file:
     description: >-
       Optional existing catalog to compare against and rewrite in place.
-      Requires mode all, text, or image.
+      Requires mode all, text, or image. Refuses a catalog that holds entries
+      which are not records.
     required: false
     default: ""
   layout:

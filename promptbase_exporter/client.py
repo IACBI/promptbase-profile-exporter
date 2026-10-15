@@ -104,6 +104,10 @@ class PromptBaseError(RuntimeError):
     """Raised when PromptBase public data cannot be resolved."""
 
 
+# Hosts whose profile URLs are accepted. urlparse().hostname is already lowercased.
+PROMPTBASE_HOSTS = frozenset({"promptbase.com", "www.promptbase.com"})
+
+
 def parse_profile_input(profile_input: str) -> str:
     """Return a PromptBase username from a URL, path, username, or @username."""
     username = _username(profile_input)
@@ -129,6 +133,13 @@ def _username(profile_input: str) -> str:
         raise PromptBaseError(f"Not a valid profile URL: {exc}.") from None
 
     if parsed.scheme and parsed.netloc:
+        # Compare the parsed hostname, not a substring: "promptbase.com.evil.example"
+        # and "https://promptbase.com@evil.example" must both be refused.
+        host = parsed.hostname or ""
+        if host not in PROMPTBASE_HOSTS:
+            raise PromptBaseError(
+                f"Profile URL must be on promptbase.com, not {host or 'an empty host'!r}."
+            )
         path_parts = [part for part in parsed.path.split("/") if part]
         if len(path_parts) >= 2 and path_parts[0].lower() == "profile":
             return path_parts[1].lstrip("@")

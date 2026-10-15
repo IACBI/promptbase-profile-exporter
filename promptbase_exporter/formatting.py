@@ -800,6 +800,39 @@ def infer_format_from_path(path: Path) -> str:
     raise ValueError(f"Cannot infer export format from extension: {path.suffix}")
 
 
+# The TXT record layout, defined once: the writer counts records with parse_txt_catalog and
+# the diff reader (diffing.load_catalog) parses with it, so the two always agree.
+# Limitation: TXT has no way to escape a description. A description holding a line such
+# as "2." then "Title: x" then "Description:" reads as an extra record, so the count is
+# too high and post-write validation rejects the export. Fixing that needs an escape in
+# the TXT format itself, which would change every TXT file.
+# The gap after "Title:" is spaces and tabs only: with \s* a blank title ("Title: " followed
+# by "Description:") let the lazy title run on into the next record.
+_TXT_HEADER = re.compile(r"(?m)^\d+\.\s*\nTitle:[ \t]*(?P<title>(?s:.*?))\nDescription:\n")
+# Where a description ends: the start of anything that looks like the next record.
+_TXT_BOUNDARY = re.compile(r"(?m)^\d+\.\s*\nTitle:")
+
+
+def parse_txt_catalog(text: str) -> list[dict[str, str]]:
+    """The records of a TXT catalog as ``title`` and ``description`` dicts."""
+    # Find the header, then the next boundary, and slice between them; a lazy
+    # description that tested for the next record at every character was three
+    # times slower. Boundary matches cannot overlap (one holds no line that starts
+    # with a digit), so searching from each header finds the same ones.
+    records = []
+    position = 0
+    while (header := _TXT_HEADER.search(text, position)) is not None:
+        boundary = _TXT_BOUNDARY.search(text, header.end())
+        position = boundary.start() if boundary is not None else len(text)
+        records.append(
+            {
+                "title": header.group("title").strip(),
+                "description": text[header.end() : position].strip(),
+            }
+        )
+    return records
+
+
 def count_written_records(path: Path, export_format: str) -> int:
     return count_records_in_text(path.read_text(encoding="utf-8"), export_format)
 
@@ -807,12 +840,7 @@ def count_written_records(path: Path, export_format: str) -> int:
 def count_records_in_text(text: str, export_format: str) -> int:
     """How many records a rendered catalog holds, read back the way a loader would."""
     if export_format == "txt":
-        return len(
-            re.findall(
-                r"(?m)^\d+\.\nTitle:[^\n]*\nDescription:\n",
-                text,
-            )
-        )
+        return len(parse_txt_catalog(text))
     if export_format == "markdown":
         # Only count headings that begin a real record (heading followed by a
         # blank line and the metadata block). A bare "## N." line inside a

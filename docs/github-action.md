@@ -333,7 +333,7 @@ Before the first run, set the repository's Pages source to **GitHub Actions**
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `profile-url` | Required | PromptBase profile URL, path, username, or `@username`. Separate several profiles with commas, spaces, or new lines. |
+| `profile-url` | Required | promptbase.com profile URL, path, username, or `@username`. Separate several profiles with commas, spaces, or new lines. |
 | `item-type` | `prompt` | Kind of listing to export: `prompt`, `bundle`, or `app`. |
 | `mode` | `split` | `split`, `all`, `text`, `image`, `text-only`, or `image-only`. |
 | `format` | Empty | `txt`, `markdown`, `json`, `ndjson`, `csv`, or `html`. Empty means `txt`, or the format inferred from `output-file` / `update-file`. With `update-file`, it must match that file's extension. |
@@ -351,7 +351,7 @@ Before the first run, set the repository's Pages source to **GitHub Actions**
 | `until` | Empty | Optional inclusive created-date filter such as `2026-12-31`. |
 | `output-file` | Empty | Write a single catalog to this exact path. Requires `mode` other than `split`. |
 | `overwrite` | `false` | Allow `output-file` to replace an existing file. |
-| `update-file` | Empty | Compare against this catalog and rewrite it in place. Requires `mode` other than `split`. |
+| `update-file` | Empty | Compare against this catalog and rewrite it in place. Requires `mode` other than `split`. Refuses a catalog that holds entries which are not records. |
 | `compare` | Empty | Existing catalog path to compare against. Requires `mode` other than `split`. |
 | `diff-output` | Empty | Optional path for the comparison report: JSON for a `.json` path, Markdown otherwise. |
 | `step-summary` | `true` | With `compare` or `update-file`, show the diff report on the workflow run's summary page. Use `false` to turn it off. |

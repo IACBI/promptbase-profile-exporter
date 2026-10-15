@@ -47,12 +47,14 @@ a CLI, a local web UI, and a composite GitHub Action.
   properties like `url`, `created_iso`, `is_text`/`is_image`/`is_free`).
 - `formatting.py` — filtering, sorting, the per-format writers (txt,
   markdown, json, ndjson, csv with optional `--csv-safe`, html), atomic writes,
+  `parse_txt_catalog` (the TXT layout, shared with the diff reader),
   and `count_written_records` (post-write validation).
 - `pipeline.py` — `Selection` (filter → sort → limit), `split_modes`, and
   `without_description`, shared by `cli.py` and `web.py`. Add a new filter here once;
   `SurfacesAgreeTests` fails if the CLI and the web form drift apart.
 - `diffing.py` — catalog loading and comparison (`--compare`/`--update-file`,
-  `pb-diff`) and the Markdown/JSON diff reports.
+  `pb-diff`) and the Markdown/JSON diff reports; `listing_kind` is the one URL→kind
+  rule shared with `convert.py`, and `--update-file` loads strictly.
 - `diff.py` — `python -m promptbase_exporter.diff` entry point for `pb-diff`, whose
   body is `cli.diff_main`.
 - `convert.py` — `pb-convert`: rewrite a saved JSON/CSV/HTML catalog in another
@@ -128,7 +130,10 @@ These touch several files; the `.claude/skills/` skills encode the full steps:
 
 - Binds to `127.0.0.1` by default; warns on non-loopback binds.
 - `POST /export` rejects cross-origin (CSRF) and rebound-DNS requests via the
-  `Host` header and `Origin`/`Sec-Fetch-Site`.
+  `Host` header and `Origin`/`Sec-Fetch-Site`. On a wildcard bind (`""`, `0.0.0.0`,
+  `::`) any IP literal on the bound port is accepted (`_wildcard_ip_host`), and no DNS
+  name but the loopback ones.
+- At most `MAX_HANDLER_THREADS` connections are served at once; downloads are streamed.
 - Output directories are confined to the server's working directory (no
   absolute paths, no `..`). Route user-supplied paths through
   `_confine_to_cwd`, which checks containment lexically *before* `resolve()`:

@@ -457,6 +457,8 @@ def export_profile(
             args.fail_on_diff,
             quiet=args.quiet,
             csv_safe=args.compare_csv_safe,
+            # --update-file rewrites this file, so an entry it would silently drop is an error.
+            rewriting=args.update_file is not None,
         )
         if diff_exit_code == EXIT_ERROR:
             # An operational failure (catalog load failed, or the requested diff
@@ -727,17 +729,36 @@ def handle_compare(
     *,
     quiet: bool,
     csv_safe: bool = False,
+    rewriting: bool = False,
 ) -> int:
+    """Compare the selected records with a catalog file; ``rewriting`` for --update-file.
+
+    A rewrite is strict: a catalog with entries that are not records is refused, since
+    the rewrite would drop them. A plain --compare only reads the file, so it skips them.
+    """
     try:
-        previous_records = load_catalog(compare_path, csv_safe=csv_safe)
+        previous_records = load_catalog(compare_path, csv_safe=csv_safe, strict=rewriting)
     except (OSError, ValueError) as exc:
-        print(f"error: could not load comparison catalog: {exc}", file=sys.stderr)
+        if rewriting:
+            print(f"error: refusing to rewrite {compare_path}: {exc}", file=sys.stderr)
+        else:
+            print(f"error: could not load comparison catalog: {exc}", file=sys.stderr)
         return EXIT_ERROR
     filtered = filter_records(selected_records, modes[0])
     diff = compare_catalogs(previous_records, filtered)
-    report = format_diff_report(diff)
+    return _finish_diff(diff, diff_outputs, fail_on_diff, quiet=quiet)
+
+
+def _finish_diff(
+    diff: CatalogDiff,
+    diff_outputs: list[Path],
+    fail_on_diff: bool,
+    *,
+    quiet: bool,
+) -> int:
+    """Print the report, write its files, and return the exit code for a diff."""
     if not quiet:
-        print(report.rstrip())
+        print(format_diff_report(diff).rstrip())
     if not write_diff_reports(diff_outputs, diff, quiet=quiet):
         return EXIT_ERROR
     if fail_on_diff and diff.has_changes:
@@ -817,13 +838,7 @@ def diff_main(argv: list[str] | None = None) -> int:
             print(f"error: could not load catalog {path}: {exc}", file=sys.stderr)
             return EXIT_ERROR
     diff = compare_catalog_records(loaded[0], loaded[1])
-    if not args.quiet:
-        print(format_diff_report(diff).rstrip())
-    if not write_diff_reports(args.diff_output or [], diff, quiet=args.quiet):
-        return EXIT_ERROR
-    if args.fail_on_diff and diff.has_changes:
-        return EXIT_DIFF
-    return EXIT_SUCCESS
+    return _finish_diff(diff, args.diff_output or [], args.fail_on_diff, quiet=args.quiet)
 
 
 def count_by(records: list[PromptRecord], attribute: str) -> dict[str, int]:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -13,7 +12,7 @@ from typing import Any
 
 from . import __version__
 from .console import make_output_safe
-from .diffing import load_catalog
+from .diffing import listing_kind, load_catalog
 from .formatting import (
     EXPORT_FORMATS,
     EXTRA_FIELD_COLUMNS,
@@ -51,7 +50,6 @@ REQUIRED_COLUMNS = (
     "rating",
     "reviews",
 )
-_URL_KIND_RE = re.compile(r"^https?://promptbase\.com/(prompt|bundle|app)/")
 _TRUE = frozenset({"true", "1", "yes"})
 _FALSE = frozenset({"false", "0", "no"})
 
@@ -347,14 +345,12 @@ def _split_tag_cell(cell: str) -> list[str]:
 
 
 def _item_type(data: Mapping[str, Any]) -> str:
-    declared = _text(data.get("item_type"))
-    if declared:
-        if declared not in ITEM_TYPES:
-            raise ValueError(f"unknown item_type {declared!r}")
-        return declared
-    match = _URL_KIND_RE.match(_text(data.get("url")))
-    return match.group(1) if match else "prompt"
-
+    # A record that states no kind at all is a prompt: the default is written here, since
+    # the shared reader returns "" for it and a diff must keep that as "unknown".
+    kind = listing_kind(data.get("item_type"), data.get("url"))
+    if kind and kind not in ITEM_TYPES:
+        raise ValueError(f"unknown item_type {kind!r}")
+    return kind or "prompt"
 
 
 if __name__ == "__main__":

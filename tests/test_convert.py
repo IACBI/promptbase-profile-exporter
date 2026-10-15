@@ -102,6 +102,20 @@ class RecordFromDictTests(unittest.TestCase):
             "app",
         )
 
+    def test_kind_from_a_url_follows_the_shared_rule(self):
+        # The same rule pb-diff uses: the PromptBase host, with or without www.
+        base = record_to_dict(sample_records()[0])
+        base.pop("url")
+        for url, expected in (
+            ("https://www.promptbase.com/bundle/x", "bundle"),
+            ("https://evil.example/bundle/x", "prompt"),
+            ("https://promptbase.com.evil.example/app/x", "prompt"),
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(record_from_dict({**base, "url": url}).item_type, expected)
+        with self.assertRaisesRegex(ValueError, "unknown item_type 'Bundle'"):
+            record_from_dict({**base, "item_type": "Bundle"})
+
     def test_missing_or_unreadable_values_are_errors_not_defaults(self):
         good = record_to_dict(sample_records()[0])
         cases = {
