@@ -103,6 +103,12 @@ class LoadConfigTests(unittest.TestCase):
                 with self.subTest(label), self.assertRaisesRegex(ConfigError, message):
                     load_config(path)
 
+    def test_deeply_nested_json_is_a_config_error_not_a_traceback(self):
+        with TemporaryDirectory() as directory:
+            path = write_config(directory, "deep.json", "[" * 200_000)
+            with self.assertRaisesRegex(ConfigError, "could not read .*deep.json"):
+                load_config(path)
+
     @unittest.skipUnless(HAS_TOML, "needs Python 3.11+")
     def test_invalid_toml_is_reported_with_the_path(self):
         with TemporaryDirectory() as directory:

@@ -1090,7 +1090,10 @@ def _select(connection: sqlite3.Connection, args: argparse.Namespace) -> list[Sn
     snapshots = list_snapshots(connection, None, args.item_type)
     profiles = sorted({snap.profile for snap in snapshots})
     if args.profile:
-        wanted = parse_profile_input(args.profile)
+        try:
+            wanted = parse_profile_input(args.profile)
+        except PromptBaseError as exc:
+            raise HistoryError(f"invalid --profile: {exc}") from None
         if wanted not in profiles:
             raise HistoryError(f"no snapshots of {ITEM_TYPE_PLURALS[args.item_type]} for @{wanted}")
         return [snap for snap in snapshots if snap.profile == wanted]

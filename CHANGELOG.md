@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A TLS connection cut while reading a response is retried like other dropped
+  connections instead of failing after one attempt.
+- `pb-convert` no longer truncates a fractional JSON count (`12.7` became `12`), and
+  refuses `Infinity`/`NaN` values instead of crashing or writing invalid JSON.
+- `pb-history report --profile` with an invalid profile reports an error instead of
+  a traceback.
+- A deeply nested `--config` file is reported as a configuration error, not a traceback.
+
 ## 0.15.0 - 2026-10-01
 
 ### Changed

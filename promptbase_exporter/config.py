@@ -43,7 +43,7 @@ def load_config(path: Path) -> dict[str, Any]:
             data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
         else:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError) as exc:  # tomllib.TOMLDecodeError is a ValueError
+    except (OSError, ValueError, RecursionError) as exc:  # TOMLDecodeError is a ValueError
         if isinstance(exc, ConfigError):
             raise
         raise ConfigError(f"could not read {path}: {exc}") from exc

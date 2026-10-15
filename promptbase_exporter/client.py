@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import math
+import ssl
 import threading
 import time
 import urllib.error
@@ -250,6 +251,7 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
         except (
             TimeoutError,
             ConnectionError,
+            ssl.SSLError,  # a TLS stream cut while reading the body
             http.client.IncompleteRead,
             http.client.BadStatusLine,
             urllib.error.URLError,

@@ -2,6 +2,7 @@ import gzip
 import http.client
 import io
 import json
+import ssl
 import threading
 import time
 import unittest
@@ -460,6 +461,21 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result, [{"document": 4}])
         self.assertEqual(urlopen.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
+
+    def test_tls_stream_cut_while_reading_the_body_is_retried(self):
+        cut = self._response(b"")
+        cut.__enter__.return_value = MagicMock(
+            read=MagicMock(side_effect=ssl.SSLEOFError("EOF occurred in violation of protocol"))
+        )
+        with patch(
+            "promptbase_exporter.client.urllib.request.urlopen"
+        ) as urlopen, patch("promptbase_exporter.client.time.sleep"):
+            urlopen.side_effect = [cut, self._response(b'[{"document": 5}]')]
+
+            result = _open_json_with_retry(MagicMock())
+
+        self.assertEqual(result, [{"document": 5}])
+        self.assertEqual(urlopen.call_count, 2)
 
     def test_persistent_json_decode_error_exhausts_retries(self):
         with patch(

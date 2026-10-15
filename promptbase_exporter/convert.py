@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -262,6 +263,8 @@ def _text(value: Any) -> str:
 def _as_int(value: Any) -> int:
     if isinstance(value, bool):
         raise ValueError("expected a number, got a boolean")
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"expected a whole number, got {value!r}")
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -277,7 +280,7 @@ def _required_int(data: Mapping[str, Any], column: str) -> int:
         raise ValueError(f"{column} is empty")
     try:
         return _as_int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} is not a whole number: {value!r}") from exc
 
 
@@ -288,9 +291,12 @@ def _required_float(data: Mapping[str, Any], column: str) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{column} is not a number: {value!r}")
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{column} is not a number: {value!r}") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{column} is not a finite number: {value!r}")
+    return number
 
 
 def _optional_int(data: Mapping[str, Any], column: str) -> int | None:
@@ -299,7 +305,7 @@ def _optional_int(data: Mapping[str, Any], column: str) -> int | None:
         return None
     try:
         return _as_int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} is not a whole number: {value!r}") from exc
 
 
