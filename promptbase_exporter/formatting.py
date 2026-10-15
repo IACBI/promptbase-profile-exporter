@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .console import printable
-from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, PromptRecord, ms_to_iso_or_none
+from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord, ms_to_iso_or_none
 
 EXPORT_FORMATS = ("txt", "markdown", "json", "csv", "html", "ndjson")
 SORT_OPTIONS = (
@@ -190,12 +190,21 @@ def format_records_as_text(records: list[PromptRecord]) -> str:
     return "\n".join(parts)
 
 
+def markdown_heading(item_type: str) -> str:
+    """The first line of a Markdown catalog of ``item_type``."""
+    return f"# PromptBase {item_type.capitalize()} Export"
+
+
+# The only title line a Markdown catalog may carry before its first record.
+MARKDOWN_HEADINGS = frozenset(markdown_heading(item_type) for item_type in ITEM_TYPES)
+
+
 def format_records_as_markdown(
     records: list[PromptRecord],
     extra_fields: Sequence[str] = (),
     item_type: str = "prompt",
 ) -> str:
-    parts = [f"# PromptBase {item_type.capitalize()} Export", ""]
+    parts = [markdown_heading(item_type), ""]
     for index, record in enumerate(records, 1):
         description = record.description.replace("\r\n", "\n").replace("\r", "\n")
         parts.extend(
@@ -537,9 +546,10 @@ def format_records_as_html(
         )
         items.append(
             '<li class="prompt"><article>'
-            f'<h2><a href="{_h(record.url)}">{_h(_single_line(record.title))}</a></h2>'
-            f'<p class="facts">{_h(facts)}</p>'
-            f'<div class="description">{_h(description)}</div>'
+            f'<h2><a href="{escape_html(record.url)}">'
+            f"{escape_html(_single_line(record.title))}</a></h2>"
+            f'<p class="facts">{escape_html(facts)}</p>'
+            f'<div class="description">{escape_html(description)}</div>'
             "</article></li>"
         )
     data = json.dumps(rows, ensure_ascii=False).replace("<", "\\u003c")
@@ -597,8 +607,9 @@ def load_html_catalog_data(text: str) -> list[object]:
     return data
 
 
-def _h(value: str) -> str:
-    return html.escape(value, quote=True)
+def escape_html(value: object) -> str:
+    """``value`` as text that is safe in HTML, quotes included, for text and attributes."""
+    return html.escape(str(value), quote=True)
 
 
 def format_records(
@@ -659,6 +670,24 @@ def expected_timestamped_filename(
     return f"{_safe_username(username)}_{mode}_{kind}_{timestamp}.{extension}"
 
 
+def export_path(
+    output_dir: Path,
+    username: str,
+    mode: str,
+    export_format: str,
+    timestamp: str | None = None,
+    item_type: str = "prompt",
+) -> Path:
+    """Where the directory export of ``mode`` goes. Nothing is created or written."""
+    return output_dir / expected_timestamped_filename(
+        username,
+        mode,
+        export_format,
+        timestamp,
+        item_type,
+    )
+
+
 def write_export(
     output_dir: Path,
     username: str,
@@ -672,14 +701,7 @@ def write_export(
     extra_fields: Sequence[str] = (),
     item_type: str = "prompt",
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / expected_timestamped_filename(
-        username,
-        mode,
-        export_format,
-        timestamp,
-        item_type,
-    )
+    output_path = export_path(output_dir, username, mode, export_format, timestamp, item_type)
     write_export_to_path(
         output_path,
         records,
@@ -804,8 +826,10 @@ def infer_format_from_path(path: Path) -> str:
 # the diff reader (diffing.load_catalog) parses with it, so the two always agree.
 # Limitation: TXT has no way to escape a description. A description holding a line such
 # as "2." then "Title: x" then "Description:" reads as an extra record, so the count is
-# too high and post-write validation rejects the export. Fixing that needs an escape in
-# the TXT format itself, which would change every TXT file.
+# too high and post-write validation rejects the export. A description whose tail is a
+# line "9." then "Title: z" is cut short instead: the reader drops that tail, and
+# count_records_in_text refuses the text the reader leaves over. Fixing either needs an
+# escape in the TXT format itself, which would change every TXT file.
 # The gap after "Title:" is spaces and tabs only: with \s* a blank title ("Title: " followed
 # by "Description:") let the lazy title run on into the next record.
 _TXT_HEADER = re.compile(r"(?m)^\d+\.\s*\nTitle:[ \t]*(?P<title>(?s:.*?))\nDescription:\n")
@@ -815,13 +839,27 @@ _TXT_BOUNDARY = re.compile(r"(?m)^\d+\.\s*\nTitle:")
 
 def parse_txt_catalog(text: str) -> list[dict[str, str]]:
     """The records of a TXT catalog as ``title`` and ``description`` dicts."""
+    return scan_txt_catalog(text)[0]
+
+
+def scan_txt_catalog(text: str) -> tuple[list[dict[str, str]], list[tuple[int, str]]]:
+    """The records of a TXT catalog, and the non-blank text that no record holds.
+
+    The second item lists ``(offset, text)`` pairs for the stretches the reader skips:
+    text before the first record, and text after a record boundary that no record
+    header starts. A record's body runs from its ``Description:`` line to the next
+    numbered ``Title:`` line, so text there is part of that record and never listed.
+    """
     # Find the header, then the next boundary, and slice between them; a lazy
     # description that tested for the next record at every character was three
     # times slower. Boundary matches cannot overlap (one holds no line that starts
     # with a digit), so searching from each header finds the same ones.
     records = []
+    skipped: list[tuple[int, str]] = []
     position = 0
+    cursor = 0  # where the last record's span ended
     while (header := _TXT_HEADER.search(text, position)) is not None:
+        skipped.append((cursor, text[cursor : header.start()]))
         boundary = _TXT_BOUNDARY.search(text, header.end())
         position = boundary.start() if boundary is not None else len(text)
         records.append(
@@ -830,17 +868,42 @@ def parse_txt_catalog(text: str) -> list[dict[str, str]]:
                 "description": text[header.end() : position].strip(),
             }
         )
-    return records
+        cursor = position
+    skipped.append((cursor, text[cursor:]))
+    return records, [(start, piece) for start, piece in skipped if piece.strip()]
 
 
 def count_written_records(path: Path, export_format: str) -> int:
     return count_records_in_text(path.read_text(encoding="utf-8"), export_format)
 
 
+def count_rendered_records(content: str, export_format: str) -> int:
+    """How many records the file written from ``content`` would hold, counted before any write.
+
+    The write stores ``_encoded(content)``, and a reader opens the file as UTF-8 with
+    universal newlines; both are applied here, so the count is that of the file that
+    would be written, and matches :func:`count_written_records` on it.
+    """
+    as_read = _encoded(content).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return count_records_in_text(as_read, export_format)
+
+
 def count_records_in_text(text: str, export_format: str) -> int:
     """How many records a rendered catalog holds, read back the way a loader would."""
     if export_format == "txt":
-        return len(parse_txt_catalog(text))
+        records, skipped = scan_txt_catalog(text)
+        if skipped:
+            # The reader would drop this text, so the record count alone would pass a file
+            # that lost a description's tail. A description can hold such a line; TXT
+            # cannot quote it, so the export must fail here rather than be written.
+            offset, stray = skipped[0]
+            start = offset + len(stray) - len(stray.lstrip())
+            line = text.count("\n", 0, start) + 1
+            raise ValueError(
+                f"line {line} is not read back as part of a record "
+                "(TXT cannot hold a line of a number and a period followed by a Title: line)"
+            )
+        return len(records)
     if export_format == "markdown":
         # Only count headings that begin a real record (heading followed by a
         # blank line and the metadata block). A bare "## N." line inside a

@@ -1,12 +1,12 @@
 ---
 name: add-export-format
-description: Add a new output/export format (like YAML or HTML) to promptbase-profile-exporter, wiring up the writer, post-write validation, diff loading, extension inference, and docs. Use when adding or changing a supported export format.
+description: Add a new output/export format (like YAML or HTML) to promptbase-profile-exporter, wiring up the writer, pre-write validation, diff loading, extension inference, and docs. Use when adding or changing a supported export format.
 ---
 
 # Add an export format end to end
 
-Formats are referenced in several places that must agree, or post-write
-validation (`count_written_records`) will reject otherwise-valid exports. Use the
+Formats are referenced in several places that must agree, or pre-write
+validation (`count_records_in_text`) will reject otherwise-valid exports. Use the
 existing six formats (`txt`, `markdown`, `json`, `ndjson`, `csv`, `html`) as the
 template.
 
@@ -16,7 +16,7 @@ template.
 - Add its file extension to `FORMAT_EXTENSIONS` (e.g. `"yaml": "yaml"`).
 - Write `format_records_as_<name>(records) -> str` and dispatch it from
   `format_records()`.
-- Add a branch to `count_written_records()` that re-parses the written file and
+- Add a branch to `count_records_in_text()` that re-parses the rendered text and
   returns the record count. This must count exactly what the writer produced —
   `main()` compares it against the expected count and fails on mismatch. For
   text-like formats, mirror the careful regex approach used for `txt`/`markdown`.
@@ -39,8 +39,8 @@ template.
 
 ## 4. Tests (required)
 
-- `tests/test_formatting.py` — round-trip: write records, then
-  `count_written_records` returns the right count; assert key fields appear.
+- `tests/test_formatting.py` — round-trip: render records, then
+  `count_rendered_records` returns the right count; assert key fields appear.
 - `tests/test_diffing.py` — if you added a `load_catalog` branch, cover it.
 - Keep coverage >= 85%.
 

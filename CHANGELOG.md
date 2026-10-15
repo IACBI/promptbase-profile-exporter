@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- An export is rendered and checked before anything is written. A check that fails (for
+  example a TXT description that holds a record-header line) leaves existing exports and
+  the `--update-file` catalog untouched, in the CLI and the web UI; before, the broken file
+  replaced them and the command then failed. `--layout files` still checks after writing.
+- `--update-file` also refuses a TXT or Markdown catalog with stray text outside its
+  records, which a rewrite would drop. A TXT description that ended in a record-header-like
+  line used to be truncated silently; that export is now refused.
+
 - `--update-file` refuses to rewrite a catalog that holds entries which are not records,
   instead of dropping them silently. `--compare` still skips them.
 - A profile given as a full URL must be on promptbase.com or www.promptbase.com; a URL on
@@ -20,6 +28,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The web UI no longer prints a traceback when a client disconnects mid-download.
 - A TXT export whose catalog has a blank title no longer merges that record into the next
   one when it is read back. A description that itself contains a TXT record header is still
   refused by validation (see docs/cli.md).

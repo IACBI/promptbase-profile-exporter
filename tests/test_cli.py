@@ -15,7 +15,13 @@ from promptbase_exporter.cli import (
     parse_datetime_ms,
 )
 from promptbase_exporter.client import PromptBaseError
-from promptbase_exporter.formatting import write_export, write_export_to_path
+from promptbase_exporter.formatting import (
+    EXPORT_FORMATS,
+    FORMAT_EXTENSIONS,
+    format_records,
+    write_export,
+    write_export_to_path,
+)
 from promptbase_exporter.models import Profile, PromptRecord
 from tests.scratch import use_scratch_working_directory
 
@@ -51,13 +57,13 @@ class CliTests(unittest.TestCase):
         with patch(
             "promptbase_exporter.cli.fetch_prompts",
             return_value=(Profile(username="acb", uid="uid-1"), records),
-        ), patch("promptbase_exporter.cli.write_export") as write_export:
+        ), patch("promptbase_exporter.cli.write_rendered") as write_rendered:
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = main(["@acb", "--dry-run"])
 
         self.assertEqual(exit_code, 0)
-        write_export.assert_not_called()
+        write_rendered.assert_not_called()
         self.assertIn("Planned outputs:", stdout.getvalue())
         self.assertIn("all: 1", stdout.getvalue())
         self.assertIn("text: 1", stdout.getvalue())
@@ -72,13 +78,13 @@ class CliTests(unittest.TestCase):
         with patch(
             "promptbase_exporter.cli.fetch_prompts",
             return_value=(Profile(username="acb", uid="uid-1"), records),
-        ), patch("promptbase_exporter.cli.write_export") as write_export:
+        ), patch("promptbase_exporter.cli.write_rendered") as write_rendered:
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = main(["@acb", "--list-domains"])
 
         self.assertEqual(exit_code, 0)
-        write_export.assert_not_called()
+        write_rendered.assert_not_called()
         self.assertIn("Domains:", stdout.getvalue())
         self.assertIn("text: 1", stdout.getvalue())
 
@@ -230,17 +236,16 @@ class CliTests(unittest.TestCase):
         with patch(
             "promptbase_exporter.cli.fetch_prompts",
             return_value=(Profile(username="acb", uid="uid-1"), records),
-        ), patch("promptbase_exporter.cli.write_export") as write_export, patch(
-            "promptbase_exporter.cli.count_written_records",
-            return_value=1,
-        ):
+        ), patch(
+            "promptbase_exporter.cli.format_records", wraps=format_records
+        ) as rendered, patch("promptbase_exporter.cli.write_rendered") as write_rendered:
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = main(["@acb", "--mode", "text-only"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(write_export.call_args.args[2], "text")
-        self.assertEqual([record.title for record in write_export.call_args.args[3]], ["A"])
+        self.assertEqual([record.title for record in rendered.call_args.args[0]], ["A"])
+        self.assertEqual(write_rendered.call_args.args[0].name, "acb_text_prompts.txt")
 
     def test_image_only_mode_alias_writes_image_export(self):
         records = [
@@ -250,17 +255,16 @@ class CliTests(unittest.TestCase):
         with patch(
             "promptbase_exporter.cli.fetch_prompts",
             return_value=(Profile(username="acb", uid="uid-1"), records),
-        ), patch("promptbase_exporter.cli.write_export") as write_export, patch(
-            "promptbase_exporter.cli.count_written_records",
-            return_value=1,
-        ):
+        ), patch(
+            "promptbase_exporter.cli.format_records", wraps=format_records
+        ) as rendered, patch("promptbase_exporter.cli.write_rendered") as write_rendered:
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = main(["@acb", "--mode", "image-only"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(write_export.call_args.args[2], "image")
-        self.assertEqual([record.title for record in write_export.call_args.args[3]], ["B"])
+        self.assertEqual([record.title for record in rendered.call_args.args[0]], ["B"])
+        self.assertEqual(write_rendered.call_args.args[0].name, "acb_image_prompts.txt")
 
     def test_version_argument_exits(self):
         stdout = io.StringIO()
@@ -282,7 +286,7 @@ class WriteFailureTests(unittest.TestCase):
 
     def test_directory_export_write_failure_reports_error(self):
         with self._fetch(), patch(
-            "promptbase_exporter.cli.write_export",
+            "promptbase_exporter.cli.write_rendered",
             side_effect=OSError("disk full"),
         ):
             stdout = io.StringIO()
@@ -298,7 +302,7 @@ class WriteFailureTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             output_path = Path(directory) / "catalog.json"
             with self._fetch(), patch(
-                "promptbase_exporter.cli.write_export_to_path",
+                "promptbase_exporter.cli.write_rendered",
                 side_effect=OSError("read-only file system"),
             ):
                 stdout = io.StringIO()
@@ -542,6 +546,89 @@ class UpdateFileStrictTests(unittest.TestCase):
         self.assertIn("- Removed: 1", stdout.getvalue())  # the one record was read
         self.assertTrue(unchanged)
 
+    def test_update_file_refuses_text_outside_records_and_keeps_the_file(self):
+        stray = {
+            "txt": "My notes\n1.\nTitle: Old\nDescription:\nOld description\n",
+            "md": (
+                "# PromptBase Prompt Export\n\nMy notes\n\n## 1. Old\n\n"
+                "- URL: https://promptbase.com/prompt/old\n\nOld description\n"
+            ),
+        }
+        for suffix, content in stray.items():
+            with self.subTest(format=suffix), TemporaryDirectory() as directory:
+                catalog = Path(directory) / f"catalog.{suffix}"
+                catalog.write_text(content, encoding="utf-8")
+                stderr = io.StringIO()
+                with self._fetch(), redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                    exit_code = main(["@acb", "--mode", "all", "--update-file", str(catalog)])
+
+                self.assertEqual(exit_code, EXIT_ERROR)
+                self.assertIn(f"refusing to rewrite {catalog}", stderr.getvalue())
+                self.assertIn("text outside any record: My notes", stderr.getvalue())
+                self.assertEqual(catalog.read_text(encoding="utf-8"), content)
+
+    def test_compare_skips_text_outside_records_without_a_rewrite(self):
+        content = "My notes\n1.\nTitle: Old\nDescription:\nOld description\n"
+        with self._fetch(), TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.txt"
+            catalog.write_text(content, encoding="utf-8")
+            stdout = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    ["@acb", "--mode", "all", "--compare", str(catalog),
+                     "--output-dir", str(Path(directory) / "out")]
+                )
+            unchanged = catalog.read_text(encoding="utf-8") == content
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("- Removed: 1", stdout.getvalue())
+        self.assertTrue(unchanged)
+
+    def test_a_catalog_the_tool_wrote_is_rewritten_unchanged_in_every_mode(self):
+        # Each tool-written TXT and Markdown catalog must pass the strict load, so that a
+        # rewrite with the same records leaves the same bytes behind.
+        records = [
+            PromptRecord("Text A", "Body\n\n- one\n- two", "text-a", "gpt", "text", 4, 1.0,
+                         item_type="prompt"),
+            PromptRecord("Image B", "A picture", "image-b", "midjourney", "image", 3, 0.0,
+                         item_type="prompt"),
+            PromptRecord("Text C", "Last", "text-c", "gpt", "text", 2, 2.5, item_type="prompt"),
+        ]
+        bundles = [
+            PromptRecord(title, body, slug, "bundle", domain, created, 1.0, item_type="bundle")
+            for title, body, slug, domain, created in (
+                ("Pack One", "First", "pack-one", "text", 3),
+                ("Pack Two", "Second", "pack-two", "image", 2),
+            )
+        ]
+        for item_list, item_type in ((records, "prompt"), (bundles, "bundle")):
+            for export_format in ("txt", "markdown"):
+                for mode in ("all", "text", "image"):
+                    with self.subTest(item_type=item_type, format=export_format, mode=mode):
+                        suffix = "txt" if export_format == "txt" else "md"
+                        with self._fetch_items(item_list), TemporaryDirectory() as tmp:
+                            catalog = Path(tmp) / f"catalog.{suffix}"
+                            first, _, _ = _quiet_main(
+                                ["@acb", "--mode", mode, "--format", export_format,
+                                 "--item-type", item_type, "--output-file", str(catalog)]
+                            )
+                            written = catalog.read_bytes()
+                            second, _, stderr = _quiet_main(
+                                ["@acb", "--mode", mode, "--item-type", item_type,
+                                 "--update-file", str(catalog)]
+                            )
+                            rewritten = catalog.read_bytes()
+
+                        self.assertEqual(first, 0)
+                        self.assertEqual(second, 0, stderr)
+                        self.assertEqual(rewritten, written)
+
+    def _fetch_items(self, records):
+        return patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="uid-1"), records),
+        )
+
 
 class TxtHeaderLimitTests(unittest.TestCase):
     """A TXT description that looks like a record header cannot be written unambiguously,
@@ -564,6 +651,134 @@ class TxtHeaderLimitTests(unittest.TestCase):
 
         self.assertEqual(exit_code, EXIT_ERROR)
         self.assertIn("validation failed", stderr.getvalue())
+
+
+class ValidateBeforeReplaceTests(unittest.TestCase):
+    """A single-file export is checked as rendered text before the destination is
+    touched: a catalog that would fail its read-back check must not replace the file."""
+
+    # TXT and Markdown cannot quote a description, so these render more records than
+    # the one selected, and the check refuses them.
+    BAD_TXT = PromptRecord(
+        "New", "Intro.\n2.\nTitle: x\nDescription:\nmore", "new", "gpt", "text", 1, 0.0
+    )
+    BAD_MARKDOWN = PromptRecord(
+        "New", "Intro.\n\n## 9. Fake\n\n- URL: https://example.com/x", "new", "gpt", "text", 1, 0.0
+    )
+
+    def _run(self, argv, bad_record):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="uid-1"), [bad_record]),
+        ), redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(argv)
+        return exit_code, stderr.getvalue()
+
+    def test_failing_update_file_keeps_the_old_catalog_bytes(self):
+        cases = (
+            ("txt", "catalog.txt", self.BAD_TXT),
+            ("markdown", "catalog.md", self.BAD_MARKDOWN),
+        )
+        for export_format, name, bad_record in cases:
+            with self.subTest(format=export_format), TemporaryDirectory() as directory:
+                catalog = Path(directory) / name
+                original = format_records([record("Old", "text", "gpt")], export_format).encode()
+                catalog.write_bytes(original)
+                exit_code, stderr = self._run(
+                    ["@acb", "--mode", "all", "--update-file", str(catalog)], bad_record
+                )
+
+                self.assertEqual(exit_code, EXIT_ERROR)
+                self.assertIn(f"validation failed for {catalog}", stderr)
+                self.assertEqual(catalog.read_bytes(), original)
+                self.assertEqual([path.name for path in Path(directory).iterdir()], [name])
+
+    def test_failing_output_file_keeps_the_existing_file_bytes(self):
+        original = b"keep me\n"
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "catalog.txt"
+            target.write_bytes(original)
+            exit_code, stderr = self._run(
+                ["@acb", "--mode", "all", "--output-file", str(target), "--overwrite"],
+                self.BAD_TXT,
+            )
+
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("validation failed", stderr)
+            self.assertEqual(target.read_bytes(), original)
+            self.assertEqual([path.name for path in Path(directory).iterdir()], ["catalog.txt"])
+
+    def test_a_txt_tail_the_reader_would_drop_is_refused_before_the_write(self):
+        tail = PromptRecord("New", "desc\n9.\nTitle: z", "new", "gpt", "text", 1, 0.0)
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "catalog.txt"
+            exit_code, stderr = self._run(
+                ["@acb", "--mode", "all", "--output-file", str(target)], tail
+            )
+
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("not read back as part of a record", stderr)
+            self.assertFalse(target.exists())
+
+    def test_failing_output_file_writes_nothing_when_the_file_is_new(self):
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "catalog.txt"
+            exit_code, stderr = self._run(
+                ["@acb", "--mode", "all", "--output-file", str(target)], self.BAD_TXT
+            )
+
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("validation failed", stderr)
+            self.assertFalse(target.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_passing_single_file_export_writes_the_same_bytes_as_before(self):
+        # Newest first, so the selection order equals the order written directly.
+        records = [
+            record("Third", "text", "gpt", created=3),
+            record("Second", "image", "midjourney", created=2),
+            record("First", "text", "claude", created=1),
+        ]
+        with TemporaryDirectory() as directory:
+            for export_format in EXPORT_FORMATS:
+                with self.subTest(format=export_format), patch(
+                    "promptbase_exporter.cli.fetch_prompts",
+                    return_value=(Profile(username="acb", uid="uid-1"), records),
+                ):
+                    extension = FORMAT_EXTENSIONS[export_format]
+                    target = Path(directory) / f"out.{extension}"
+                    exit_code, _, _ = _quiet_main(
+                        ["@acb", "--mode", "all", "--format", export_format,
+                         "--output-file", str(target)]
+                    )
+                    reference = Path(directory) / f"reference.{extension}"
+                    write_export_to_path(reference, records, export_format, overwrite=True)
+
+                    self.assertEqual(exit_code, 0)
+                    self.assertEqual(target.read_bytes(), reference.read_bytes())
+                    target.unlink()
+
+    def test_passing_update_file_rewrite_writes_the_same_bytes_as_before(self):
+        records = [
+            record("Second", "text", "gpt", created=2),
+            record("First", "text", "gpt", created=1),
+        ]
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.txt"
+            catalog.write_text("1.\nTitle: Old\nDescription:\nOld\n", encoding="utf-8")
+            with patch(
+                "promptbase_exporter.cli.fetch_prompts",
+                return_value=(Profile(username="acb", uid="uid-1"), records),
+            ):
+                exit_code, _, _ = _quiet_main(
+                    ["@acb", "--mode", "all", "--update-file", str(catalog)]
+                )
+            reference = Path(directory) / "reference.txt"
+            write_export_to_path(reference, records, "txt", overwrite=True)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(catalog.read_bytes(), reference.read_bytes())
 
 
 class NewOptionValidationTests(unittest.TestCase):
@@ -838,7 +1053,7 @@ class NewOptionBehaviourTests(unittest.TestCase):
             "promptbase_exporter.cli.fetch_prompts",
             return_value=(Profile(username="acb", uid="u"), [record("A", "text", "gpt")]),
         ), patch(
-            "promptbase_exporter.cli.count_written_records",
+            "promptbase_exporter.cli.count_rendered_records",
             side_effect=ValueError("HTML catalog lists 0 prompts but embeds 1 records"),
         ):
             exit_code, _, stderr = _quiet_main(["@acb", "-o", directory, "--mode", "all"])
@@ -846,6 +1061,71 @@ class NewOptionBehaviourTests(unittest.TestCase):
         self.assertEqual(exit_code, EXIT_ERROR)
         self.assertIn("validation failed", stderr)
         self.assertIn("embeds 1 records", stderr)
+
+
+class DirectoryExportCheckTests(unittest.TestCase):
+    """A directory export is checked before any of its files is written."""
+
+    # Its TXT rendering holds a line "2." then "Title:", which reads back as a second record.
+    SMUGGLED = "Intro\n2.\nTitle: Injected\nDescription:\nBody"
+
+    def _records(self):
+        return [
+            PromptRecord("A", self.SMUGGLED, "a", "gpt", "text", 2, 0.0),
+            PromptRecord("B", "B description", "b", "chatgpt-image", "image", 1, 0.0),
+        ]
+
+    def _run_split(self, directory):
+        with patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="uid-1"), self._records()),
+        ):
+            return _quiet_main(["@acb", "-o", str(directory), "--mode", "split"])
+
+    def test_failed_check_leaves_existing_exports_untouched(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = {mode: f"previous {mode}\n" for mode in ("all", "text")}
+            for mode, text in old.items():
+                (root / f"acb_{mode}_prompts.txt").write_text(text, encoding="utf-8")
+
+            exit_code, _, stderr = self._run_split(root)
+
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertIn("validation failed", stderr)
+            for mode, text in old.items():
+                kept = (root / f"acb_{mode}_prompts.txt").read_text(encoding="utf-8")
+                self.assertEqual(kept, text)
+            # The image export passes its own check, but a failure in another mode
+            # stops every write, so it is not created either.
+            self.assertFalse((root / "acb_image_prompts.txt").exists())
+
+    def test_failed_check_creates_no_output_directory(self):
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "not-yet"
+
+            exit_code, _, _ = self._run_split(target)
+
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertFalse(target.exists())
+
+    def test_successful_export_bytes_match_the_renderer(self):
+        plain = [PromptRecord("Plain", "Plain description", "plain", "gpt", "text", 1, 0.0)]
+        for export_format in ("txt", "markdown", "json", "csv", "html"):
+            with self.subTest(export_format=export_format), TemporaryDirectory() as directory:
+                with patch(
+                    "promptbase_exporter.cli.fetch_prompts",
+                    return_value=(Profile(username="acb", uid="uid-1"), plain),
+                ):
+                    exit_code, _, _ = _quiet_main(
+                        ["@acb", "-o", directory, "--mode", "all", "--format", export_format]
+                    )
+                written = Path(directory) / f"acb_all_prompts.{FORMAT_EXTENSIONS[export_format]}"
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(
+                    written.read_bytes(),
+                    format_records(plain, export_format).encode("utf-8"),
+                )
 
 
 class DiffCommandTests(unittest.TestCase):

@@ -48,7 +48,8 @@ a CLI, a local web UI, and a composite GitHub Action.
 - `formatting.py` — filtering, sorting, the per-format writers (txt,
   markdown, json, ndjson, csv with optional `--csv-safe`, html), atomic writes,
   `parse_txt_catalog` (the TXT layout, shared with the diff reader),
-  and `count_written_records` (post-write validation).
+  and `count_records_in_text`/`count_rendered_records` (validation of the rendered
+  catalog *before* anything is written).
 - `pipeline.py` — `Selection` (filter → sort → limit), `split_modes`, and
   `without_description`, shared by `cli.py` and `web.py`. Add a new filter here once;
   `SurfacesAgreeTests` fails if the CLI and the web form drift apart.
