@@ -6,7 +6,6 @@ import ipaddress
 import math
 import os
 import re
-import shutil
 import socket
 import sys
 import threading
@@ -1179,7 +1178,17 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
-        shutil.copyfileobj(source, self.wfile)
+        # Never more than the advertised length, even if the file grew since fstat. If it
+        # shrank, the body is short, so the connection is dropped rather than left to
+        # misframe the next request.
+        remaining = size
+        while remaining > 0:
+            chunk = source.read(min(remaining, 64 * 1024))
+            if not chunk:
+                self.close_connection = True
+                return
+            self.wfile.write(chunk)
+            remaining -= len(chunk)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         """The server's own errors (501 for an unsupported method, 400 for a bad request

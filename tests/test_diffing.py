@@ -841,6 +841,8 @@ class ListingKindUnificationTests(unittest.TestCase):
 
     def test_the_item_type_column_wins_and_comes_back_as_written(self):
         self.assertEqual(listing_kind("bundle", "https://promptbase.com/app/x"), "bundle")
+        self.assertEqual(listing_kind("", "https://promptbase.com:443/bundle/x"), "bundle")
+        self.assertEqual(listing_kind("", "https://promptbase.com.evil.example/bundle/x"), "")
         self.assertEqual(listing_kind(" app ", None), "app")
         self.assertEqual(listing_kind("Bundle", None), "Bundle")
 

@@ -1,7 +1,6 @@
 import http.client
 import io
 import os
-import shutil
 import socket
 import threading
 import unittest
@@ -412,17 +411,33 @@ class DownloadTests(unittest.TestCase):
             handler.end_headers = MagicMock()
             handler.wfile = io.BytesIO()
             handler._send_text = MagicMock()
-            real_copy = shutil.copyfileobj
-            with patch.object(Path, "read_bytes", side_effect=AssertionError("read whole")), \
-                    patch("promptbase_exporter.web.shutil.copyfileobj",
-                          side_effect=real_copy) as copy:
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("read whole")):
                 handler._handle_download()
 
-        copy.assert_called_once()
         headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
         self.assertEqual(headers["Content-Length"], str(len(payload)))
         self.assertEqual(handler.wfile.getvalue(), payload)
         handler._send_text.assert_not_called()
+
+    def _stream(self, content: bytes, size: int):
+        handler = _make_handler({"Host": "127.0.0.1:8765"})
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = io.BytesIO()
+        handler.close_connection = False
+        handler._send_download(io.BytesIO(content), size, "x.json", "application/json")
+        return handler
+
+    def test_a_file_that_grew_is_cut_at_the_advertised_length(self):
+        handler = self._stream(b"0123456789" * 20_000, 150_000)
+        self.assertEqual(len(handler.wfile.getvalue()), 150_000)
+        self.assertFalse(handler.close_connection)
+
+    def test_a_file_that_shrank_drops_the_connection(self):
+        handler = self._stream(b"abc", 10)
+        self.assertEqual(handler.wfile.getvalue(), b"abc")
+        self.assertTrue(handler.close_connection)
 
     def test_a_file_that_cannot_be_opened_is_a_404(self):
         with _in_directory():
@@ -558,8 +573,8 @@ class DownloadHeaderTests(unittest.TestCase):
         self.assertEqual(handler.wfile.getvalue(), b"<p>x</p>")
 
     def test_content_length_is_the_size_the_caller_gives(self):
-        # The header is the length the caller promised, so it can never disagree with
-        # the bytes that are sent, whatever the source holds.
+        # The header is the length the caller promised, and no more than that many bytes
+        # are sent, whatever the source holds.
         handler = _make_handler({"Host": "127.0.0.1:8765"})
         handler.send_response = MagicMock()
         handler.send_header = MagicMock()
@@ -570,7 +585,7 @@ class DownloadHeaderTests(unittest.TestCase):
 
         headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
         self.assertEqual(headers["Content-Length"], "4")
-        self.assertEqual(handler.wfile.getvalue(), b"0123456789")
+        self.assertEqual(handler.wfile.getvalue(), b"0123")
 
 
 class NewWebOptionTests(unittest.TestCase):

@@ -28,7 +28,7 @@ COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
 # A listing URL: the kind is the path segment after the host, the slug the one after it.
 # Anchored to the PromptBase host, so another site's /prompt/ path is not a listing.
-_LISTING_URL_RE = re.compile(r"^https?://(?:www\.)?promptbase\.com/(prompt|bundle|app)/([^/?#]*)")
+_LISTING_URL_RE = re.compile(r"^https?://(?:www\.)?promptbase\.com(?::\d+)?/(prompt|bundle|app)/([^/?#]*)")
 # File extensions load_catalog can read.
 CATALOG_SUFFIXES = frozenset(
     {".json", ".ndjson", ".jsonl", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"}
