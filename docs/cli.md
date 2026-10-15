@@ -157,8 +157,8 @@ Creates clean, modern logo concepts.
 
 TXT has no way to quote a description, so a description containing a line that
 holds only a number and a period, followed by a `Title:` line, cannot be
-written in TXT. The export fails its check and reports it; use another format for
-that catalog.
+written in TXT. The export fails its check, writes nothing, and reports it; use
+another format for that catalog.
 
 **Markdown** is a catalog that renders well on GitHub, with the key metadata
 per prompt:
@@ -371,6 +371,10 @@ Sort keys: `newest` (default), `oldest`, `title`, `price`, `views`, `sales`,
 generated filename. The format is inferred from the extension unless you pass
 `--format`. An existing file is never replaced unless you add `--overwrite`.
 
+The export is checked before anything is written: if the file would not read back
+with the same number of records, the command exits with `1`, nothing is created,
+and an existing file keeps its bytes, even with `--overwrite`.
+
 ```bash
 pb @acb --mode text --output-file catalogs/text-prompts.csv
 ```
@@ -459,6 +463,20 @@ holds entries which are not records (for example a `null` or a number inside a J
 array, or a non-object line in NDJSON). It exits with code `1` and names the file
 before anything is written, so those entries are never silently dropped. `--compare`
 reads the same file without rewriting it and skips such entries.
+
+For TXT and Markdown the same refusal covers text that no record holds, which the
+reader would otherwise drop:
+
+- in TXT, text before the first record, or a `N.` line followed by a `Title:` line
+  that no `Description:` line completes, with everything after it;
+- in Markdown, any line before the first record other than the one title line the
+  writer puts there (`# PromptBase Prompt Export`, or the Bundle or App form).
+
+Text inside a record is never refused: a description, a TXT description's trailing
+lines, or a Markdown metadata line the reader does not use all belong to that
+record, and a rewrite replaces them with the current data. Only the fields that
+`--compare` checks are reported as changes, so a metadata line that is not one of
+those is replaced without a report.
 
 Add `--fail-on-diff` to exit with code `2` when the catalog changed, which lets a
 CI job flag catalog drift. A change means a prompt was added or removed, or its
@@ -633,12 +651,12 @@ pb @acb --quiet          # print nothing except errors
 | `--compare-csv-safe` | off | Read the CSV `--compare` / `--update-file` catalog as written with `--csv-safe`. Independent of `--csv-safe`. |
 | `--allow-missing-descriptions` | off | Write files even if some prompt descriptions are missing. |
 | `--timestamp-filenames` | off | Append `_YYYYMMDD_HHMMSS` to generated filenames. |
-| `--output-file` | none | Write a single catalog to this exact path. Needs `--mode all`, `text`, or `image`. |
+| `--output-file` | none | Write a single catalog to this exact path. Needs `--mode all`, `text`, or `image`. The file is checked before it is written, so a failed check leaves an existing file as it was. |
 | `--overwrite` | off | Allow `--output-file` to replace an existing file. |
 | `--compare` | none | Compare against an existing JSON, CSV, TXT, Markdown, or HTML catalog. |
 | `--diff-output` | none | Also write the comparison report to this path: JSON for `.json`, Markdown otherwise. Repeatable. Needs `--compare` or `--update-file`. |
 | `--fail-on-diff` | off | Exit with code `2` when the comparison finds changes. |
-| `--update-file` | none | Compare against an existing catalog and rewrite it in place. The rewrite is atomic, so a failed write leaves the old catalog intact. Refuses (exit 1) a catalog with entries that are not records. Needs `--mode all`, `text`, or `image`. |
+| `--update-file` | none | Compare against an existing catalog and rewrite it in place. The rewrite is atomic, so a failed write leaves the old catalog intact. Refuses (exit 1) a catalog with entries that are not records, or with TXT or Markdown text outside any record. Needs `--mode all`, `text`, or `image`. |
 | `--dry-run` | off | Fetch, filter, and validate without writing files. |
 | `--list-domains` | off | Print domain counts after filters, then exit. |
 | `--list-types` | off | Print PromptBase type counts after filters, then exit. |
@@ -665,13 +683,18 @@ GitHub Action exposes this through its `fail-on-diff` input and its
 
 ## Validation and safety checks
 
-Before and after writing, the exporter checks that:
+Before anything is written, the exporter checks that:
 
 - the profile exists and has approved prompts,
 - every selected prompt has a description, unless
   `--allow-missing-descriptions` is set,
 - the records are ordered newest to oldest as fetched, and
-- each written file contains exactly the expected number of records.
+- each file, as it will be written, reads back with exactly the expected number
+  of records.
+
+A failed check stops the run before any file of a catalog export is written, so
+an existing file with the same name keeps its contents. `--layout files` is the
+exception: it writes one file per prompt and counts the files after writing them.
 
 It also watches for changes to PromptBase's public data. If the fields it
 depends on disappear from most records, it stops with a schema-change error

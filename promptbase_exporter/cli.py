@@ -33,14 +33,15 @@ from .diffing import (
 from .formatting import (
     EXPORT_FORMATS,
     SORT_OPTIONS,
-    count_written_records,
+    count_rendered_records,
+    export_path,
     filter_records,
+    format_records,
     infer_format_from_path,
     parse_csv_option,
     parse_extra_fields,
     sorted_newest_to_oldest,
-    write_export,
-    write_export_to_path,
+    write_rendered,
 )
 from .layout import LAYOUTS, count_files, unique_names, write_markdown_files
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
@@ -474,15 +475,23 @@ def export_profile(
     if options.output_file:
         mode = modes[0]
         filtered = filter_records(selected_records, mode)
+        # Check the rendered text before the destination is touched: a file that
+        # fails the check must not replace the catalog that was there before.
+        content = format_records(
+            filtered,
+            options.export_format,
+            csv_safe=args.csv_safe,
+            extra_fields=options.extra_fields,
+            item_type=args.item_type,
+        )
+        written_count = validate_rendered(
+            content, options.output_file, options.export_format, len(filtered)
+        )
+        if written_count is None:
+            return EXIT_ERROR
         try:
-            output_path = write_export_to_path(
-                options.output_file,
-                filtered,
-                options.export_format,
-                overwrite=options.overwrite_output,
-                csv_safe=args.csv_safe,
-                extra_fields=options.extra_fields,
-                item_type=args.item_type,
+            output_path = write_rendered(
+                options.output_file, content, overwrite=options.overwrite_output
             )
         except FileExistsError as exc:
             print(f"error: {exc}. Use --overwrite to replace it.", file=sys.stderr)
@@ -493,43 +502,54 @@ def export_profile(
                 file=sys.stderr,
             )
             return EXIT_ERROR
-        written_count = validate_written(output_path, options.export_format, len(filtered))
-        if written_count is None:
-            return EXIT_ERROR
         if not args.quiet:
             print(f"Wrote {mode:>5}: {written_count:>4} {kind} -> {output_path}")
             print_summary(selected_records, all_count=len(records))
         return diff_exit_code
 
-    for mode in modes:
-        filtered = filter_records(selected_records, mode)
-        if options.layout == "files":
+    if options.layout == "files":
+        for mode in modes:
+            filtered = filter_records(selected_records, mode)
             written_count = write_files_for_mode(
                 output_dir, profile.username, mode, filtered, options, args, timestamp
             )
             if written_count is None:
                 return EXIT_ERROR
-            continue
-        try:
-            output_path = write_export(
+    else:
+        # Every mode is rendered and checked before any file is written, so a failed
+        # check in one mode leaves the existing exports of all modes as they were.
+        pending: list[tuple[str, Path, str, int]] = []
+        for mode in modes:
+            filtered = filter_records(selected_records, mode)
+            output_path = export_path(
                 output_dir,
                 profile.username,
                 mode,
+                options.export_format,
+                timestamp,
+                args.item_type,
+            )
+            content = format_records(
                 filtered,
                 options.export_format,
-                timestamp=timestamp,
                 csv_safe=args.csv_safe,
                 extra_fields=options.extra_fields,
                 item_type=args.item_type,
             )
-        except OSError as exc:
-            print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
-            return EXIT_ERROR
-        written_count = validate_written(output_path, options.export_format, len(filtered))
-        if written_count is None:
-            return EXIT_ERROR
-        if not args.quiet:
-            print(f"Wrote {mode:>5}: {written_count:>4} {kind} -> {output_path}")
+            written_count = validate_rendered(
+                content, output_path, options.export_format, len(filtered)
+            )
+            if written_count is None:
+                return EXIT_ERROR
+            pending.append((mode, output_path, content, written_count))
+        for mode, output_path, content, written_count in pending:
+            try:
+                write_rendered(output_path, content, overwrite=True)
+            except OSError as exc:
+                print(f"error: could not write export to {output_dir}: {exc}", file=sys.stderr)
+                return EXIT_ERROR
+            if not args.quiet:
+                print(f"Wrote {mode:>5}: {written_count:>4} {kind} -> {output_path}")
 
     if not args.quiet:
         print_summary(selected_records, all_count=len(records))
@@ -703,21 +723,34 @@ def normalize_options(args: argparse.Namespace) -> RunOptions:
     )
 
 
-def validate_written(output_path: Path, export_format: str, expected: int) -> int | None:
-    """Re-read a written export and return its record count, or None on mismatch."""
+def validate_rendered(
+    content: str,
+    output_path: Path,
+    export_format: str,
+    expected: int,
+) -> int | None:
+    """Count the records ``content`` would hold once written; None on mismatch.
+
+    Used before any export replaces a file, so a file that cannot be read back never
+    reaches the destination.
+    """
     try:
-        written_count = count_written_records(output_path, export_format)
-    except (OSError, ValueError) as exc:
+        rendered_count = count_rendered_records(content, export_format)
+    except ValueError as exc:
         print(f"error: validation failed for {output_path}: {exc}", file=sys.stderr)
         return None
-    if written_count != expected:
+    return _expect_count(output_path, rendered_count, expected)
+
+
+def _expect_count(output_path: Path, count: int, expected: int) -> int | None:
+    if count != expected:
         print(
             f"error: validation failed for {output_path}: "
-            f"expected {expected}, wrote {written_count}",
+            f"expected {expected}, wrote {count}",
             file=sys.stderr,
         )
         return None
-    return written_count
+    return count
 
 
 def handle_compare(

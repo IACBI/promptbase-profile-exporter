@@ -20,12 +20,16 @@ from promptbase_exporter.diffing import (
     write_diff_report,
 )
 from promptbase_exporter.formatting import (
+    FORMAT_EXTENSIONS,
     count_records_in_text,
+    format_records,
     format_records_as_text,
     parse_txt_catalog,
     write_export,
+    write_export_to_path,
 )
-from promptbase_exporter.models import PromptRecord
+from promptbase_exporter.layout import write_markdown_files
+from promptbase_exporter.models import ITEM_TYPES, PromptRecord
 
 
 def record(title, description, slug=None):
@@ -514,6 +518,119 @@ class StrictLoadTests(unittest.TestCase):
             self.assertEqual([r["title"] for r in load_catalog(path)], ["A", "B"])
             with self.assertRaisesRegex(ValueError, "entry 2 of the catalog is not a record"):
                 load_catalog(path, strict=True)
+
+
+class StrictTextCatalogTests(unittest.TestCase):
+    """Strict loading refuses the text a TXT or Markdown reader would drop, and accepts
+    every catalog the tool writes: an --update-file rewrite depends on both."""
+
+    def _load(self, name, text, *, strict):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(text, encoding="utf-8")
+            return load_catalog(path, strict=strict)
+
+    def test_text_before_the_first_txt_record_is_refused_only_when_strict(self):
+        text = "My notes\n1.\nTitle: A\nDescription:\nx\n"
+        self.assertEqual([r["title"] for r in self._load("c.txt", text, strict=False)], ["A"])
+        with self.assertRaisesRegex(ValueError, "line 1 is text outside any record: My notes"):
+            self._load("c.txt", text, strict=True)
+
+    def test_a_txt_header_the_reader_skips_is_refused_only_when_strict(self):
+        # "Description: oops" is not a header, so the reader drops record B and what follows.
+        text = "1.\nTitle: A\nDescription:\nx\n2.\nTitle: B\nDescription: oops\ny\n"
+        self.assertEqual([r["title"] for r in self._load("c.txt", text, strict=False)], ["A"])
+        with self.assertRaisesRegex(ValueError, "line 5 is text outside any record"):
+            self._load("c.txt", text, strict=True)
+
+    def test_blank_lines_and_an_empty_txt_catalog_are_not_stray(self):
+        self.assertEqual(self._load("c.txt", "\n  \n", strict=True), [])
+        self.assertEqual(self._load("c.txt", "", strict=True), [])
+        text = "\n1.\nTitle: A\nDescription:\nx\n\n\n"
+        self.assertEqual([r["title"] for r in self._load("c.txt", text, strict=True)], ["A"])
+
+    def test_markdown_text_before_the_first_record_is_refused_only_when_strict(self):
+        text = (
+            "# Notes\n\n# PromptBase Prompt Export\n\n## 1. A\n\n"
+            "- URL: https://promptbase.com/prompt/a\n\nbody\n"
+        )
+        self.assertEqual([r["title"] for r in self._load("c.md", text, strict=False)], ["A"])
+        with self.assertRaisesRegex(ValueError, "line 1 is text outside any record: # Notes"):
+            self._load("c.md", text, strict=True)
+
+    def test_a_second_markdown_title_line_is_stray(self):
+        text = (
+            "# PromptBase Prompt Export\n# PromptBase Prompt Export\n\n"
+            "## 1. A\n\n- URL: https://promptbase.com/prompt/a\n"
+        )
+        with self.assertRaisesRegex(ValueError, "line 2 is text outside any record"):
+            self._load("c.md", text, strict=True)
+
+    def test_text_inside_a_record_is_never_stray(self):
+        text = (
+            "## 1. A\n\n- URL: https://promptbase.com/prompt/a\n\n"
+            "Body\n\n## Not a record\n\nmore\n"
+        )
+        self.assertEqual(len(self._load("c.md", text, strict=True)), 1)
+
+    def test_every_txt_and_markdown_export_loads_strictly_and_reads_back(self):
+        records = [
+            PromptRecord("Plain", "Body", "plain", "gpt", "text", 3, 1.0,
+                         tags=("a", "b"), engine="v2"),
+            PromptRecord("Empty description", "", "empty", "gpt", "text", 2, 0.0),
+            PromptRecord("Line one\nLine two", "- bullet\n- item\n\n# Heading\n\nEnd",
+                         "multi", "midjourney", "image", 1, 2.5),
+        ]
+        expected_titles = ["Plain", "Empty description", "Line one Line two"]
+        with TemporaryDirectory() as directory:
+            for item_type in ITEM_TYPES:
+                for export_format in ("txt", "markdown"):
+                    with self.subTest(item_type=item_type, format=export_format):
+                        extension = FORMAT_EXTENSIONS[export_format]
+                        path = write_export_to_path(
+                            Path(directory) / f"{item_type}.{extension}",
+                            records,
+                            export_format,
+                            overwrite=True,
+                            extra_fields=("tags", "engine") if export_format == "markdown" else (),
+                            item_type=item_type,
+                        )
+                        loaded = load_catalog(path, strict=True)
+                        self.assertEqual([r["title"] for r in loaded], expected_titles)
+                        self.assertEqual(loaded[0]["description"], "Body")
+                        self.assertEqual(loaded[1]["description"], "")
+                        self.assertEqual(loaded[2]["description"], records[2].description)
+
+    def test_a_markdown_catalog_saved_with_a_byte_order_mark_loads_strictly(self):
+        # Notepad saves UTF-8 with a mark; the title line it precedes is still the writer's.
+        text = "﻿" + format_records(
+            [PromptRecord("A", "Body", "a", "gpt", "text", 1, 0.0)], "markdown"
+        )
+        loaded = self._load("c.md", text, strict=True)
+        self.assertEqual([r["title"] for r in loaded], ["A"])
+
+    def test_a_txt_catalog_with_a_byte_order_mark_is_refused_when_strict(self):
+        # The reader does not match the first header after the mark, so its record would be
+        # dropped; strict loading says why instead.
+        text = "﻿1.\nTitle: A\nDescription:\nx\n"
+        with self.assertRaisesRegex(ValueError, "byte order mark is not skipped"):
+            self._load("c.txt", text, strict=True)
+
+    def test_an_empty_export_loads_strictly(self):
+        with TemporaryDirectory() as directory:
+            for export_format in ("txt", "markdown"):
+                path = Path(directory) / f"empty.{FORMAT_EXTENSIONS[export_format]}"
+                path.write_text(format_records([], export_format), encoding="utf-8")
+                self.assertEqual(load_catalog(path, strict=True), [])
+
+    def test_a_per_prompt_file_from_the_files_layout_is_refused_when_strict(self):
+        # Not a catalog, so a rewrite would replace its front matter and body with a list.
+        record = PromptRecord("A", "Body", "a", "gpt", "text", 1, 0.0)
+        with TemporaryDirectory() as directory:
+            folder = write_markdown_files(Path(directory), "acb", "all", [record])
+            (only,) = folder.iterdir()
+            with self.assertRaisesRegex(ValueError, "line 1 is text outside any record"):
+                load_catalog(only, strict=True)
 
 
 class MalformedCatalogTests(unittest.TestCase):

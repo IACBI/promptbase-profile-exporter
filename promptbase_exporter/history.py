@@ -10,7 +10,6 @@ SQLite file (the standard library's ``sqlite3``), so a scheduled
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import math
 import re
@@ -27,6 +26,7 @@ from typing import Any
 from . import __version__
 from .client import PromptBaseError, fetch_prompts, parse_profile_input
 from .console import make_output_safe, printable
+from .formatting import escape_html
 from .formatting import escape_markdown as _cell
 from .models import ITEM_TYPE_PLURALS, ITEM_TYPES, PromptRecord
 
@@ -692,23 +692,25 @@ def comparison_to_dict(
     }
 
 
+def _h(value: object) -> str:
+    """HTML-escaped text for a value from PromptBase, made one line of plain text first."""
+    return escape_html(printable(value))
+
+
 def render_comparison_html(
     summaries: Sequence[ProfileSummary], item_type: str, days: float | None = None,
 ) -> str:
-    def h(value: object) -> str:
-        return html.escape(printable(value))
-
     rows = _comparison_rows(summaries, days)
     title = f"PromptBase profiles compared ({ITEM_TYPE_PLURALS[item_type]})"
-    head = "".join(f"<th>{h(cell)}</th>" for cell in rows[0])
+    head = "".join(f"<th>{_h(cell)}</th>" for cell in rows[0])
     body = "".join(
-        "<tr>" + "".join(f"<td>{h(cell)}</td>" for cell in row) + "</tr>" for row in rows[1:]
+        "<tr>" + "".join(f"<td>{_h(cell)}</td>" for cell in row) + "</tr>" for row in rows[1:]
     )
     return (
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        f"<title>{h(title)}</title><style>{_PAGE_STYLE}</style></head><body>"
-        f"<h1>{h(title)}</h1><p>Each profile's latest snapshot.</p>"
+        f"<title>{_h(title)}</title><style>{_PAGE_STYLE}</style></head><body>"
+        f"<h1>{_h(title)}</h1><p>Each profile's latest snapshot.</p>"
         f'<div class="scroll"><table><thead><tr>{head}</tr></thead>'
         f"<tbody>{body}</tbody></table></div></body></html>\n"
     )
@@ -860,7 +862,7 @@ def _chart(series: list[tuple[datetime, dict[str, int]]], counter: str) -> str:
         f"{pad + index * step:.1f},{height - pad - (value - low) / span * (height - 2 * pad):.1f}"
         for index, value in enumerate(values)
     )
-    label = html.escape(f"{counter}: {values[0]} to {values[-1]} over {len(values)} snapshots")
+    label = escape_html(f"{counter}: {values[0]} to {values[-1]} over {len(values)} snapshots")
     return (
         f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{label}" class="chart">'
         f'<polyline points="{points}" fill="none" stroke="currentColor" stroke-width="2"/></svg>'
@@ -885,9 +887,6 @@ _PAGE_STYLE = (
 
 
 def render_html(report: Report) -> str:
-    def h(value: object) -> str:
-        return html.escape(printable(value))
-
     kind = ITEM_TYPE_PLURALS[report.item_type]
 
     def rows(cells: list[list[str]]) -> str:
@@ -897,54 +896,58 @@ def render_html(report: Report) -> str:
 
     def listed(items: Sequence[Observation]) -> str:
         return "".join(
-            f"<li>{h(o.title)} <code>{h(o.slug)}</code></li>" for o in items
+            f"<li>{_h(o.title)} <code>{_h(o.slug)}</code></li>" for o in items
         ) or "<li>None.</li>"
 
     totals = rows([
-        [h(key), h(_number(round(before, 2))), h(_number(round(after, 2))),
-         h(_delta(round(before, 2), round(after, 2)))]
+        [_h(key), _h(_number(round(before, 2))), _h(_number(round(after, 2))),
+         _h(_delta(round(before, 2), round(after, 2)))]
         for key, (before, after) in report.totals.items()
     ])
     movers = rows([
-        [f"{h(m.title)} <code>{h(m.slug)}</code>", *(h(f"{m.change[c]:+d}") for c in COUNTERS),
-         h(_number(m.price))]
+        [f"{_h(m.title)} <code>{_h(m.slug)}</code>", *(_h(f"{m.change[c]:+d}") for c in COUNTERS),
+         _h(_number(m.price))]
         for m in report.movers
-    ]) or f'<tr><td colspan="{len(COUNTERS) + 2}">No {h(kind)} gained {h(report.metric)}.</td></tr>'
+    ]) or (
+        f'<tr><td colspan="{len(COUNTERS) + 2}">'
+        f"No {_h(kind)} gained {_h(report.metric)}.</td></tr>"
+    )
     alerts = ""
     if report.alert_rules:
         alerts = f"<h2>Alerts ({len(report.alerts)})</h2><ul>" + ("".join(
-            f"<li><code>{h(hit.rule)}</code>: {h(hit.title)} <code>{h(hit.slug)}</code>: "
-            f"{h(hit.detail)}</li>" for hit in report.alerts
-        ) or f"<li>None of the rules fired ({h(', '.join(report.alert_rules))}).</li>") + "</ul>"
+            f"<li><code>{_h(hit.rule)}</code>: {_h(hit.title)} <code>{_h(hit.slug)}</code>: "
+            f"{_h(hit.detail)}</li>" for hit in report.alerts
+        ) or f"<li>None of the rules fired ({_h(', '.join(report.alert_rules))}).</li>") + "</ul>"
     charts = "".join(
-        f"<figure><figcaption>{h(c)}{h(_span(report.series, c))}</figcaption>"
+        f"<figure><figcaption>{_h(c)}{_h(_span(report.series, c))}</figcaption>"
         f"{_chart(report.series, c)}</figure>"
         for c in ("views", "sales", "favorites")
     )
     return (
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        f"<title>PromptBase trends: {h(_heading(report))}</title><style>"
+        f"<title>PromptBase trends: {_h(_heading(report))}</title><style>"
         f"{_PAGE_STYLE}"
         "</style></head><body>"
-        f"<h1>PromptBase trends: {h(_heading(report))}</h1>"
-        f"<p>From snapshot {report.baseline.id} ({h(report.baseline.taken_at.isoformat())}) to "
-        f"snapshot {report.latest.id} ({h(report.latest.taken_at.isoformat())}): "
-        f"{h(describe_duration(report.days))}.</p>"
+        f"<h1>PromptBase trends: {_h(_heading(report))}</h1>"
+        f"<p>From snapshot {report.baseline.id} ({_h(report.baseline.taken_at.isoformat())}) to "
+        f"snapshot {report.latest.id} ({_h(report.latest.taken_at.isoformat())}): "
+        f"{_h(describe_duration(report.days))}.</p>"
         f"{alerts}{charts}"
         '<div class="scroll"><table><thead><tr><th>Measure</th><th>Before</th><th>Now</th>'
         f"<th>Change</th></tr></thead><tbody>{totals}</tbody></table></div>"
-        f"<h2>Top movers by {h(report.metric)}</h2>"
-        f'<div class="scroll"><table><thead><tr><th>{h(kind)}</th>'
-        + "".join(f"<th>{h(c)}</th>" for c in COUNTERS) + "<th>price</th></tr></thead>"
+        f"<h2>Top movers by {_h(report.metric)}</h2>"
+        f'<div class="scroll"><table><thead><tr><th>{_h(kind)}</th>'
+        + "".join(f"<th>{_h(c)}</th>" for c in COUNTERS) + "<th>price</th></tr></thead>"
         f"<tbody>{movers}</tbody></table></div>"
-        f"<h2>New {h(kind)} ({len(report.new)})</h2><ul>{listed(report.new)}</ul>"
-        f"<h2>Removed {h(kind)} ({len(report.removed)})</h2><ul>{listed(report.removed)}</ul>"
+        f"<h2>New {_h(kind)} ({len(report.new)})</h2><ul>{listed(report.new)}</ul>"
+        f"<h2>Removed {_h(kind)} ({len(report.removed)})</h2><ul>{listed(report.removed)}</ul>"
         f"<h2>Price changes ({len(report.price_changes)})</h2><ul>"
         + ("".join(
-            f"<li>{h(after.title)} <code>{h(after.slug)}</code>: price {h(_number(before.price))} "
-            f"to {h(_number(after.price))}, discount {h(_number(before.discount))} to "
-            f"{h(_number(after.discount))}</li>" for before, after in report.price_changes
+            f"<li>{_h(after.title)} <code>{_h(after.slug)}</code>: "
+            f"price {_h(_number(before.price))} "
+            f"to {_h(_number(after.price))}, discount {_h(_number(before.discount))} to "
+            f"{_h(_number(after.discount))}</li>" for before, after in report.price_changes
         ) or "<li>None.</li>")
         + "</ul></body></html>\n"
     )

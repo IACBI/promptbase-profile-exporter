@@ -15,6 +15,7 @@ from promptbase_exporter.formatting import (
     HTML_DATA_ELEMENT_ID,
     RECORD_FIELDS,
     UTF8_BOM,
+    count_rendered_records,
     count_written_records,
     csv_escape_formula,
     csv_unescape_formula,
@@ -31,7 +32,9 @@ from promptbase_exporter.formatting import (
     infer_format_from_path,
     load_html_catalog_data,
     parse_extra_fields,
+    parse_txt_catalog,
     record_to_dict,
+    scan_txt_catalog,
     sort_records,
     sorted_newest_to_oldest,
     write_export,
@@ -819,6 +822,71 @@ class ItemTypeFormattingTests(unittest.TestCase):
                 path = Path(directory) / "catalog.md"
                 path.write_text(text, encoding="utf-8")
                 self.assertEqual(load_catalog(path)[0]["slug"], "kinds")
+
+
+class RenderedCountTests(unittest.TestCase):
+    """The count taken before a write is the count of the file the write produces."""
+
+    RECORDS = [
+        PromptRecord("Crlf\r\nTitle", "a\r\nb\rc", "crlf", "gpt", "text", 2, 1.0),
+        PromptRecord("Surrogate \ud800", "d", "surrogate", "gpt", "text", 1, 0.0),
+    ]
+
+    def test_rendered_count_equals_the_count_of_the_written_file(self):
+        with TemporaryDirectory() as directory:
+            for export_format in EXPORT_FORMATS:
+                with self.subTest(format=export_format):
+                    extension = FORMAT_EXTENSIONS[export_format]
+                    path = write_export_to_path(
+                        Path(directory) / f"c.{extension}",
+                        self.RECORDS,
+                        export_format,
+                        overwrite=True,
+                    )
+                    content = format_records(self.RECORDS, export_format)
+                    self.assertEqual(
+                        count_rendered_records(content, export_format),
+                        count_written_records(path, export_format),
+                    )
+                    self.assertEqual(count_rendered_records(content, export_format), 2)
+
+    def test_a_txt_description_whose_tail_the_reader_drops_is_refused(self):
+        # "9." then "Title: z" ends the description: the reader would stop at it and keep
+        # only "desc", so the record count alone would pass a file that lost text.
+        record_with_tail = PromptRecord("A", "desc\n9.\nTitle: z", "a", "gpt", "text", 1, 1.0)
+        content = format_records([record_with_tail], "txt")
+        self.assertEqual(parse_txt_catalog(content), [{"title": "A", "description": "desc"}])
+        with self.assertRaisesRegex(ValueError, "line 5 is not read back as part of a record"):
+            count_rendered_records(content, "txt")
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "c.txt"
+            path.write_text(content, encoding="utf-8")
+            with self.assertRaises(ValueError):
+                count_written_records(path, "txt")
+
+
+class TxtScanTests(unittest.TestCase):
+    def test_scan_reports_only_the_text_the_reader_skips(self):
+        records, skipped = scan_txt_catalog(
+            "intro\n1.\nTitle: A\nDescription:\nx\n\n2.\nTitle: B\nDescription:\ny\n"
+        )
+        self.assertEqual([r["title"] for r in records], ["A", "B"])
+        self.assertEqual(skipped, [(0, "intro\n")])
+
+    def test_text_after_the_last_record_start_is_reported_as_a_tail(self):
+        # A header the reader cannot match ends the records: a Title: line is a header only
+        # when a Description: line follows somewhere later, so the rest is skipped.
+        text = "1.\nTitle: A\nDescription:\nx\n2.\nTitle: B\nDescription: no\ny\n"
+        records, skipped = scan_txt_catalog(text)
+        self.assertEqual([r["title"] for r in records], ["A"])
+        self.assertEqual(skipped, [(27, "2.\nTitle: B\nDescription: no\ny\n")])
+
+    def test_writer_output_has_no_skipped_text(self):
+        records = [PromptRecord("A", "x\n\ny", "a", "gpt", "text", 1, 0.0)]
+        for item in ([], records):
+            with self.subTest(count=len(item)):
+                _, skipped = scan_txt_catalog(format_records(item, "txt"))
+                self.assertEqual(skipped, [])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import http.client
 import io
+import json
 import os
 import socket
 import threading
@@ -10,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from promptbase_exporter.formatting import write_export
+from promptbase_exporter.formatting import format_records, write_export
 from promptbase_exporter.models import EXTRA_FIELDS, ITEM_TYPES, Profile, PromptRecord
 from promptbase_exporter.web import (
     _EXPORT_FILENAME_RE,
@@ -798,28 +799,100 @@ class CompareFileTests(unittest.TestCase):
             self.assertNotIn(str(root), str(caught.exception))
             self.assertIn("Validation failed for exports/acb_all_prompts.", str(caught.exception))
 
+class ExportCheckBeforeWriteTests(unittest.TestCase):
+    """A failed check must leave the files that were there before exactly as they were."""
+
+    # Its TXT rendering holds a line "2." then "Title:", which reads back as a second record.
+    SMUGGLED = "Intro\n2.\nTitle: Injected\nDescription:\nBody"
+
+    @staticmethod
+    def _fetcher(records):
+        def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
+            return Profile(username="acb", uid="uid-1"), records
+
+        return fetcher
+
+    def test_failed_check_leaves_existing_exports_untouched(self):
+        records = [
+            PromptRecord("A", self.SMUGGLED, "a", "gpt", "text", 2, 2.0),
+            record("B", "image", "chatgpt-image", created=1, price=1.0),
+        ]
+        old = {mode: f"previous {mode}\n" for mode in ("all", "text", "image")}
+        with _in_directory() as root:
+            exports = root / "exports"
+            exports.mkdir()
+            for mode, text in old.items():
+                (exports / f"acb_{mode}_prompts.txt").write_text(text, encoding="utf-8")
+            request = build_request_config({"profile": "acb", "mode": "split"})
+
+            with self.assertRaisesRegex(WebInputError, "Validation failed for exports/acb_all"):
+                run_export(request, fetcher=self._fetcher(records))
+            kept = {
+                mode: (exports / f"acb_{mode}_prompts.txt").read_text(encoding="utf-8")
+                for mode in old
+            }
+
+        self.assertEqual(kept, old)
+
+    def test_failed_check_leaves_the_compared_catalog_untouched(self):
+        records = [PromptRecord("A", self.SMUGGLED, "a", "gpt", "text", 2, 2.0)]
+        stale = "1.\nTitle: Stale\nDescription:\nold\n"
+        with _in_directory() as root:
+            exports = root / "exports"
+            exports.mkdir()
+            catalog = exports / "acb_all_prompts.txt"
+            catalog.write_text(stale, encoding="utf-8")
+            request = build_request_config(
+                {
+                    "profile": "acb",
+                    "mode": "all",
+                    "compare_file": "exports/acb_all_prompts.txt",
+                }
+            )
+
+            with self.assertRaisesRegex(WebInputError, "Validation failed"):
+                run_export(request, fetcher=self._fetcher(records))
+            kept = catalog.read_text(encoding="utf-8")
+
+        self.assertEqual(kept, stale)
+
+    def test_successful_export_bytes_match_the_renderer(self):
+        records = [record("A", "text", "gpt", created=2, price=2.0)]
+        with TemporaryDirectory() as directory:
+            request = ExportRequest(
+                profile_input="acb", mode="all", output_dir=Path(directory), export_format="txt"
+            )
+            run_export(request, fetcher=self._fetcher(records))
+            written = (Path(directory) / "acb_all_prompts.txt").read_bytes()
+
+        self.assertEqual(written, format_records(records, "txt").encode("utf-8"))
+
+
 class ExportLockTests(unittest.TestCase):
     def test_writes_happen_while_holding_the_export_lock(self):
         observed = []
+        rec = record("=A", "text", "gpt")
 
-        def writer(output_dir, username, mode, records, export_format, timestamp=None,
-                   overwrite=True, *, csv_safe=False, extra_fields=(), item_type="prompt"):
-            observed.append((_EXPORT_LOCK.locked(), csv_safe))
-            path = output_dir / f"{username}_{mode}_prompts.txt"
-            path.write_text("", encoding="utf-8")
-            return path
+        def writer(output_path, content, *, overwrite=True):
+            observed.append((_EXPORT_LOCK.locked(), overwrite, content))
+            output_path.write_text("", encoding="utf-8")
+            return output_path
 
         def fetcher(_profile_input, extra_fields=(), item_type="prompt"):
             self.assertFalse(_EXPORT_LOCK.locked())
-            return Profile(username="acb", uid="uid-1"), [record("A", "text", "gpt")]
+            return Profile(username="acb", uid="uid-1"), [rec]
 
         with TemporaryDirectory() as directory:
             request = ExportRequest(
-                profile_input="@acb", output_dir=Path(directory), mode="all", csv_safe=True
+                profile_input="@acb", output_dir=Path(directory), mode="all",
+                export_format="csv", csv_safe=True,
             )
             run_export(request, fetcher=fetcher, writer=writer, counter=lambda _p, _f: 1)
 
-        self.assertEqual(observed, [(True, True)])
+        self.assertEqual(
+            observed,
+            [(True, True, format_records([rec], "csv", csv_safe=True))],
+        )
         self.assertFalse(_EXPORT_LOCK.locked())
 
     def test_lock_is_released_when_validation_fails(self):
@@ -864,20 +937,15 @@ class ExtraFieldsWebTests(unittest.TestCase):
             seen["fetch"] = tuple(extra_fields)
             return Profile("acb", "u"), [record("A", "text", "gpt")]
 
-        def writer(output_dir, username, mode, records, export_format, timestamp=None,
-                   overwrite=True, *, csv_safe=False, extra_fields=(), item_type="prompt"):
-            seen["write"] = tuple(extra_fields)
-            path = output_dir / f"{username}_{mode}_prompts.json"
-            path.write_text("[{}]", encoding="utf-8")
-            return path
-
         with TemporaryDirectory() as directory:
             request = ExportRequest(
                 profile_input="acb", mode="all", output_dir=Path(directory),
                 export_format="json", extra_fields=("tags",),
             )
-            run_export(request, fetcher=fetcher, writer=writer, counter=lambda _p, _f: 1)
-        self.assertEqual(seen, {"fetch": ("tags",), "write": ("tags",)})
+            run_export(request, fetcher=fetcher)
+            written = json.loads((Path(directory) / "acb_all_prompts.json").read_text("utf-8"))
+        self.assertEqual(seen, {"fetch": ("tags",)})
+        self.assertIn("tags", written[0])
 
 
 class ItemTypeWebTests(unittest.TestCase):
@@ -971,6 +1039,48 @@ class ClientDisconnectTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 handler.do_POST()
         self.assertEqual(handler._send_html.call_count, 1)
+
+
+class GetDisconnectTests(unittest.TestCase):
+    """A client that drops mid-response on a GET is closed quietly, not raised."""
+
+    PATHS = ("/healthz", "/", "/nope", "/download?file=exports/acb_all_prompts.json")
+
+    def _get(self, path, write_error):
+        with _in_directory():
+            Path("exports").mkdir()
+            Path("exports/acb_all_prompts.json").write_bytes(b"[" + b"x" * 200_000 + b"]")
+            handler = _make_handler({"Host": "127.0.0.1:8765"})
+            handler.command = "GET"
+            handler.path = path
+            handler.close_connection = False
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+            handler.wfile = MagicMock()
+            handler.wfile.write.side_effect = write_error
+            handler.do_GET()
+        return handler
+
+    def test_a_disconnect_while_writing_any_response_is_swallowed(self):
+        for error in (BrokenPipeError(32, "Broken pipe"),
+                      ConnectionResetError(104, "Connection reset"),
+                      ConnectionAbortedError(103, "Connection aborted")):
+            for path in self.PATHS:
+                with self.subTest(error=type(error).__name__, path=path):
+                    handler = self._get(path, error)
+                    self.assertTrue(handler.close_connection)
+
+    def test_other_os_errors_while_writing_still_propagate(self):
+        for path in self.PATHS:
+            with self.subTest(path=path):
+                with self.assertRaises(OSError):
+                    self._get(path, OSError(28, "No space left on device"))
+
+    def test_a_disconnect_on_a_sent_response_is_not_reported_as_a_server_error(self):
+        handler = self._get("/", BrokenPipeError(32, "Broken pipe"))
+        handler.send_response.assert_called_once_with(200)
+        self.assertTrue(handler.close_connection)
 
 
 def _guard(bind, headers):

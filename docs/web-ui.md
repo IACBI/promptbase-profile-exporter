@@ -113,7 +113,7 @@ using it:
   retry shortly. A slow client therefore cannot start an unlimited number of
   threads.
 - **One export writes at a time.** Requests are handled in parallel, but the
-  compare-write-validate step is serialized, so two exports of the same profile
+  compare-check-write step is serialized, so two exports of the same profile
   cannot interleave their writes to the same files.
 
 The command line is not subject to these limits: it runs as you and writes

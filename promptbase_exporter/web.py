@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import html
 import ipaddress
 import math
 import os
@@ -32,12 +31,15 @@ from .diffing import (
 from .formatting import (
     EXPORT_FORMATS,
     SORT_OPTIONS,
-    count_written_records,
+    count_rendered_records,
+    escape_html,
+    export_path,
     filter_records,
+    format_records,
     parse_csv_option,
     parse_extra_fields,
     sorted_newest_to_oldest,
-    write_export,
+    write_rendered,
 )
 from .layout import LAYOUTS, count_files, unique_names, write_markdown_files
 from .models import EXTRA_FIELDS, ITEM_TYPE_PLURALS, ITEM_TYPES, Profile, PromptRecord
@@ -198,24 +200,10 @@ class FetchPrompts(Protocol):
     ) -> tuple[Profile, list[PromptRecord]]: ...
 
 
-class WriteExport(Protocol):
-    def __call__(
-        self,
-        output_dir: Path,
-        username: str,
-        mode: str,
-        records: list[PromptRecord],
-        export_format: str,
-        timestamp: str | None = None,
-        overwrite: bool = True,
-        *,
-        csv_safe: bool = False,
-        extra_fields: Sequence[str] = (),
-        item_type: str = "prompt",
-    ) -> Path: ...
-
-
-CountWrittenRecords = Callable[[Path, str], int]
+# Counts the records of rendered catalog text, before anything is written.
+CountRenderedRecords = Callable[[str, str], int]
+# Writes rendered catalog text to a path: write_rendered, or a stand-in in tests.
+WriteRendered = Callable[..., Path]
 # Writes one Markdown file per record into a folder and returns the folder.
 FilesWriter = Callable[..., Path]
 
@@ -404,11 +392,15 @@ def run_export(
     request: ExportRequest,
     *,
     fetcher: FetchPrompts = fetch_prompts,
-    writer: WriteExport = write_export,
-    counter: CountWrittenRecords = count_written_records,
+    writer: WriteRendered = write_rendered,
+    counter: CountRenderedRecords = count_rendered_records,
     files_writer: FilesWriter = write_markdown_files,
 ) -> WebExportResult:
-    """Fetch, filter, sort, write, and validate exports for one web request."""
+    """Fetch, filter, sort, check, and then write the exports for one web request.
+
+    Nothing is written until every selected mode has rendered and passed its check, so
+    a failed check leaves the files that were there before untouched.
+    """
     profile, records, selected_records = _fetch_selection(request, fetcher)
 
     missing_descriptions = without_description(selected_records)
@@ -443,9 +435,9 @@ def run_export(
             except ValueError as exc:
                 raise WebInputError(f"Could not load comparison catalog: {exc}") from exc
             diff = compare_catalogs(previous, filter_records(selected_records, modes[0]))
-        for mode in modes:
-            filtered = filter_records(selected_records, mode)
-            if request.layout == "files":
+        if request.layout == "files":
+            for mode in modes:
+                filtered = filter_records(selected_records, mode)
                 folder = files_writer(
                     request.output_dir,
                     profile.username,
@@ -462,32 +454,42 @@ def run_export(
                         f"expected {len(filtered)}, wrote {present}."
                     )
                 exported_files.append(ExportedFile(mode=mode, path=folder, count=present))
-                continue
-            output_path = writer(
-                request.output_dir,
-                profile.username,
-                mode,
-                filtered,
-                request.export_format,
-                timestamp,
-                csv_safe=request.csv_safe,
-                extra_fields=request.extra_fields,
-                item_type=request.item_type,
-            )
-            try:
-                written_count = counter(output_path, request.export_format)
-            except ValueError as exc:
-                raise WebInputError(
-                    f"Validation failed for {_shown_path(output_path)}: {exc}"
-                ) from exc
-            if written_count != len(filtered):
-                raise WebInputError(
-                    f"Validation failed for {_shown_path(output_path)}: "
-                    f"expected {len(filtered)}, wrote {written_count}."
+        else:
+            pending: list[tuple[str, Path, str, int]] = []
+            for mode in modes:
+                filtered = filter_records(selected_records, mode)
+                output_path = export_path(
+                    request.output_dir,
+                    profile.username,
+                    mode,
+                    request.export_format,
+                    timestamp,
+                    request.item_type,
                 )
-            exported_files.append(
-                ExportedFile(mode=mode, path=output_path, count=written_count)
-            )
+                content = format_records(
+                    filtered,
+                    request.export_format,
+                    csv_safe=request.csv_safe,
+                    extra_fields=request.extra_fields,
+                    item_type=request.item_type,
+                )
+                try:
+                    written_count = counter(content, request.export_format)
+                except ValueError as exc:
+                    raise WebInputError(
+                        f"Validation failed for {_shown_path(output_path)}: {exc}"
+                    ) from exc
+                if written_count != len(filtered):
+                    raise WebInputError(
+                        f"Validation failed for {_shown_path(output_path)}: "
+                        f"expected {len(filtered)}, wrote {written_count}."
+                    )
+                pending.append((mode, output_path, content, written_count))
+            for mode, output_path, content, written_count in pending:
+                writer(output_path, content, overwrite=True)
+                exported_files.append(
+                    ExportedFile(mode=mode, path=output_path, count=written_count)
+                )
 
     image_count = len(filter_records(selected_records, "image"))
     text_count = len(filter_records(selected_records, "text"))
@@ -513,11 +515,17 @@ def render_form(
 ) -> str:
     """Render the local web UI as a complete HTML document."""
     request = request or default_request()
+    since_value = escape_html(request.since)
+    until_value = escape_html(request.until)
+    output_dir_value = escape_html(_shown_path(request.output_dir))
     status_block = ""
     if preview:
         status_block = _render_preview(preview)
     elif error:
-        status_block = f'<section class="notice error"><h2>Error</h2><p>{_h(error)}</p></section>'
+        status_block = (
+            '<section class="notice error"><h2>Error</h2>'
+            f"<p>{escape_html(error)}</p></section>"
+        )
     elif result:
         rows = "\n".join(_render_file_row(item) for item in result.files)
         kind = ITEM_TYPE_PLURALS[result.item_type]
@@ -525,7 +533,7 @@ def render_form(
         <section class="notice success">
           <h2>Export complete</h2>
           <p>
-            @{_h(result.username)}: {result.selected_records} selected from
+            @{escape_html(result.username)}: {result.selected_records} selected from
             {result.total_records} {kind}. Text: {result.text_records},
             image: {result.image_records}, other: {result.other_records}.
           </p>
@@ -743,7 +751,7 @@ def render_form(
       <div class="grid">
         <div class="full">
           <label for="profile">PromptBase profile</label>
-          <input id="profile" name="profile" value="{_h(request.profile_input)}"
+          <input id="profile" name="profile" value="{escape_html(request.profile_input)}"
             placeholder="https://promptbase.com/profile/acb" required>
         </div>
         <div>
@@ -772,54 +780,54 @@ def render_form(
         </div>
         <div>
           <label for="domain">Domain filter</label>
-          <input id="domain" name="domain" value="{_h(request.domain)}"
+          <input id="domain" name="domain" value="{escape_html(request.domain)}"
             placeholder="text,image">
         </div>
         <div>
           <label for="prompt_type">Type filter</label>
-          <input id="prompt_type" name="prompt_type" value="{_h(request.prompt_type)}"
+          <input id="prompt_type" name="prompt_type" value="{escape_html(request.prompt_type)}"
             placeholder="gpt,claude,chatgpt-image">
         </div>
         <div>
           <label for="min_price">Minimum price</label>
           <input id="min_price" name="min_price" inputmode="decimal"
-            value="{_h(_format_optional_float(request.min_price))}" placeholder="0">
+            value="{escape_html(_format_optional_float(request.min_price))}" placeholder="0">
         </div>
         <div>
           <label for="max_price">Maximum price</label>
           <input id="max_price" name="max_price" inputmode="decimal"
-            value="{_h(_format_optional_float(request.max_price))}" placeholder="10">
+            value="{escape_html(_format_optional_float(request.max_price))}" placeholder="10">
         </div>
         <div>
           <label for="since">Since</label>
-          <input id="since" name="since" value="{_h(request.since)}" placeholder="2026-01-01">
+          <input id="since" name="since" value="{since_value}" placeholder="2026-01-01">
         </div>
         <div>
           <label for="until">Until</label>
-          <input id="until" name="until" value="{_h(request.until)}" placeholder="2026-12-31">
+          <input id="until" name="until" value="{until_value}" placeholder="2026-12-31">
         </div>
         <div>
           <label for="min_sales">Minimum sales</label>
           <input id="min_sales" name="min_sales" inputmode="numeric"
-            value="{_h(_format_optional_int(request.min_sales))}" placeholder="0">
+            value="{escape_html(_format_optional_int(request.min_sales))}" placeholder="0">
         </div>
         <div>
           <label for="min_rating">Minimum rating</label>
           <input id="min_rating" name="min_rating" inputmode="decimal"
-            value="{_h(_format_optional_float(request.min_rating))}" placeholder="4.5">
+            value="{escape_html(_format_optional_float(request.min_rating))}" placeholder="4.5">
         </div>
         <div>
           <label for="limit">Limit</label>
           <input id="limit" name="limit" inputmode="numeric"
-            value="{_h(_format_optional_int(request.limit))}" placeholder="50">
+            value="{escape_html(_format_optional_int(request.limit))}" placeholder="50">
         </div>
         <div class="full">
           <label for="output_dir">Output directory</label>
-          <input id="output_dir" name="output_dir" value="{_h(_shown_path(request.output_dir))}">
+          <input id="output_dir" name="output_dir" value="{output_dir_value}">
         </div>
         <div class="full">
           <label for="compare_file">Compare with existing catalog (optional)</label>
-          <input id="compare_file" name="compare_file" value="{_h(request.compare_file)}"
+          <input id="compare_file" name="compare_file" value="{escape_html(request.compare_file)}"
             placeholder="exports/acb_all_prompts.json">
         </div>
         <fieldset class="full">
@@ -864,8 +872,8 @@ def render_form(
 
 def _render_extra_field_checkboxes(selected: Sequence[str]) -> str:
     return "\n".join(
-        f'<label><input type="checkbox" name="extra_fields" value="{_h(name)}" '
-        f'{_checked(name in selected)}> {_h(name)}</label>'
+        f'<label><input type="checkbox" name="extra_fields" value="{escape_html(name)}" '
+        f'{_checked(name in selected)}> {escape_html(name)}</label>'
         for name in EXTRA_FIELDS
     )
 
@@ -874,10 +882,11 @@ def _render_preview(preview: WebPreview) -> str:
     kind = ITEM_TYPE_PLURALS[preview.item_type]
     rows = "\n".join(
         "<tr>"
-        f'<td><a href="{_h(row.url)}" rel="noopener noreferrer">{_h(row.title)}</a></td>'
-        f"<td>{_h(row.domain)}</td><td>{_h(row.prompt_type)}</td>"
-        f"<td>{_h(f'{row.price:g}')}</td><td>{row.views}</td><td>{row.sales}</td>"
-        f"<td>{_h(row.created)}</td>"
+        f'<td><a href="{escape_html(row.url)}" rel="noopener noreferrer">'
+        f"{escape_html(row.title)}</a></td>"
+        f"<td>{escape_html(row.domain)}</td><td>{escape_html(row.prompt_type)}</td>"
+        f"<td>{escape_html(f'{row.price:g}')}</td><td>{row.views}</td><td>{row.sales}</td>"
+        f"<td>{escape_html(row.created)}</td>"
         "</tr>"
         for row in preview.rows
     )
@@ -894,7 +903,7 @@ def _render_preview(preview: WebPreview) -> str:
         <section class="notice success">
           <h2>Preview</h2>
           <p>
-            @{_h(preview.username)}: {preview.selected_records} selected from
+            @{escape_html(preview.username)}: {preview.selected_records} selected from
             {preview.total_records} {kind}. Text: {preview.text_records},
             image: {preview.image_records}, other: {preview.other_records}.
             Nothing has been written.
@@ -915,7 +924,7 @@ def _render_preview(preview: WebPreview) -> str:
 def _render_diff(diff: CatalogDiff | None) -> str:
     if diff is None:
         return ""
-    return f"<h3>Comparison</h3><pre>{_h(format_diff_report(diff))}</pre>"
+    return f"<h3>Comparison</h3><pre>{escape_html(format_diff_report(diff))}</pre>"
 
 
 def _render_file_row(item: ExportedFile) -> str:
@@ -923,12 +932,12 @@ def _render_file_row(item: ExportedFile) -> str:
     if href is None:
         download_cell = "<td>—</td>"
     else:
-        download_cell = f'<td><a href="{_h(href)}" download>Download</a></td>'
+        download_cell = f'<td><a href="{escape_html(href)}" download>Download</a></td>'
     return (
         "<tr>"
-        f"<td>{_h(item.mode)}</td>"
+        f"<td>{escape_html(item.mode)}</td>"
         f"<td>{item.count}</td>"
-        f"<td><code>{_h(_shown_path(item.path))}</code></td>"
+        f"<td><code>{escape_html(_shown_path(item.path))}</code></td>"
         f"{download_cell}"
         "</tr>"
     )
@@ -939,9 +948,18 @@ def render_select(name: str, options: Sequence[str], selected: str) -> str:
     for option in options:
         selected_attr = " selected" if option == selected else ""
         items.append(
-            f'<option value="{_h(option)}"{selected_attr}>{_h(option)}</option>'
+            f'<option value="{escape_html(option)}"{selected_attr}>{escape_html(option)}</option>'
         )
-    return f'<select id="{_h(name)}" name="{_h(name)}">\n' + "\n".join(items) + "\n</select>"
+    return (
+        f'<select id="{escape_html(name)}" name="{escape_html(name)}">\n'
+        + "\n".join(items)
+        + "\n</select>"
+    )
+
+
+# Errors meaning the client closed or reset the connection mid-response. Only these are
+# swallowed when writing a response; any other OSError is a real fault and propagates.
+_CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 class PromptBaseWebHandler(BaseHTTPRequestHandler):
@@ -951,6 +969,14 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
     timeout = 60
 
     def do_GET(self) -> None:
+        # A client that disconnects while a response is written is not a server error:
+        # there is no one left to answer, so the connection is closed without a traceback.
+        try:
+            self._route_get()
+        except _CLIENT_DISCONNECT_ERRORS:
+            self.close_connection = True
+
+    def _route_get(self) -> None:
         path = urllib.parse.urlparse(self.path).path
         if path == "/healthz":
             self._send_text("ok\n")
@@ -1045,7 +1071,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
 
         try:
             self._send_html(page, status=status)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        except _CLIENT_DISCONNECT_ERRORS:
             # The client went away; there is no one left to answer.
             self.close_connection = True
 
@@ -1536,10 +1562,6 @@ def _format_optional_int(value: int | None) -> str:
 
 def _checked(value: bool) -> str:
     return "checked" if value else ""
-
-
-def _h(value: object) -> str:
-    return html.escape(str(value), quote=True)
 
 
 def _content_disposition_name(filename: str) -> str:

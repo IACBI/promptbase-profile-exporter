@@ -13,14 +13,15 @@ from typing import Any
 
 from .console import printable
 from .formatting import (
+    MARKDOWN_HEADINGS,
     UTF8_BOM,
     _atomic_write_text,
     csv_unescape_formula,
     escape_markdown,
     load_html_catalog_data,
     load_ndjson_catalog_data,
-    parse_txt_catalog,
     record_to_dict,
+    scan_txt_catalog,
 )
 from .models import PromptRecord
 
@@ -69,7 +70,8 @@ def load_catalog(
 
     A JSON or HTML catalog entry that is not a record (a number, ``null``) is
     skipped, unless ``strict`` is set: then it raises ValueError, so a caller
-    that must not lose data notices.
+    that must not lose data notices. The same holds for text in a TXT or Markdown
+    catalog that no record holds, which a reader would otherwise drop.
     """
     suffix = path.suffix.lower()
     # A CSV keeps a description's own "\r\n" inside a quoted cell; reading it with
@@ -105,10 +107,56 @@ def load_catalog(
     if suffix in {".html", ".htm"}:
         return _records(load_html_catalog_data(text), strict)
     if suffix == ".txt":
-        return [_normalize_record(item) for item in parse_txt_catalog(text)]
+        records, skipped = scan_txt_catalog(text)
+        if strict and skipped:
+            raise _outside_record_error(text, *skipped[0])
+        return [_normalize_record(item) for item in records]
     if suffix in {".md", ".markdown"}:
+        if strict:
+            outside = _markdown_text_outside_records(text)
+            if outside is not None:
+                raise _outside_record_error(text, *outside)
         return [_normalize_record(item) for item in _parse_markdown_catalog(text)]
     raise ValueError(f"Unsupported catalog file extension: {path.suffix}")
+
+
+def _outside_record_error(text: str, offset: int, skipped: str) -> ValueError:
+    """The error for text no record holds, named by its line and its first characters."""
+    start = offset + len(skipped) - len(skipped.lstrip())
+    line = text.count("\n", 0, start) + 1
+    shown = printable(skipped.strip())
+    if len(shown) > 60:
+        shown = shown[:57] + "..."
+    message = f"line {line} is text outside any record: {shown}"
+    if start == 0 and text.startswith(UTF8_BOM):
+        # The reader does not match a record that starts right after the mark.
+        message += " (a byte order mark is not skipped; save the file without it)"
+    return ValueError(message)
+
+
+# Where a Markdown record starts: a "## N." heading whose next line block opens the metadata.
+_MARKDOWN_RECORD_START = re.compile(r"(?m)^## \d+\. (?=.*\n\n- URL:)")
+
+
+def _markdown_text_outside_records(text: str) -> tuple[int, str] | None:
+    """The first stretch before the first record that is not the writer's title line.
+
+    Everything from a record's heading to the next one belongs to that record, so only
+    the text before the first record can fall outside. It may hold the one title line
+    the writer puts there, and nothing else but blank lines.
+    """
+    preamble = _MARKDOWN_RECORD_START.split(text, maxsplit=1)[0]
+    headings = set(MARKDOWN_HEADINGS)
+    offset = 0
+    for line in preamble.split("\n"):
+        # Notepad saves UTF-8 with a byte order mark, which belongs to no line of text.
+        stripped = line.removeprefix(UTF8_BOM).strip()
+        if stripped in headings:
+            headings.discard(stripped)
+        elif stripped:
+            return offset, line.removeprefix(UTF8_BOM)
+        offset += len(line) + 1
+    return None
 
 
 def _records(data: list[Any], strict: bool) -> list[dict[str, Any]]:
@@ -241,7 +289,7 @@ def write_diff_report(path: Path, diff: CatalogDiff) -> Path:
 
 
 def _parse_markdown_catalog(text: str) -> list[dict[str, str]]:
-    sections = re.split(r"(?m)^## \d+\. (?=.*\n\n- URL:)", text)
+    sections = _MARKDOWN_RECORD_START.split(text)
     records: list[dict[str, str]] = []
     for section in sections[1:]:
         lines = section.splitlines()
