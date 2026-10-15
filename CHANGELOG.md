@@ -4,42 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.15.1 - 2026-10-15
+
 ### Changed
 
-- An export is rendered and checked before anything is written. A check that fails (for
-  example a TXT description that holds a record-header line) leaves existing exports and
-  the `--update-file` catalog untouched, in the CLI and the web UI; before, the broken file
+- An export is rendered and checked before anything is written, in the CLI and the web UI.
+  A failing check (for example a TXT description that holds a record-header line) leaves
+  existing exports and the `--update-file` catalog untouched; before, the broken file
   replaced them and the command then failed. `--layout files` still checks after writing.
-- `--update-file` also refuses a TXT or Markdown catalog with stray text outside its
-  records, which a rewrite would drop. A TXT description that ended in a record-header-like
-  line used to be truncated silently; that export is now refused.
-
-- `--update-file` refuses to rewrite a catalog that holds entries which are not records,
-  instead of dropping them silently. `--compare` still skips them.
+- `--update-file` refuses to rewrite a catalog it would have to change by dropping data:
+  entries that are not records, or, in a TXT or Markdown catalog, stray text outside its
+  records. `--compare` still skips them.
 - A profile given as a full URL must be on promptbase.com or www.promptbase.com; a URL on
   another host used to be accepted using only its path.
 - `pb-diff` and `--compare` pair listings that share a title in near-linear time
   (2,000 same-title records: 44 s before, 0.03 s now). Which records are paired is unchanged.
 - `pb-convert` and `pb-diff` read a listing's kind from its URL by one shared rule; a
   `www.promptbase.com` bundle URL is now converted as a bundle, not as a prompt.
-- The web UI streams downloads instead of reading the file into memory, serves at most 32
-  connections at once, and, on a bind that is not loopback, accepts requests addressed by
-  an IP literal (never a DNS name other than the loopback names). `--host ""` is now treated as a wildcard bind.
+- The web UI streams downloads instead of reading the file into memory and serves at most
+  32 connections at once. On a bind that is not loopback it accepts requests addressed by an
+  IP literal, never by a DNS name other than the loopback names. `--host ""` is now a
+  wildcard bind.
 
 ### Fixed
 
-- The web UI no longer prints a traceback when a client disconnects mid-download.
-- A TXT export whose catalog has a blank title no longer merges that record into the next
-  one when it is read back. A description that itself contains a TXT record header is still
-  refused by validation (see docs/cli.md).
-- The web UI no longer answers a client that disconnected mid-response with a second, failing
-  write.
-- A TLS connection cut while reading a response is retried like other dropped
-  connections instead of failing after one attempt.
-- `pb-convert` no longer truncates a fractional JSON count (`12.7` became `12`), and
-  refuses `Infinity`/`NaN` values instead of crashing or writing invalid JSON.
-- `pb-history report --profile` with an invalid profile reports an error instead of
-  a traceback.
+- The web UI no longer prints a traceback, or sends a second response, when a client
+  disconnects during a response, including a download.
+- A TXT catalog whose record has a blank title no longer merges that record into the next
+  one when it is read back. A TXT description ending in a record-header-like line used to be
+  truncated silently; that export is now refused. Such a description cannot be written to TXT
+  (see docs/cli.md).
+- A TLS connection cut while reading a response is retried like other dropped connections,
+  instead of failing after one attempt.
+- `pb-convert` no longer truncates a fractional JSON count (`12.7` became `12`), and refuses
+  `Infinity` and `NaN` values instead of crashing or writing invalid JSON.
+- `pb-history report --profile` with an invalid profile reports an error instead of a
+  traceback.
 - A deeply nested `--config` file is reported as a configuration error, not a traceback.
 
 ## 0.15.0 - 2026-10-01
