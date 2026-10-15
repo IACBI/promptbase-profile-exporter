@@ -127,7 +127,7 @@ nav.primary a:hover { color: var(--ink); text-decoration: underline; text-underl
 .term .note { color: var(--term-muted); }
 
 section { padding: 3.5rem 0; border-top: 1px solid var(--rule); }
-section > .lead { color: var(--muted); max-width: 42rem; margin: 0 0 2rem; }
+section .lead { color: var(--muted); max-width: 42rem; margin: 0 0 2rem; }
 
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
 .card {
@@ -219,8 +219,8 @@ footer.site nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
       </div>
       <figure class="term" aria-label="Example command">
         <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
-        <pre><code><span class="prompt">$ </span>pb <span class="arg">@acb</span> <span class="flag">--format html</span>
-<span class="note"># HTML page in ./exports</span></code></pre>
+        <pre><code><span class="prompt">$ </span>pb <span class="arg">@acb</span> <span class="flag">--mode all --format html</span>
+<span class="note"># one searchable HTML page in ./exports</span></code></pre>
       </figure>
     </div>
   </div>
@@ -228,7 +228,7 @@ footer.site nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
   <section id="formats" aria-labelledby="formats-title">
     <div class="wrap">
       <h2 id="formats-title">Six formats, one source of truth</h2>
-      <p class="lead">Every format is built from the same listings. Pick the one your tool reads, or export all of them in one run.</p>
+      <p class="lead">Every format is built from the same listings. Pick the one your tool reads; the command takes one format per run.</p>
       <div class="grid formats">
         <article class="card"><code>catalog.html</code><p>One self-contained page you can search. It loads nothing from other sites.</p></article>
         <article class="card"><code>catalog.json</code><p>Every field, for scripts and pipelines.</p></article>
@@ -306,7 +306,7 @@ cd promptbase-profile-exporter</code></pre>
         <li>
           <h3>Export a profile</h3>
           <p>Pass a username, an <code>@name</code> or a profile URL.</p>
-          <pre><code>pb @acb --format html</code></pre>
+          <pre><code>pb @acb --mode all --format html</code></pre>
         </li>
       </ol>
     </div>
