@@ -5,6 +5,7 @@ import io
 import json
 import math
 import re
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,13 +19,16 @@ from .formatting import (
     escape_markdown,
     load_html_catalog_data,
     load_ndjson_catalog_data,
+    parse_txt_catalog,
     record_to_dict,
 )
 from .models import PromptRecord
 
 COMPARE_FIELDS = ("title", "description", "type", "domain", "price")
 NUMERIC_COMPARE_FIELDS = frozenset({"price"})
-_KIND_FROM_URL_RE = re.compile(r"/(prompt|bundle|app)/([^/?#]+)")
+# A listing URL: the kind is the path segment after the host, the slug the one after it.
+# Anchored to the PromptBase host, so another site's /prompt/ path is not a listing.
+_LISTING_URL_RE = re.compile(r"^https?://(?:www\.)?promptbase\.com(?::\d+)?/(prompt|bundle|app)/([^/?#]*)")
 # File extensions load_catalog can read.
 CATALOG_SUFFIXES = frozenset(
     {".json", ".ndjson", ".jsonl", ".csv", ".txt", ".md", ".markdown", ".html", ".htm"}
@@ -101,7 +105,7 @@ def load_catalog(
     if suffix in {".html", ".htm"}:
         return _records(load_html_catalog_data(text), strict)
     if suffix == ".txt":
-        return [_normalize_record(item) for item in _parse_text_catalog(text)]
+        return [_normalize_record(item) for item in parse_txt_catalog(text)]
     if suffix in {".md", ".markdown"}:
         return [_normalize_record(item) for item in _parse_markdown_catalog(text)]
     raise ValueError(f"Unsupported catalog file extension: {path.suffix}")
@@ -236,30 +240,6 @@ def write_diff_report(path: Path, diff: CatalogDiff) -> Path:
     return path
 
 
-_TXT_HEADER = re.compile(r"(?m)^\d+\.\s*\nTitle:\s*(?P<title>(?s:.*?))\nDescription:\n")
-# Where a description ends: the start of anything that looks like the next record.
-_TXT_BOUNDARY = re.compile(r"(?m)^\d+\.\s*\nTitle:")
-
-
-def _parse_text_catalog(text: str) -> list[dict[str, str]]:
-    # Find the header, then the next boundary, and slice between them; a lazy
-    # description that tested for the next record at every character was three
-    # times slower. Boundary matches cannot overlap (one holds no line that starts
-    # with a digit), so searching from each header finds the same ones.
-    records = []
-    position = 0
-    while (header := _TXT_HEADER.search(text, position)) is not None:
-        boundary = _TXT_BOUNDARY.search(text, header.end())
-        position = boundary.start() if boundary is not None else len(text)
-        records.append(
-            {
-                "title": header.group("title").strip(),
-                "description": text[header.end() : position].strip(),
-            }
-        )
-    return records
-
-
 def _parse_markdown_catalog(text: str) -> list[dict[str, str]]:
     sections = re.split(r"(?m)^## \d+\. (?=.*\n\n- URL:)", text)
     records: list[dict[str, str]] = []
@@ -313,6 +293,111 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+_Listing = tuple[str, bool]  # (listing kind or "", whether the record has a slug)
+
+
+class _Unpaired:
+    """Previous records still unpaired, bucketed so a lookup never scans what is paired.
+
+    ``_by_group`` holds, per group (a slug, or a title), the indices of its records per
+    class, in previous-catalog order. ``_by_content`` holds the same indices again under
+    the group, the class and the normalised title and description, because an unchanged
+    match must share that content: an exact lookup searches one bucket, not the group.
+    A paired index is dropped lazily: from a group bucket when it reaches the front, and
+    from a content bucket where it was found. The one case still searched record by
+    record is many records with the same title and description that differ only in
+    metadata, since the metadata check decides each of them.
+    """
+
+    def __init__(self, previous: list[dict[str, Any]], paired: set[int]) -> None:
+        self._previous = previous
+        self._paired = paired
+        self._by_group: dict[str, dict[Any, deque[int]]] = {}
+        self._by_content: dict[tuple[str, Any, tuple[str, str]], deque[int]] = {}
+
+    def add(self, index: int, group: str, cls: Any) -> None:
+        self._by_group.setdefault(group, {}).setdefault(cls, deque()).append(index)
+        content = (group, cls, _content_key(self._previous[index]))
+        self._by_content.setdefault(content, deque()).append(index)
+
+    def pair_first(
+        self, group: str, query: Any, compatible: Callable[[Any, Any], bool]
+    ) -> int | None:
+        """Pair with the earliest unpaired record of ``group`` that ``compatible`` accepts."""
+        best: deque[int] | None = None
+        for cls, bucket in self._by_group.get(group, {}).items():
+            if not compatible(query, cls):
+                continue
+            self._drop_paired(bucket)
+            if bucket and (best is None or bucket[0] < best[0]):
+                best = bucket
+        if best is None:
+            return None
+        index = best.popleft()
+        self._paired.add(index)
+        return index
+
+    def pair_identical(
+        self,
+        group: str,
+        query: Any,
+        compatible: Callable[[Any, Any], bool],
+        record: dict[str, Any],
+    ) -> int | None:
+        """Pair with the earliest unpaired record of ``group`` that ``record`` is unchanged from."""
+        found: list[tuple[int, deque[int], int]] = []
+        for cls in self._by_group.get(group, {}):
+            if not compatible(query, cls):
+                continue
+            bucket = self._by_content.get((group, cls, _content_key(record)))
+            if bucket is None:
+                continue
+            self._drop_paired(bucket)
+            for position, index in enumerate(bucket):
+                if index in self._paired:
+                    continue
+                if not _changed_fields(self._previous[index], record):
+                    found.append((index, bucket, position))
+                    break
+        if not found:
+            return None
+        index, bucket, position = min(found, key=lambda item: item[0])
+        del bucket[position]
+        self._paired.add(index)
+        return index
+
+    def _drop_paired(self, bucket: deque[int]) -> None:
+        while bucket and bucket[0] in self._paired:
+            bucket.popleft()
+
+
+def _any_listing(query: Any, other: Any) -> bool:
+    return True
+
+
+def _same_listing(record: _Listing, other: _Listing) -> bool:
+    # Two records that both carry a slug are told apart by it; the title is only a
+    # fallback for a side that has none (a TXT catalog). An app often shares a
+    # prompt's title, so kinds must agree where both are known.
+    (kind, slugged), (other_kind, other_slugged) = record, other
+    if slugged and other_slugged:
+        return False
+    return len({kind, other_kind} - {""}) <= 1
+
+
+def _listing(record: dict[str, Any]) -> _Listing:
+    return _listing_kind(record), _slug_key(record) != ""
+
+
+def _content_key(record: dict[str, Any]) -> tuple[str, str]:
+    # _changed_fields compares the title and description by these normalised values, so
+    # two records it finds unchanged always share this key.
+    return (
+        _comparable_value(record.get("title")),
+        _comparable_value(record.get("description")),
+    )
+
+
 def _pair_records(
     previous: list[dict[str, Any]],
     current: list[dict[str, Any]],
@@ -322,34 +407,36 @@ def _pair_records(
     Every slug match is made before any title match, so a new listing that happens
     to share a title cannot claim the previous record that another listing matches
     by slug, whatever order the records are in. Each previous record is used once.
+    Within a pass the earliest previous record wins, so the pairing is deterministic.
+    The buckets in _Unpaired only skip records that cannot win; the result is the one
+    a plain scan over every previous record gives.
     """
     matches: list[int | None] = [None] * len(current)
-    used: set[int] = set()
-    by_slug: dict[str, list[int]] = {}
+    paired: set[int] = set()
+
+    # A slug should appear once, but a hand-edited catalog can repeat one; identical
+    # records are paired first, so a catalog compared with itself is always clean.
+    slugs = _Unpaired(previous, paired)
     for index, record in enumerate(previous):
         key = _slug_key(record)
         if key:
-            by_slug.setdefault(key, []).append(index)
-    # A slug should appear once, but a hand-edited catalog can repeat one; identical
-    # records are paired first, so a catalog compared with itself is always clean.
+            slugs.add(index, key, None)
     for exact in (True, False):
         for position, record in enumerate(current):
             key = _slug_key(record)
             if matches[position] is not None or not key:
                 continue
-            for index in by_slug.get(key, ()):
-                if index not in used and (
-                    not exact or not _changed_fields(previous[index], record)
-                ):
-                    matches[position] = index
-                    used.add(index)
-                    break
+            matches[position] = (
+                slugs.pair_identical(key, None, _any_listing, record)
+                if exact
+                else slugs.pair_first(key, None, _any_listing)
+            )
 
-    by_title: dict[str, list[int]] = {}
+    titles = _Unpaired(previous, paired)
     for index, record in enumerate(previous):
         title = _title_key(record)
-        if title and index not in used:
-            by_title.setdefault(title, []).append(index)
+        if title and index not in paired:
+            titles.add(index, title, _listing(record))
     # Records that repeat a title are paired with an identical old record first, so
     # their order cannot turn two unchanged records into two changes.
     for exact in (True, False):
@@ -357,37 +444,24 @@ def _pair_records(
             title = _title_key(record)
             if matches[position] is not None or not title:
                 continue
-            for index in by_title.get(title, ()):
-                if (
-                    index not in used
-                    and _same_listing_by_title(record, previous[index])
-                    and (not exact or not _changed_fields(previous[index], record))
-                ):
-                    matches[position] = index
-                    used.add(index)
-                    break
+            query = _listing(record)
+            matches[position] = (
+                titles.pair_identical(title, query, _same_listing, record)
+                if exact
+                else titles.pair_first(title, query, _same_listing)
+            )
 
     # A record with neither slug nor title has no identity; pair it with an identical
     # one, or a catalog compared with itself would report it as added and removed.
+    # Its content key has an empty title, so it is searched under the "" group.
+    identity = _Unpaired(previous, paired)
+    for index, record in enumerate(previous):
+        if index not in paired and not _slug_key(record) and not _title_key(record):
+            identity.add(index, "", None)
     for position, record in enumerate(current):
-        if matches[position] is not None or _slug_key(record) or _title_key(record):
-            continue
-        for index, old in enumerate(previous):
-            if (index not in used and not _slug_key(old) and not _title_key(old)
-                    and not _changed_fields(old, record)):
-                matches[position] = index
-                used.add(index)
-                break
+        if matches[position] is None and not _slug_key(record) and not _title_key(record):
+            matches[position] = identity.pair_identical("", None, _any_listing, record)
     return matches
-
-
-def _same_listing_by_title(record: dict[str, Any], previous: dict[str, Any]) -> bool:
-    # Two records that both carry a slug are told apart by it; the title is only a
-    # fallback for a side that has none (a TXT catalog). An app often shares a
-    # prompt's title, so kinds must agree where both are known.
-    if _slug_key(record) and _slug_key(previous):
-        return False
-    return len({_known_kind(record), _known_kind(previous)} - {""}) <= 1
 
 
 def _changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
@@ -449,15 +523,24 @@ def _slug_key(record: dict[str, Any]) -> str:
 
 def _kind(record: dict[str, Any]) -> str:
     # A record with a slug but no kind is a prompt: only bundles and apps store one.
-    return _known_kind(record) or "prompt"
+    return _listing_kind(record) or "prompt"
 
 
-def _known_kind(record: dict[str, Any]) -> str:
-    """The listing kind a record states, from ``item_type`` or its URL, else ``""``."""
-    kind = str(record.get("item_type") or "").strip().lower()
-    if kind:
-        return kind
-    match = _KIND_FROM_URL_RE.search(str(record.get("url") or ""))
+def _listing_kind(record: dict[str, Any]) -> str:
+    return listing_kind(record.get("item_type"), record.get("url"))
+
+
+def listing_kind(item_type: object, url: object) -> str:
+    """The kind of listing a record names: its ``item_type``, else the kind in its URL.
+
+    Returns ``""`` when neither says so (a TXT catalog stores neither). A stated
+    ``item_type`` comes back exactly as written, so a caller that needs a known kind
+    can refuse anything else. pb-diff and pb-convert both read kinds through here.
+    """
+    declared = "" if item_type is None else str(item_type).strip()
+    if declared:
+        return declared
+    match = _LISTING_URL_RE.match("" if url is None else str(url).strip())
     return match.group(1) if match else ""
 
 
@@ -466,7 +549,7 @@ def _title_key(record: dict[str, Any]) -> str:
 
 
 def _slug_from_url(url: str) -> str:
-    match = _KIND_FROM_URL_RE.search(url)
+    match = _LISTING_URL_RE.match(url.strip())
     return match.group(2) if match else ""
 
 

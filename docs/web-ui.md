@@ -17,8 +17,7 @@ or HTML file inside the folder the server runs in, with a mode other than
 as `--compare`. Tick "Comparison catalog is a protected CSV" when that catalog
 was written with CSV formula protection; this is independent of whether the
 new export is protected. The comparison is taken before any file is written,
-so it is
-accurate even when the export overwrites that catalog. Rewriting a catalog in
+so it is accurate even when the export overwrites that catalog. Rewriting a catalog in
 place (`--update-file`), several profiles per run, and the command-line preview
 flags (`--dry-run`, `--list-domains`, `--list-types`) are command-line only; the
 form has its own **Preview matches** button instead (see below). Like the rest
@@ -35,7 +34,7 @@ Then open <http://127.0.0.1:8765/>. Stop the server with `Ctrl+C`.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | Address to bind, IPv4 or IPv6 (for example `::1`). Keep the loopback default unless you have a reason not to. |
+| `--host` | `127.0.0.1` | Address to bind, IPv4 or IPv6 (for example `::1`). `0.0.0.0`, `::`, or `""` listens on every interface. Keep the loopback default unless you have a reason not to; see [Security model](#security-model). |
 | `--port` | `8765` | Port to listen on. |
 | `--open` | off | Open the page in your default browser once the server is listening. |
 | `--version` | | Print the version and exit. |
@@ -68,6 +67,15 @@ using it:
   also means every interface), prints a warning, because the
   export endpoint fetches remote data and writes files for anyone who can
   reach it. Only do that on a network you trust.
+- **Host names are checked.** The `Host` header must name the server, which is
+  what stops DNS rebinding. A loopback bind (`127.0.0.1`, `::1`) answers only to
+  `127.0.0.1`, `localhost`, and `[::1]`. A server bound to a specific address
+  (for example `--host 192.168.1.5`) answers to that address and nothing else. A
+  wildcard bind (`0.0.0.0`, `::`, or `""`) answers to any IP address on its port,
+  so another machine on your network can open `http://192.168.1.5:8765/`. A
+  wildcard bind also answers to `127.0.0.1`, `localhost`, and `[::1]`, but to no
+  other DNS name, because a rebinding attack needs one.
+  IPv6 literals must be bracketed, as browsers send them.
 - **Cross-site requests are rejected.** `POST /export` checks the `Host`
   header and the browser's `Origin`/`Sec-Fetch-Site` headers, so a web page
   you visit cannot submit exports in the background (CSRF), and a hostile
@@ -82,7 +90,7 @@ using it:
   catalog path gets the same containment check as the output directory, must
   have a catalog extension, and is only read, never written. The page shows
   just the diff report (titles, slugs, and changed values). On a server bound
-  beyond loopback (`--host 0.0.0.0`), the catalog must also be named like an
+  beyond loopback (for example `--host 0.0.0.0`), the catalog must also be named like an
   export, as for downloads, so another machine cannot read values from any JSON
   or CSV file here or probe which files exist.
 - **Downloads serve exports only.** `GET /download` returns a file only if it
@@ -91,7 +99,8 @@ using it:
   cannot be used to read other files, not even a stray `secrets.json` next to
   your exports. Downloads are always sent as attachments with
   `Content-Security-Policy: sandbox`, so an HTML export can never run script
-  on the UI's origin.
+  on the UI's origin. The file is streamed to the browser in chunks rather than
+  loaded into memory first.
 - **Hardened responses.** Pages are served with a strict Content Security
   Policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
   `Referrer-Policy: no-referrer`, error responses from the HTTP server itself
@@ -99,6 +108,10 @@ using it:
   shown relative to the working directory, never where the server lives. Oversized or malformed form submissions are
   rejected, and a connection that stalls while sending its request is closed
   after 60 seconds.
+- **Bounded connections.** The server serves at most 32 connections at once. A
+  connection that arrives while all 32 are busy is closed without a response, so
+  retry shortly. A slow client therefore cannot start an unlimited number of
+  threads.
 - **One export writes at a time.** Requests are handled in parallel, but the
   compare-write-validate step is serialized, so two exports of the same profile
   cannot interleave their writes to the same files.

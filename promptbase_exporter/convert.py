@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
+import math
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -12,7 +12,7 @@ from typing import Any
 
 from . import __version__
 from .console import make_output_safe
-from .diffing import load_catalog
+from .diffing import listing_kind, load_catalog
 from .formatting import (
     EXPORT_FORMATS,
     EXTRA_FIELD_COLUMNS,
@@ -50,7 +50,6 @@ REQUIRED_COLUMNS = (
     "rating",
     "reviews",
 )
-_URL_KIND_RE = re.compile(r"^https?://promptbase\.com/(prompt|bundle|app)/")
 _TRUE = frozenset({"true", "1", "yes"})
 _FALSE = frozenset({"false", "0", "no"})
 
@@ -262,6 +261,8 @@ def _text(value: Any) -> str:
 def _as_int(value: Any) -> int:
     if isinstance(value, bool):
         raise ValueError("expected a number, got a boolean")
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"expected a whole number, got {value!r}")
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -277,7 +278,7 @@ def _required_int(data: Mapping[str, Any], column: str) -> int:
         raise ValueError(f"{column} is empty")
     try:
         return _as_int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} is not a whole number: {value!r}") from exc
 
 
@@ -288,9 +289,12 @@ def _required_float(data: Mapping[str, Any], column: str) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{column} is not a number: {value!r}")
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{column} is not a number: {value!r}") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{column} is not a finite number: {value!r}")
+    return number
 
 
 def _optional_int(data: Mapping[str, Any], column: str) -> int | None:
@@ -299,7 +303,7 @@ def _optional_int(data: Mapping[str, Any], column: str) -> int | None:
         return None
     try:
         return _as_int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} is not a whole number: {value!r}") from exc
 
 
@@ -341,14 +345,12 @@ def _split_tag_cell(cell: str) -> list[str]:
 
 
 def _item_type(data: Mapping[str, Any]) -> str:
-    declared = _text(data.get("item_type"))
-    if declared:
-        if declared not in ITEM_TYPES:
-            raise ValueError(f"unknown item_type {declared!r}")
-        return declared
-    match = _URL_KIND_RE.match(_text(data.get("url")))
-    return match.group(1) if match else "prompt"
-
+    # A record that states no kind at all is a prompt: the default is written here, since
+    # the shared reader returns "" for it and a diff must keep that as "unknown".
+    kind = listing_kind(data.get("item_type"), data.get("url"))
+    if kind and kind not in ITEM_TYPES:
+        raise ValueError(f"unknown item_type {kind!r}")
+    return kind or "prompt"
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ GitHub Action for scheduled exports.
 
 ### Features
 
-- Accepts a profile URL (with or without `https://`), a `profile/<name>` path, a
+- Accepts a promptbase.com profile URL (with or without `https://`), a `profile/<name>` path, a
   username, or `@username`,
   and exports several profiles in one run.
 - Exports a profile's prompts, bundles, or apps (`--item-type`), reads its options
@@ -191,7 +191,7 @@ zamanlanmış dışa aktarımlar için bir GitHub Action.
 
 ### Özellikler
 
-- Profil adresi (`https://` ile ya da onsuz), `profile/<ad>` yolu, kullanıcı adı
+- promptbase.com profil adresi (`https://` ile ya da onsuz), `profile/<ad>` yolu, kullanıcı adı
   ya da `@kullanıcıadı` kabul eder; tek çalıştırmada birden fazla profili dışa aktarabilir.
 - Bir profilin prompt'larını, bundle'larını ya da app'lerini dışa aktarır
   (`--item-type`), seçeneklerini `--config` ile bir `.json` ya da `.toml` dosyasından

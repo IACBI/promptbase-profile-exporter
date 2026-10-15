@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `--update-file` refuses to rewrite a catalog that holds entries which are not records,
+  instead of dropping them silently. `--compare` still skips them.
+- A profile given as a full URL must be on promptbase.com or www.promptbase.com; a URL on
+  another host used to be accepted using only its path.
+- `pb-diff` and `--compare` pair listings that share a title in near-linear time
+  (2,000 same-title records: 44 s before, 0.03 s now). Which records are paired is unchanged.
+- `pb-convert` and `pb-diff` read a listing's kind from its URL by one shared rule; a
+  `www.promptbase.com` bundle URL is now converted as a bundle, not as a prompt.
+- The web UI streams downloads instead of reading the file into memory, serves at most 32
+  connections at once, and, on a bind that is not loopback, accepts requests addressed by
+  an IP literal (never a DNS name other than the loopback names). `--host ""` is now treated as a wildcard bind.
+
+### Fixed
+
+- A TXT export whose catalog has a blank title no longer merges that record into the next
+  one when it is read back. A description that itself contains a TXT record header is still
+  refused by validation (see docs/cli.md).
+- The web UI no longer answers a client that disconnected mid-response with a second, failing
+  write.
+- A TLS connection cut while reading a response is retried like other dropped
+  connections instead of failing after one attempt.
+- `pb-convert` no longer truncates a fractional JSON count (`12.7` became `12`), and
+  refuses `Infinity`/`NaN` values instead of crashing or writing invalid JSON.
+- `pb-history report --profile` with an invalid profile reports an error instead of
+  a traceback.
+- A deeply nested `--config` file is reported as a configuration error, not a traceback.
+
 ## 0.15.0 - 2026-10-01
 
 ### Changed

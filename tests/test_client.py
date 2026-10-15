@@ -2,6 +2,7 @@ import gzip
 import http.client
 import io
 import json
+import ssl
 import threading
 import time
 import unittest
@@ -28,6 +29,7 @@ from promptbase_exporter.client import (
     fetch_prompt_items,
     fetch_prompts,
     field_filter,
+    parse_profile_input,
     resolve_profile,
 )
 from promptbase_exporter.models import EXTRA_FIELDS, ITEM_TYPES, Profile
@@ -326,6 +328,43 @@ class ResolveProfileTests(unittest.TestCase):
                 resolve_profile("@ghost")
 
 
+class ProfileUrlHostTests(unittest.TestCase):
+    def test_promptbase_hosts_are_accepted_in_any_case(self):
+        for value in (
+            "https://promptbase.com/profile/acb",
+            "http://www.promptbase.com/profile/acb",
+            "https://PromptBase.COM/profile/acb",
+            "https://promptbase.com:443/profile/acb",
+            "https://promptbase.com/profile/@acb/",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(parse_profile_input(value), "acb")
+
+    def test_foreign_hosts_are_refused(self):
+        for value in (
+            "https://evil.example/profile/acb",
+            "https://promptbase.com.evil.example/profile/acb",
+            "https://evilpromptbase.com/profile/acb",
+            "https://www.promptbase.com.evil.example/profile/acb",
+            "https://promptbase.com@evil.example/profile/acb",
+            "https://promptbase.com.:443/profile/acb",
+            "https://localhost/profile/acb",
+        ):
+            with self.subTest(value=value), \
+                    self.assertRaisesRegex(PromptBaseError, "must be on promptbase.com"):
+                parse_profile_input(value)
+
+    def test_host_is_checked_before_the_path(self):
+        with self.assertRaisesRegex(PromptBaseError, "must be on promptbase.com"):
+            parse_profile_input("https://evil.example/prompt/some-slug")
+
+    def test_bare_forms_are_unchanged(self):
+        self.assertEqual(parse_profile_input("acb"), "acb")
+        self.assertEqual(parse_profile_input("@acb"), "acb")
+        self.assertEqual(parse_profile_input("profile/acb"), "acb")
+        self.assertEqual(parse_profile_input("promptbase.com/profile/acb"), "acb")
+
+
 class RetryTests(unittest.TestCase):
     @staticmethod
     def _response(body: bytes, content_encoding: str | None = None) -> MagicMock:
@@ -460,6 +499,21 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result, [{"document": 4}])
         self.assertEqual(urlopen.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
+
+    def test_tls_stream_cut_while_reading_the_body_is_retried(self):
+        cut = self._response(b"")
+        cut.__enter__.return_value = MagicMock(
+            read=MagicMock(side_effect=ssl.SSLEOFError("EOF occurred in violation of protocol"))
+        )
+        with patch(
+            "promptbase_exporter.client.urllib.request.urlopen"
+        ) as urlopen, patch("promptbase_exporter.client.time.sleep"):
+            urlopen.side_effect = [cut, self._response(b'[{"document": 5}]')]
+
+            result = _open_json_with_retry(MagicMock())
+
+        self.assertEqual(result, [{"document": 5}])
+        self.assertEqual(urlopen.call_count, 2)
 
     def test_persistent_json_decode_error_exhausts_retries(self):
         with patch(

@@ -506,6 +506,13 @@ class CompareTests(unittest.TestCase):
                 self.assertIn("error:", err)
                 self.assertNotIn("Traceback", err)
 
+    def test_report_with_an_invalid_profile_is_an_error_not_a_traceback(self):
+        store(self.db, "acb", [(0, [rec("a")])])
+        code, _, err = run(["report", "--db", str(self.db), "--profile", "https://example.com/x"])
+        self.assertEqual(code, 1)
+        self.assertIn("invalid --profile", err)
+        self.assertNotIn("Traceback", err)
+
     def test_profile_names_are_escaped(self):
         store(self.db, "<b>x</b>|y", [(0, [rec("q")])])
         summaries = self.summaries()

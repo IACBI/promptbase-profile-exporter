@@ -4,17 +4,27 @@ import re
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from promptbase_exporter.diffing import (
-    _parse_text_catalog,
+    _changed_fields,
+    _pair_records,
+    _slug_key,
+    _title_key,
     compare_catalog_records,
     compare_catalogs,
     diff_to_dict,
     format_diff_report,
+    listing_kind,
     load_catalog,
     write_diff_report,
 )
-from promptbase_exporter.formatting import write_export
+from promptbase_exporter.formatting import (
+    count_records_in_text,
+    format_records_as_text,
+    parse_txt_catalog,
+    write_export,
+)
 from promptbase_exporter.models import PromptRecord
 
 
@@ -626,16 +636,12 @@ class CsvLineBreakTests(unittest.TestCase):
         self.assertFalse(compare_catalog_records(as_json, as_csv).has_changes)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TxtParserTests(unittest.TestCase):
     """The TXT reader slices between record boundaries; it must read exactly what the
-    earlier single regular expression read, malformed text included."""
+    single regular expression it replaced read, malformed text included."""
 
     ORACLE = re.compile(
-        r"(?ms)^\d+\.\s*\nTitle:\s*(?P<title>.*?)\nDescription:\n"
+        r"(?ms)^\d+\.\s*\nTitle:[ \t]*(?P<title>.*?)\nDescription:\n"
         r"(?P<description>.*?)(?=^\d+\.\s*\nTitle:|\Z)"
     )
 
@@ -651,4 +657,216 @@ class TxtParserTests(unittest.TestCase):
                   "x\n", "2. \n", "\n1.\nTitle:", "\nDescription:\n"]
         for _ in range(20000):
             text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 30)))
-            self.assertEqual(_parse_text_catalog(text), self.oracle(text), repr(text))
+            self.assertEqual(parse_txt_catalog(text), self.oracle(text), repr(text))
+
+    def test_a_blank_title_does_not_run_into_the_next_record(self):
+        # Regression: "Title:" followed by whitespace and a newline let the title span
+        # the next record, so a blank-titled record swallowed its neighbour.
+        text = "1.\nTitle: \nDescription:\nd\n\n2.\nTitle: t\nDescription:\nd2\n"
+        self.assertEqual(
+            parse_txt_catalog(text),
+            [{"title": "", "description": "d"}, {"title": "t", "description": "d2"}],
+        )
+
+    def test_a_header_like_description_is_counted_as_the_reader_reads_it(self):
+        # TXT cannot escape a description, so a line such as "2." then "Title: x" then
+        # "Description:" reads as a second record, both to the reader and to the count.
+        # The export then fails validation; see the limitation note in formatting.py.
+        record = PromptRecord(
+            "Text One", "Intro.\n2.\nTitle: x\nDescription:\nmore", "one", "gpt", "text", 1, 0
+        )
+        text = format_records_as_text([record])
+        self.assertEqual(count_records_in_text(text, "txt"), len(parse_txt_catalog(text)))
+        self.assertEqual(count_records_in_text(text, "txt"), 2)
+
+
+class PairingEquivalenceTests(unittest.TestCase):
+    """_pair_records must pair exactly what a plain first-fit scan pairs.
+
+    The reference below is that scan, written out without any index. The random
+    catalogs use few distinct titles, slugs, and kinds, so records collide on every
+    pass and each rule (slug, title, kind, identity, exact, loose) decides some pair.
+    """
+
+    TITLES = ["", "A", "a", " A ", "B", "Untitled"]
+    DESCRIPTIONS = ["", "d", "d ", "e", "line\nbreak"]
+    SLUGS = ["", "", "s1", "S1", "s2"]
+    URLS = [
+        "",
+        "https://promptbase.com/prompt/s1",
+        "https://promptbase.com/bundle/s1",
+        "https://www.promptbase.com/app/s2",
+        "https://evil.example/bundle/s1",
+    ]
+    ITEM_TYPES = [None, "", "prompt", "bundle", "app"]
+    PRICES = ["absent", 0, 0.0, 1.0, "1.0", "nan", None]
+
+    def random_row(self, rng):
+        row = {"title": rng.choice(self.TITLES), "description": rng.choice(self.DESCRIPTIONS)}
+        if rng.random() < 0.8:
+            row["slug"] = rng.choice(self.SLUGS)
+        if rng.random() < 0.4:
+            row["item_type"] = rng.choice(self.ITEM_TYPES)
+        if rng.random() < 0.5:
+            row["url"] = rng.choice(self.URLS)
+        if rng.random() < 0.5:
+            row["type"] = rng.choice([None, "", "gpt", "claude"])
+        if rng.random() < 0.5:
+            row["domain"] = rng.choice(["", "text", "image"])
+        if rng.random() < 0.5:
+            price = rng.choice(self.PRICES)
+            if price != "absent":
+                row["price"] = price
+        return row
+
+    def scenario(self, rng, size):
+        previous = [self.random_row(rng) for _ in range(rng.randint(0, size))]
+        current = []
+        for row in previous:
+            roll = rng.random()
+            if roll < 0.25:
+                continue  # removed
+            if roll < 0.5:
+                current.append(dict(row))  # unchanged
+            else:
+                key = rng.choice(["title", "description", "slug", "type", "price", "url"])
+                current.append({**row, key: self.random_row(rng).get(key, "")})
+            if rng.random() < 0.1:
+                current.append(dict(row))  # a repeated record
+        current += [self.random_row(rng) for _ in range(rng.randint(0, 5))]
+        rng.shuffle(current)
+        return previous, current
+
+    def test_pairing_matches_the_plain_scan_on_random_catalogs(self):
+        rng = random.Random(20261015)
+        for trial in range(3000):
+            previous, current = self.scenario(rng, 12)
+            with self.subTest(trial=trial):
+                self.assertEqual(
+                    _pair_records(previous, current), reference_pairs(previous, current)
+                )
+        for trial in range(200):
+            previous, current = self.scenario(rng, 80)
+            with self.subTest(large=trial):
+                self.assertEqual(
+                    _pair_records(previous, current), reference_pairs(previous, current)
+                )
+
+
+def reference_pairs(previous, current):
+    """The first-fit pairing as a plain scan over every previous record, in order."""
+
+    def same_listing(record, old):
+        if _slug_key(record) and _slug_key(old):
+            return False
+        kinds = {listing_kind(record.get("item_type"), record.get("url")),
+                 listing_kind(old.get("item_type"), old.get("url"))}
+        return len(kinds - {""}) <= 1
+
+    matches = [None] * len(current)
+    used = set()
+
+    def pair(position, candidates):
+        for index in candidates:
+            if index not in used:
+                matches[position] = index
+                used.add(index)
+                return
+
+    # Slugs first, then titles, then identity-less records; exact matches before loose.
+    for exact in (True, False):
+        for position, record in enumerate(current):
+            key = _slug_key(record)
+            if matches[position] is None and key:
+                pair(position, (
+                    index for index, old in enumerate(previous)
+                    if _slug_key(old) == key and index not in used
+                    and (not exact or not _changed_fields(old, record))
+                ))
+    for exact in (True, False):
+        for position, record in enumerate(current):
+            title = _title_key(record)
+            if matches[position] is None and title:
+                pair(position, (
+                    index for index, old in enumerate(previous)
+                    if _title_key(old) == title and index not in used
+                    and same_listing(record, old)
+                    and (not exact or not _changed_fields(old, record))
+                ))
+    for position, record in enumerate(current):
+        if matches[position] is None and not _slug_key(record) and not _title_key(record):
+            pair(position, (
+                index for index, old in enumerate(previous)
+                if index not in used and not _slug_key(old) and not _title_key(old)
+                and not _changed_fields(old, record)
+            ))
+    return matches
+
+
+class PairingWorkTests(unittest.TestCase):
+    """How often records are compared, which does not depend on the machine's speed."""
+
+    def comparisons(self, previous, current):
+        with patch("promptbase_exporter.diffing._changed_fields",
+                   wraps=_changed_fields) as spy:
+            compare_catalog_records(previous, current)
+        return spy.call_count
+
+    def test_many_records_sharing_a_title_are_each_compared_a_bounded_number_of_times(self):
+        n = 2000
+        previous = [row("Untitled", description=f"old {i}") for i in range(n)]
+        current = [row("Untitled", description=f"new {i}") for i in range(n)]
+        self.assertLessEqual(self.comparisons(previous, current), 2 * n)
+
+    def test_identical_records_sharing_a_title_pair_without_scanning_each_other(self):
+        n = 2000
+        previous = [row("Untitled", description="same") for _ in range(n)]
+        self.assertLessEqual(self.comparisons(previous, list(previous)), 2 * n)
+
+    def test_many_records_sharing_a_slug_are_each_compared_a_bounded_number_of_times(self):
+        n = 2000
+        previous = [row("T", slug="dup", description=f"old {i}") for i in range(n)]
+        current = [row("T", slug="dup", description=f"new {i}") for i in range(n)]
+        self.assertLessEqual(self.comparisons(previous, current), 2 * n)
+
+    def test_slugged_records_that_cannot_pair_by_title_are_not_compared_at_all(self):
+        n = 2000
+        previous = [row("Untitled", slug=f"a{i}", description=f"old {i}") for i in range(n)]
+        current = [row("Untitled", slug=f"b{i}", description=f"new {i}") for i in range(n)]
+        self.assertEqual(self.comparisons(previous, current), 0)
+
+
+class ListingKindUnificationTests(unittest.TestCase):
+    """pb-diff and pb-convert read a record's kind through one helper."""
+
+    def test_the_item_type_column_wins_and_comes_back_as_written(self):
+        self.assertEqual(listing_kind("bundle", "https://promptbase.com/app/x"), "bundle")
+        self.assertEqual(listing_kind("", "https://promptbase.com:443/bundle/x"), "bundle")
+        self.assertEqual(listing_kind("", "https://promptbase.com.evil.example/bundle/x"), "")
+        self.assertEqual(listing_kind(" app ", None), "app")
+        self.assertEqual(listing_kind("Bundle", None), "Bundle")
+
+    def test_the_url_names_the_kind_only_on_the_promptbase_host(self):
+        self.assertEqual(listing_kind(None, "https://promptbase.com/bundle/x"), "bundle")
+        self.assertEqual(listing_kind(None, "http://promptbase.com/app/x"), "app")
+        self.assertEqual(listing_kind(None, "https://www.promptbase.com/prompt/x"), "prompt")
+        self.assertEqual(listing_kind(None, "https://evil.example/bundle/x"), "")
+        self.assertEqual(listing_kind(None, "https://promptbase.com.evil.example/app/x"), "")
+        self.assertEqual(listing_kind(None, "https://promptbase.com/skill/x"), "")
+        self.assertEqual(listing_kind(None, "https://promptbase.com/bundle/"), "bundle")
+
+    def test_nothing_stated_is_unknown(self):
+        self.assertEqual(listing_kind(None, None), "")
+        self.assertEqual(listing_kind("", ""), "")
+
+    def test_a_foreign_url_is_not_a_slug_in_a_markdown_catalog(self):
+        # Markdown reads the slug from the URL; a URL on another site must not supply one.
+        text = "# Export\n\n## 1. Logo\n\n- URL: https://evil.example/prompt/logo\n\nBody\n"
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.md"
+            path.write_text(text, encoding="utf-8")
+            self.assertEqual(load_catalog(path)[0]["slug"], "")
+
+
+if __name__ == "__main__":
+    unittest.main()

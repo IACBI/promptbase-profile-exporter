@@ -102,6 +102,20 @@ class RecordFromDictTests(unittest.TestCase):
             "app",
         )
 
+    def test_kind_from_a_url_follows_the_shared_rule(self):
+        # The same rule pb-diff uses: the PromptBase host, with or without www.
+        base = record_to_dict(sample_records()[0])
+        base.pop("url")
+        for url, expected in (
+            ("https://www.promptbase.com/bundle/x", "bundle"),
+            ("https://evil.example/bundle/x", "prompt"),
+            ("https://promptbase.com.evil.example/app/x", "prompt"),
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(record_from_dict({**base, "url": url}).item_type, expected)
+        with self.assertRaisesRegex(ValueError, "unknown item_type 'Bundle'"):
+            record_from_dict({**base, "item_type": "Bundle"})
+
     def test_missing_or_unreadable_values_are_errors_not_defaults(self):
         good = record_to_dict(sample_records()[0])
         cases = {
@@ -111,6 +125,9 @@ class RecordFromDictTests(unittest.TestCase):
             "text number": ({**good, "price": "free"}, "price is not a number"),
             "fractional count": ({**good, "sales": "2.5"}, "sales is not a whole number"),
             "boolean count": ({**good, "sales": True}, "sales is not a whole number"),
+            "fractional json count": ({**good, "views": 12.7}, "views is not a whole number"),
+            "infinite count": ({**good, "views": float("inf")}, "views is not a whole number"),
+            "nan price": ({**good, "price": float("nan")}, "price is not a finite number"),
             "bad flag": ({**good, "nsfw": "maybe"}, "nsfw is not true or false"),
             "bad kind": ({**good, "item_type": "skill"}, "unknown item_type"),
             "bad time": ({**good, "updated": "yesterday"}, "updated is not a whole number"),

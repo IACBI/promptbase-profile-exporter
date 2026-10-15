@@ -496,6 +496,76 @@ def _quiet_main(argv):
     return exit_code, stdout.getvalue(), stderr.getvalue()
 
 
+class UpdateFileStrictTests(unittest.TestCase):
+    """--update-file rewrites its catalog, so it refuses one with entries that are not
+    records (it would drop them). --compare only reads the file and skips them."""
+
+    NOT_RECORDS = {
+        "json": json.dumps([{"title": "Old", "slug": "old", "description": "d"}, None]),
+        "ndjson": '{"title": "Old", "slug": "old", "description": "d"}\n3\n',
+    }
+
+    def _fetch(self):
+        return patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="uid-1"), [record("New", "text", "gpt")]),
+        )
+
+    def test_update_file_refuses_entries_that_are_not_records_and_keeps_the_file(self):
+        for suffix, content in self.NOT_RECORDS.items():
+            with self.subTest(format=suffix), TemporaryDirectory() as directory:
+                catalog = Path(directory) / f"catalog.{suffix}"
+                catalog.write_text(content, encoding="utf-8")
+                stderr = io.StringIO()
+                with self._fetch(), redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                    exit_code = main(["@acb", "--mode", "all", "--update-file", str(catalog)])
+
+                self.assertEqual(exit_code, EXIT_ERROR)
+                self.assertIn(f"refusing to rewrite {catalog}", stderr.getvalue())
+                self.assertIn("is not a record", stderr.getvalue())
+                self.assertEqual(catalog.read_text(encoding="utf-8"), content)
+
+    def test_compare_reads_the_same_catalog_and_skips_those_entries(self):
+        content = self.NOT_RECORDS["json"]
+        with self._fetch(), TemporaryDirectory() as directory:
+            catalog = Path(directory) / "catalog.json"
+            catalog.write_text(content, encoding="utf-8")
+            stdout = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    ["@acb", "--mode", "all", "--compare", str(catalog),
+                     "--output-dir", str(Path(directory) / "out")]
+                )
+            unchanged = catalog.read_text(encoding="utf-8") == content
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("- Removed: 1", stdout.getvalue())  # the one record was read
+        self.assertTrue(unchanged)
+
+
+class TxtHeaderLimitTests(unittest.TestCase):
+    """A TXT description that looks like a record header cannot be written unambiguously,
+    so the export is refused by validation (see the note on TXT in formatting.py)."""
+
+    def test_a_description_that_looks_like_a_txt_record_fails_validation(self):
+        prompt = PromptRecord(
+            "Text One", "Intro.\n2.\nTitle: x\nDescription:\nmore", "one", "gpt", "text", 1, 0.0
+        )
+        with patch(
+            "promptbase_exporter.cli.fetch_prompts",
+            return_value=(Profile(username="acb", uid="uid-1"), [prompt]),
+        ), TemporaryDirectory() as directory:
+            stderr = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                exit_code = main(
+                    ["@acb", "--mode", "all", "--format", "txt",
+                     "--output-file", str(Path(directory) / "out.txt")]
+                )
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertIn("validation failed", stderr.getvalue())
+
+
 class NewOptionValidationTests(unittest.TestCase):
     _run_expecting_failure = ArgumentValidationTests._run_expecting_failure
 

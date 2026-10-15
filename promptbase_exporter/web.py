@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Protocol
 
 from . import __version__
 from .client import PromptBaseError, fetch_prompts
@@ -47,6 +47,9 @@ WEB_MODES = ("split", "all", "text", "image")
 PRICE_FILTERS = ("all", "free", "paid")
 DEFAULT_OUTPUT_DIR = "exports"
 MAX_FORM_BYTES = 20_000
+# Connections served at once. Each one gets a thread; past this many, new connections
+# are closed without a response, so slow clients cannot exhaust the process.
+MAX_HANDLER_THREADS = 32
 
 # Files the /download endpoint is allowed to serve, mapped to their content
 # type. Restricting to export extensions keeps the endpoint from being used to
@@ -968,7 +971,7 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         guard rejects requests whose Host header does not name this server.
         """
         host_header = (self.headers.get("Host") or "").strip()
-        if host_header and host_header not in self._expected_authorities():
+        if host_header and not self._host_header_allowed(host_header):
             self._send_text("Host header not recognized.\n", status=403)
             return
 
@@ -988,7 +991,18 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             self._send_text("not found\n", status=404)
             return
         content_type = DOWNLOAD_CONTENT_TYPES[candidate.suffix.lower()]
-        self._send_download(candidate.read_bytes(), candidate.name, content_type)
+        # Opened before the response is sent, so a missing or unreadable file is a 404
+        # here rather than an exception out of the request handler.
+        try:
+            source = candidate.open("rb")
+        except OSError:
+            self._send_text("not found\n", status=404)
+            return
+        # Streamed from the open file in chunks, not read into memory; the length is
+        # taken from that same handle, so Content-Length matches what is sent.
+        with source:
+            size = os.fstat(source.fileno()).st_size
+            self._send_download(source, size, candidate.name, content_type)
 
     def do_POST(self) -> None:
         path = urllib.parse.urlparse(self.path).path
@@ -1003,29 +1017,37 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             self._send_text(f"{rejection}\n", status=403)
             return
 
+        # Only the page is built in the try: the send happens after it, so a client
+        # that disconnects while the response is written is not reported as a server
+        # error and is not sent a second response.
         request: ExportRequest | None = None
+        status = 200
         try:
             form = self._read_form()
             request = build_request_config(form, exposed=self._exposed())
             if _single_value(form, "action", "export") == "preview":
-                self._send_html(render_form(request, preview=run_preview(request)))
+                page = render_form(request, preview=run_preview(request))
             else:
-                self._send_html(render_form(request, result=run_export(request)))
+                page = render_form(request, result=run_export(request))
         except WebInputError as exc:
-            self._send_html(render_form(request, error=str(exc)), status=400)
+            status, page = 400, render_form(request, error=str(exc))
         except PromptBaseError as exc:
-            self._send_html(render_form(request, error=str(exc)), status=502)
+            status, page = 502, render_form(request, error=str(exc))
         except OSError as exc:
-            self._send_html(
-                render_form(request, error=f"Could not write export: {_describe_os_error(exc)}"),
-                status=500,
+            status, page = 500, render_form(
+                request, error=f"Could not write export: {_describe_os_error(exc)}"
             )
         except Exception as exc:  # pragma: no cover - last-resort web boundary
             # The type only: an arbitrary message could carry server paths.
-            self._send_html(
-                render_form(request, error=f"Unexpected error ({type(exc).__name__})."),
-                status=500,
+            status, page = 500, render_form(
+                request, error=f"Unexpected error ({type(exc).__name__})."
             )
+
+        try:
+            self._send_html(page, status=status)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # The client went away; there is no one left to answer.
+            self.close_connection = True
 
     def _exposed(self) -> bool:
         address = self.server.server_address
@@ -1033,16 +1055,65 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         return not _is_loopback(str(host))
 
     def _expected_authorities(self) -> set[str]:
-        """Host:port authorities this server legitimately answers to."""
+        """Host:port authorities this server answers to by name.
+
+        IP literals on a wildcard bind are not listed; ``_host_header_allowed``
+        accepts them, since the server may be reached at any local address.
+        """
         server_address = self.server.server_address
         assert isinstance(server_address, tuple)  # noqa: S101 - type narrowing
         host, port = server_address[0], server_address[1]
-        names = {_url_host(host)}
-        if host in {"127.0.0.1", "0.0.0.0", "::", "::1"}:
-            names |= {"127.0.0.1", "localhost", "[::1]"}
+        names: set[str] = set()
+        if host not in WILDCARD_HOSTS:
+            names.add(_url_host(host))
+        if host in WILDCARD_HOSTS or host in {"127.0.0.1", "::1"}:
+            names |= _LOOPBACK_NAMES
         authorities = set(names)
         authorities |= {f"{name}:{port}" for name in names}
         return authorities
+
+    def _host_header_allowed(self, host_header: str) -> bool:
+        """Whether a Host header value (``name`` or ``name:port``) names this server."""
+        return host_header in self._expected_authorities() or self._wildcard_ip_host(
+            host_header
+        )
+
+    def _wildcard_ip_host(self, authority: str) -> bool:
+        """On a wildcard bind, any IP literal on the bound port is this server.
+
+        Names are never accepted here: a DNS name is what DNS rebinding needs.
+        """
+        server_address = self.server.server_address
+        assert isinstance(server_address, tuple)  # noqa: S101 - type narrowing
+        if server_address[0] not in WILDCARD_HOSTS:
+            return False
+        parsed = _split_authority(authority)
+        if parsed is None:
+            return False
+        name, port = parsed
+        if port is not None and port != str(server_address[1]):
+            return False
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            return False
+        return True
+
+    def _origin_allowed(self, origin: str) -> bool:
+        try:
+            parts = urllib.parse.urlsplit(origin)
+        except ValueError:
+            return False
+        if parts.scheme not in {"http", "https"}:
+            return False
+        if parts.netloc in self._expected_authorities():
+            return True
+        # A wildcard bind accepts any IP literal as Host, so an Origin on another one is
+        # a different site: it must be the very authority the request was addressed to.
+        host_header = (self.headers.get("Host") or "").strip()
+        return bool(host_header) and parts.netloc == host_header and self._wildcard_ip_host(
+            parts.netloc
+        )
 
     def _reject_unsafe_request(self) -> str | None:
         """Return an error string if the request is cross-origin or rebound.
@@ -1051,11 +1122,9 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         a form to localhost) and DNS rebinding (a hostile domain re-pointed
         at 127.0.0.1). Returns ``None`` when the request is safe to process.
         """
-        authorities = self._expected_authorities()
-
         # DNS-rebinding guard: the Host header must name this server.
         host_header = (self.headers.get("Host") or "").strip()
-        if host_header and host_header not in authorities:
+        if host_header and not self._host_header_allowed(host_header):
             return "Host header not recognized."
 
         # CSRF guard: trust Sec-Fetch-Site when modern browsers send it,
@@ -1068,11 +1137,8 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
             return None
 
         origin = self.headers.get("Origin")
-        if origin is not None:
-            allowed = {f"http://{authority}" for authority in authorities}
-            allowed |= {f"https://{authority}" for authority in authorities}
-            if origin not in allowed:
-                return "Cross-origin requests are not allowed."
+        if origin is not None and not self._origin_allowed(origin):
+            return "Cross-origin requests are not allowed."
         return None
 
     def _read_form(self) -> Mapping[str, list[str]]:
@@ -1095,10 +1161,12 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
     def _send_text(self, body: str, *, status: int = 200) -> None:
         self._send(body, "text/plain; charset=utf-8", status=status)
 
-    def _send_download(self, data: bytes, filename: str, content_type: str) -> None:
+    def _send_download(
+        self, source: BinaryIO, size: int, filename: str, content_type: str
+    ) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(size))
         self.send_header("X-Content-Type-Options", "nosniff")
         # Force a download rather than inline rendering; the quoted filename
         # keeps any unusual characters from breaking the header.
@@ -1110,7 +1178,17 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
-        self.wfile.write(data)
+        # Never more than the advertised length, even if the file grew since fstat. If it
+        # shrank, the body is short, so the connection is dropped rather than left to
+        # misframe the next request.
+        remaining = size
+        while remaining > 0:
+            chunk = source.read(min(remaining, 64 * 1024))
+            if not chunk:
+                self.close_connection = True
+                return
+            self.wfile.write(chunk)
+            remaining -= len(chunk)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         """The server's own errors (501 for an unsupported method, 400 for a bad request
@@ -1142,6 +1220,9 @@ class PromptBaseWebHandler(BaseHTTPRequestHandler):
 # An empty host is deliberately absent: socket.bind treats "" as INADDR_ANY,
 # i.e. every interface, which is exactly the exposure the warning is for.
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Bind addresses that mean every interface ("" is socket.bind's spelling of INADDR_ANY).
+WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::"})
+_LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "[::1]"})
 
 
 def _is_loopback(host: str) -> bool:
@@ -1171,14 +1252,43 @@ def _warn_if_exposed(host: str) -> None:
     )
 
 
-class _IPv6HTTPServer(ThreadingHTTPServer):
+class _BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """A ThreadingHTTPServer that serves at most ``MAX_HANDLER_THREADS`` connections.
+
+    A connection that arrives while every slot is taken is closed without a response.
+    Refusing rather than waiting keeps the accept loop from blocking, so shutdown stays
+    prompt even when slow clients hold every slot.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._slots = threading.BoundedSemaphore(MAX_HANDLER_THREADS)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
+class _IPv6HTTPServer(_BoundedThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
 def _make_server(host: str, port: int) -> ThreadingHTTPServer:
     # ThreadingHTTPServer is IPv4-only; binding "::1" on it fails to resolve.
     if ":" not in host:
-        return ThreadingHTTPServer((host, port), PromptBaseWebHandler)
+        return _BoundedThreadingHTTPServer((host, port), PromptBaseWebHandler)
     return _IPv6HTTPServer(_ipv6_bind_address(host, port), PromptBaseWebHandler)
 
 
@@ -1198,6 +1308,23 @@ def _ipv6_bind_address(host: str, port: int) -> tuple[Any, ...]:
 def _url_host(host: str) -> str:
     """Return ``host`` as it appears in a URL or Host header (IPv6 bracketed)."""
     return f"[{host}]" if ":" in host else host
+
+
+def _split_authority(authority: str) -> tuple[str, str | None] | None:
+    """Split a Host header value into ``(name, port)``; ``port`` is ``None`` when absent.
+
+    An IPv6 literal must be bracketed, as browsers always send it; ``None`` means the
+    value is malformed.
+    """
+    if authority.startswith("["):
+        name, bracket, rest = authority[1:].partition("]")
+        if not bracket or (rest and not rest.startswith(":")):
+            return None
+        return name, (rest[1:] if rest else None)
+    name, colon, port = authority.partition(":")
+    if ":" in port:  # an unbracketed IPv6 literal
+        return None
+    return name, (port if colon else None)
 
 
 def browser_url(host: str, port: int) -> str:

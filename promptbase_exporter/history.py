@@ -590,7 +590,6 @@ def summarize(
         summed = _totals(observations)
         totals = {c: int(summed[c]) for c in COUNTERS}
         prices = sorted(o.price for o in observations.values())
-        rated = [o.rating for o in observations.values() if o.rating > 0]
         count = len(observations)
         growth, growth_days = None, 0.0
         if days is not None:
@@ -610,7 +609,7 @@ def summarize(
             taken_at=latest.taken_at,
             listings=count,
             totals=totals,
-            average_rating=sum(rated) / len(rated) if rated else 0.0,
+            average_rating=summed["average rating"],
             median_price=_median(prices),
             free_share=sum(1 for price in prices if price == 0) / count if count else 0.0,
             sales_per_listing=totals["sales"] / count if count else 0.0,
@@ -1090,7 +1089,10 @@ def _select(connection: sqlite3.Connection, args: argparse.Namespace) -> list[Sn
     snapshots = list_snapshots(connection, None, args.item_type)
     profiles = sorted({snap.profile for snap in snapshots})
     if args.profile:
-        wanted = parse_profile_input(args.profile)
+        try:
+            wanted = parse_profile_input(args.profile)
+        except PromptBaseError as exc:
+            raise HistoryError(f"invalid --profile: {exc}") from None
         if wanted not in profiles:
             raise HistoryError(f"no snapshots of {ITEM_TYPE_PLURALS[args.item_type]} for @{wanted}")
         return [snap for snap in snapshots if snap.profile == wanted]
@@ -1098,6 +1100,16 @@ def _select(connection: sqlite3.Connection, args: argparse.Namespace) -> list[Sn
         names = ", ".join(f"@{name}" for name in profiles)
         raise HistoryError(f"the file holds several profiles ({names}): choose one with --profile")
     return snapshots
+
+
+def _write_output(text: str, output: Path | None, what: str) -> None:
+    """Write ``text`` to ``output`` (announcing it) or to stdout when no path was given."""
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8", newline="\n")
+        print(f"Wrote {what} -> {output}")
+    else:
+        sys.stdout.write(text)
 
 
 def _report_command(args: argparse.Namespace) -> int:
@@ -1114,13 +1126,7 @@ def _report_command(args: argparse.Namespace) -> int:
         )
     finally:
         connection.close()
-    text = render(report, args.format)
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text, encoding="utf-8", newline="\n")
-        print(f"Wrote {args.format} report -> {args.output}")
-    else:
-        sys.stdout.write(text)
+    _write_output(render(report, args.format), args.output, f"{args.format} report")
     if report.alerts:
         print(f"{len(report.alerts)} alert(s) fired", file=sys.stderr)
         return EXIT_ALERT
@@ -1140,12 +1146,7 @@ def _compare_command(args: argparse.Namespace) -> int:
         text = render_comparison_html(summaries, args.item_type, args.days)
     else:
         text = render_comparison_markdown(summaries, args.item_type, args.days)
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text, encoding="utf-8", newline="\n")
-        print(f"Wrote {args.format} comparison -> {args.output}")
-    else:
-        sys.stdout.write(text)
+    _write_output(text, args.output, f"{args.format} comparison")
     return EXIT_SUCCESS
 
 
