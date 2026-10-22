@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Docs: the Markdown formats keep descriptions verbatim, raw HTML included; `docs/cli.md` and `SECURITY.md` now say so and what to do in renderers that allow it.
+
 ## 0.15.1 - 2026-10-15
 
 ### Changed

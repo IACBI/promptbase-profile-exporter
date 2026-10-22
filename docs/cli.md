@@ -179,6 +179,14 @@ per prompt:
 Creates clean, modern logo concepts.
 ```
 
+Descriptions are written exactly as their author wrote them, so a Markdown catalog
+can contain raw HTML, links, and remote images (`![](https://...)`). GitHub sanitises
+these when it renders the file. A renderer that allows raw HTML or loads remote
+content, such as a note or wiki app, a static site generator, or an editor preview,
+may display the HTML, run embedded content, or fetch the images, so turn that off
+there, or export `txt` or `json` instead when you open catalogs of other people's
+profiles in one.
+
 **JSON** and **CSV** carry the full metadata set, in this field order:
 
 ```text
@@ -298,6 +306,9 @@ Transform your digital interfaces with ...
   since been removed. A file that already holds exactly the new text is not
   touched, so it keeps its modification time and a sync tool or Git sees only the
   prompts that changed.
+- **Descriptions** are the body, written as their author wrote them, so raw HTML,
+  links, and remote images pass through; see [Output formats](#output-formats)
+  for renderers that allow them.
 - It needs Markdown (`--format` may be left out) and cannot be combined with
   `--output-file`, `--compare`, or `--update-file`, which work on a single
   catalog file. The web UI offers it as "Layout" (it needs the markdown format and
