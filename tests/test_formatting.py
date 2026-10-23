@@ -19,6 +19,7 @@ from promptbase_exporter.formatting import (
     count_written_records,
     csv_escape_formula,
     csv_unescape_formula,
+    escape_markdown,
     expected_filename,
     expected_timestamped_filename,
     filter_records,
@@ -40,6 +41,7 @@ from promptbase_exporter.formatting import (
     write_export,
     write_export_to_path,
 )
+from promptbase_exporter.layout import render_file
 from promptbase_exporter.models import EXTRA_FIELDS, ITEM_TYPES, PromptRecord
 
 
@@ -357,6 +359,45 @@ def hostile_record(title, description, slug="hostile", **metadata):
         price=metadata.pop("price", 2.5),
         **metadata,
     )
+
+
+class MarkdownTrustBoundaryTests(unittest.TestCase):
+    """Markdown keeps author text verbatim by design; HTML and the summaries must not."""
+
+    IMG = "<img src=x onerror=alert(1)>"
+    SCRIPT = "</script><script>alert(1)</script>"
+
+    def setUp(self):
+        self.record = hostile_record(f"{self.IMG} {self.SCRIPT}", f"{self.IMG}\n{self.SCRIPT}")
+
+    def test_markdown_and_layout_files_keep_raw_html(self):
+        markdown = format_records_as_markdown([self.record])
+        layout = render_file(self.record)
+        for text in (markdown, layout):
+            self.assertIn(self.IMG, text)
+            self.assertIn(self.SCRIPT, text)
+
+    def test_html_export_escapes_visible_text(self):
+        html_text = format_records_as_html([self.record])
+        self.assertNotIn("<img src=x onerror", html_text)
+        self.assertNotIn("</script><script>", html_text)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html_text)
+        self.assertIn("&lt;/script&gt;&lt;script&gt;", html_text)
+
+    def test_html_export_embeds_json_with_escaped_angle_brackets(self):
+        html_text = format_records_as_html([self.record])
+        self.assertIn("\\u003cimg src=x onerror=alert(1)>", html_text)
+        self.assertEqual(load_html_catalog_data(html_text)[0]["title"], self.record.title)
+
+    def test_only_the_page_own_script_tags_close_script_elements(self):
+        harmless = hostile_record("Harmless", "plain text")
+        self.assertEqual(
+            format_records_as_html([self.record]).count("</script>"),
+            format_records_as_html([harmless]).count("</script>"),
+        )
+
+    def test_escape_markdown_backslash_escapes_angle_brackets(self):
+        self.assertEqual(escape_markdown("<img>"), "\\<img\\>")
 
 
 class MetadataThresholdFilterTests(unittest.TestCase):
