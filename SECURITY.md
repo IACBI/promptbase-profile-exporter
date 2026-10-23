@@ -50,6 +50,8 @@ API keys, or cookies. Reports are most useful when they involve:
 - command execution, including through the GitHub Action's inputs;
 - packaging or supply-chain issues that affect users.
 
+Markdown exports keep descriptions as their authors wrote them (see [Output formats](docs/cli.md#output-formats)); what a Markdown renderer does with that content is up to the renderer, so reports about it are out of scope unless the exporter's own escaping (the HTML catalog, `--csv-safe`, or the diff and history summaries) fails.
+
 Behavior of PromptBase itself is out of scope; report that to PromptBase.
 
 ## Responsible use
