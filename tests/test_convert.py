@@ -334,6 +334,19 @@ class ReviewFindingsTests(unittest.TestCase):
         self.assertEqual(kept, "keep me")
         self.assertEqual(leftovers, ["out.txt", "src.json"])  # no temp files left behind
 
+    def test_a_huge_integer_price_is_an_error_not_a_traceback(self):
+        rows = self._rows()
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "src.json"
+            # json.dumps would refuse nothing here, but float() of it overflows.
+            source.write_text(json.dumps(rows).replace(
+                f'"price": {rows[0]["price"]}', '"price": 1' + "0" * 400, 1
+            ), encoding="utf-8")
+            exit_code, _, stderr = run([str(source), "-f", "markdown",
+                                        "-o", str(Path(directory) / "out.md")])
+        self.assertEqual(exit_code, 1)
+        self.assertIn("price is not a number", stderr)
+
     def test_a_blank_title_converts_to_txt(self):
         rows = self._rows()
         rows[0]["title"] = ""

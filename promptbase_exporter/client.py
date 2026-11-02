@@ -36,6 +36,9 @@ TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 DEFAULT_PAGE_SIZE = 300
 MAX_PAGES = 100
 MAX_RETRIES = 3
+# A server's Retry-After is honoured up to this many seconds; a longer one is cut
+# short, so a hostile or misconfigured value cannot stall the run for hours.
+MAX_RETRY_AFTER_SECONDS = 30
 # Seconds to wait for a connection or for the next bytes of a response.
 REQUEST_TIMEOUT_SECONDS = 90
 # Far above a real page (300 records with descriptions is a few MB), but a bound,
@@ -223,7 +226,14 @@ def _run_query(
         },
     )
 
-    rows = _open_json_with_retry(request)
+    return documents_from_response(_open_json_with_retry(request))
+
+
+def documents_from_response(rows: Any) -> list[dict[str, Any]]:
+    """Decode a runQuery response body into plain documents, each with ``_doc_name``.
+
+    Raises PromptBaseError, and nothing else, for a body of the wrong shape.
+    """
     if not isinstance(rows, list):
         raise PromptBaseError("PromptBase query returned an unexpected response shape.")
 
@@ -237,9 +247,14 @@ def _run_query(
                 key: firestore_value(item)
                 for key, item in document.get("fields", {}).items()
             }
+            doc["_doc_name"] = document.get("name", "")
         except RecursionError:
             raise PromptBaseError("PromptBase returned a document nested too deeply.") from None
-        doc["_doc_name"] = document.get("name", "")
+        # The decode trusts the response's shape; a document, field map, or value of
+        # the wrong type (or an integerValue that is not a number) lands here, and
+        # must reach the user as an error, not as a traceback.
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise PromptBaseError(f"PromptBase returned a malformed document: {exc}") from None
         docs.append(doc)
     return docs
 
@@ -247,6 +262,7 @@ def _run_query(
 def _open_json_with_retry(request: urllib.request.Request) -> Any:
     last_error: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
+        delay = 0.8 * attempt
         try:
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 return _read_json(response)
@@ -256,6 +272,7 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
             last_error = exc
             if exc.code not in TRANSIENT_HTTP_STATUS_CODES or attempt == MAX_RETRIES:
                 break
+            delay = max(delay, _retry_after_seconds(exc))
         # urlopen only wraps errors from sending the request in URLError; a
         # dropped connection while awaiting or reading the response surfaces
         # raw (e.g. RemoteDisconnected, IncompleteRead), so retry those too.
@@ -275,8 +292,21 @@ def _open_json_with_retry(request: urllib.request.Request) -> Any:
             last_error = exc
             if attempt == MAX_RETRIES:
                 break
-        time.sleep(0.8 * attempt)
+        time.sleep(delay)
     raise PromptBaseError(f"PromptBase query failed: {last_error}") from last_error
+
+
+def _retry_after_seconds(error: urllib.error.HTTPError) -> float:
+    """The delay a 429/503 response asks for, capped; 0 if it names none.
+
+    Only the delay-seconds form is read: Firestore sends that, and an HTTP date
+    would depend on the local clock agreeing with the server's.
+    """
+    value = (error.headers.get("Retry-After") if error.headers else None) or ""
+    value = value.strip()
+    if not value.isascii() or not value.isdigit():
+        return 0.0
+    return float(min(int(value), MAX_RETRY_AFTER_SECONDS))
 
 
 def _read_json(response: Any) -> Any:

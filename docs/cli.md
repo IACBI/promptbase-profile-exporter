@@ -179,7 +179,7 @@ per prompt:
 Creates clean, modern logo concepts.
 ```
 
-Descriptions are written exactly as their author wrote them, so a Markdown catalog
+Titles and descriptions are written exactly as their author wrote them, so a Markdown catalog
 can contain raw HTML, links, and remote images (`![](https://...)`). GitHub sanitises
 these when it renders the file. A renderer that allows raw HTML or loads remote
 content, such as a note or wiki app, a static site generator, or an editor preview,

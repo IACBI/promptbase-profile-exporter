@@ -290,7 +290,7 @@ def _required_float(data: Mapping[str, Any], column: str) -> float:
         raise ValueError(f"{column} is not a number: {value!r}")
     try:
         number = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:  # OverflowError: a huge integer
         raise ValueError(f"{column} is not a number: {value!r}") from exc
     if not math.isfinite(number):
         raise ValueError(f"{column} is not a finite number: {value!r}")

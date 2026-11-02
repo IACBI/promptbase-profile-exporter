@@ -304,6 +304,10 @@ def _snapshot(row: Sequence[Any]) -> Snapshot:
         taken_at = datetime.fromisoformat(row[1])
     except (TypeError, ValueError):
         raise HistoryError(f"snapshot {row[0]} has an unreadable time: {row[1]!r}") from None
+    if taken_at.tzinfo is None:
+        # Every time this tool stores carries its offset; one without it was edited by
+        # hand, and comparing it with the aware times beside it would raise TypeError.
+        raise HistoryError(f"snapshot {row[0]} has a time without a UTC offset: {row[1]!r}")
     return Snapshot(int(row[0]), taken_at, row[2], row[3], int(row[4]))
 
 
@@ -730,6 +734,8 @@ def describe_duration(days: float) -> str:
 
 def _number(value: float) -> str:
     """``2000100``, ``4.95``, ``0.0000004``: in full, never ``2.0001e+06``."""
+    if not math.isfinite(value):
+        return str(value)  # only a hand-edited file holds one: "inf", not a crash
     if value == int(value):
         return str(int(value))
     # repr is the shortest text that reads back as ``value``; Decimal only drops

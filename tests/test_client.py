@@ -15,6 +15,7 @@ from promptbase_exporter.client import (
     DETAIL_COLLECTIONS,
     EXTRA_FIELD_SOURCES,
     MAX_RETRIES,
+    MAX_RETRY_AFTER_SECONDS,
     PROMPT_DETAIL_FIELDS,
     PROMPT_DETAIL_SCHEMA_FIELDS,
     PROMPT_ITEM_FIELDS,
@@ -630,6 +631,55 @@ class RetryTests(unittest.TestCase):
                    return_value=[{"document": {"fields": {"title": value}}}]), \
                 self.assertRaisesRegex(PromptBaseError, "nested too deeply"):
             _run_query("Items", [field_filter("uid", "EQUAL", {"stringValue": "u"})])
+
+    def test_a_malformed_document_is_an_error_not_a_crash(self):
+        malformed = {
+            "non-numeric integerValue": {"fields": {"created": {"integerValue": "abc"}}},
+            "document is not an object": "oops",
+            "fields is not an object": {"fields": ["x"]},
+            "null mapValue": {"fields": {"a": {"mapValue": None}}},
+            "null arrayValue": {"fields": {"a": {"arrayValue": None}}},
+            "value is not an object": {"fields": {"a": "has stringValue inside"}},
+        }
+        for name, document in malformed.items():
+            with self.subTest(name), patch(
+                "promptbase_exporter.client._open_json_with_retry",
+                return_value=[{"document": document}],
+            ), self.assertRaisesRegex(PromptBaseError, "malformed document"):
+                _run_query("Items", [field_filter("uid", "EQUAL", {"stringValue": "u"})])
+
+    def _retry_after_error(self, code: int, retry_after: str) -> urllib.error.HTTPError:
+        headers = Message()
+        headers["Retry-After"] = retry_after
+        return urllib.error.HTTPError(url="http://x", code=code, msg="slow down",
+                                      hdrs=headers, fp=None)
+
+    def _sleep_before_retry(self, error: urllib.error.HTTPError) -> float:
+        with patch("promptbase_exporter.client.urllib.request.urlopen") as urlopen, \
+                patch("promptbase_exporter.client.time.sleep") as sleep:
+            urlopen.side_effect = [error, self._response(b"[]")]
+            self.assertEqual(_open_json_with_retry(MagicMock()), [])
+        sleep.assert_called_once()
+        return sleep.call_args.args[0]
+
+    def test_retry_after_is_honoured(self):
+        self.assertEqual(self._sleep_before_retry(self._retry_after_error(429, "5")), 5)
+
+    def test_retry_after_is_capped(self):
+        self.assertEqual(
+            self._sleep_before_retry(self._retry_after_error(503, "86400")),
+            MAX_RETRY_AFTER_SECONDS,
+        )
+
+    def test_retry_after_never_shortens_the_backoff(self):
+        self.assertEqual(self._sleep_before_retry(self._retry_after_error(429, "0")), 0.8)
+
+    def test_an_unreadable_retry_after_falls_back_to_the_backoff(self):
+        for value in ("Wed, 21 Oct 2026 07:28:00 GMT", "-3", "1.5", "²", ""):
+            with self.subTest(value):
+                self.assertEqual(
+                    self._sleep_before_retry(self._retry_after_error(429, value)), 0.8
+                )
 
 
 class ExtraFieldsFetchTests(unittest.TestCase):

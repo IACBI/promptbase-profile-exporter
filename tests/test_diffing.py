@@ -1,3 +1,4 @@
+import csv
 import json
 import random
 import re
@@ -22,6 +23,7 @@ from promptbase_exporter.diffing import (
 from promptbase_exporter.formatting import (
     FORMAT_EXTENSIONS,
     count_records_in_text,
+    count_rendered_records,
     format_records,
     format_records_as_text,
     parse_txt_catalog,
@@ -642,6 +644,63 @@ class MalformedCatalogTests(unittest.TestCase):
                 with self.subTest(csv_safe=csv_safe), \
                         self.assertRaisesRegex(ValueError, "line 3 has more fields"):
                     load_catalog(path, csv_safe=csv_safe)
+
+    def test_a_csv_cell_over_the_csv_module_default_limit_loads(self):
+        # 131,072 characters was the csv module's limit: a longer description crashed
+        # both the pre-write check of a CSV export and every reader of it.
+        record = PromptRecord("A", "x" * 200_000, "a", "gpt", "text", 1, 0.0)
+        text = format_records([record], "csv")
+        self.assertEqual(count_rendered_records(text, "csv"), 1)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.csv"
+            path.write_text(text, encoding="utf-8", newline="")
+            self.assertEqual(len(load_catalog(path)[0]["description"]), 200_000)
+
+    def test_a_csv_the_csv_module_rejects_is_a_value_error(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.csv"
+            path.write_text("title,slug\nA,a\n", encoding="utf-8")
+            with patch("promptbase_exporter.formatting.csv.DictReader.__next__",
+                       side_effect=csv.Error("boom")), \
+                    self.assertRaisesRegex(ValueError, "CSV line .*boom"):
+                load_catalog(path)
+
+    def test_a_deeply_nested_json_catalog_is_a_value_error(self):
+        with TemporaryDirectory() as directory:
+            for name, text in (("deep.json", "[" * 200_000), ("deep.ndjson", "[" * 200_000)):
+                path = Path(directory) / name
+                path.write_text(text, encoding="utf-8")
+                # Whether the C parser overflows depends on the platform's stack, so
+                # its RecursionError is also raised directly.
+                with self.subTest(name), patch(
+                    "promptbase_exporter.diffing._load_catalog", side_effect=RecursionError
+                ), self.assertRaisesRegex(ValueError, "nested too deeply"):
+                    load_catalog(path)
+
+    def test_a_line_break_in_domain_or_type_stays_in_its_markdown_field(self):
+        # The break used to end the field, and the rest of the record was read as part
+        # of the description.
+        record = PromptRecord("A", "Body", "a", "g\npt", "te" + chr(0x2028) + "xt", 1, 2.0)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.md"
+            path.write_text(format_records([record], "markdown"), encoding="utf-8")
+            loaded = load_catalog(path, strict=True)
+        self.assertEqual(
+            (loaded[0]["description"], loaded[0]["type"], loaded[0]["domain"]),
+            ("Body", "g pt", "te xt"),
+        )
+        self.assertFalse(compare_catalogs(loaded, [record]).has_changes)
+
+    def test_a_huge_integer_price_compares_without_a_crash(self):
+        huge = 10 ** 400
+        previous = [{"title": "A", "slug": "a", "description": "d", "price": huge}]
+        current = [{"title": "A", "slug": "a", "description": "d", "price": 1}]
+        diff = compare_catalog_records(previous, current)
+        self.assertEqual(diff.changed[0].fields, ("price",))
+        self.assertIn("price", format_diff_report(diff))
+        # No float holds it, so the JSON report has no number to give.
+        price = diff_to_dict(diff)["changed"][0]["fields"]["price"]
+        self.assertEqual(price, {"previous": None, "current": 1.0})
 
     def test_a_repeated_slug_compares_equal_to_itself(self):
         # Found by fuzzing: the second row with a slug used to be left unmatched.
