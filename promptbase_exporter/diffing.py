@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
 import json
 import math
 import re
@@ -16,6 +14,7 @@ from .formatting import (
     MARKDOWN_HEADINGS,
     UTF8_BOM,
     _atomic_write_text,
+    csv_rows,
     csv_unescape_formula,
     escape_markdown,
     load_html_catalog_data,
@@ -73,6 +72,13 @@ def load_catalog(
     that must not lose data notices. The same holds for text in a TXT or Markdown
     catalog that no record holds, which a reader would otherwise drop.
     """
+    try:
+        return _load_catalog(path, csv_safe, strict)
+    except RecursionError:
+        raise ValueError("catalog is nested too deeply to read") from None
+
+
+def _load_catalog(path: Path, csv_safe: bool, strict: bool) -> list[dict[str, Any]]:
     suffix = path.suffix.lower()
     # A CSV keeps a description's own "\r\n" inside a quoted cell; reading it with
     # universal newlines would turn that into "\n" and report a change that never happened.
@@ -90,15 +96,8 @@ def load_catalog(
             if isinstance(item, dict)
         ]
     if suffix == ".csv":
-        # Strip a BOM from any CSV (Excel adds one), or the first column name
-        # would read as "\ufefftitle".
-        rows = csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM)))
         records = []
-        for row in rows:
-            if None in row:
-                # DictReader files the surplus of a row longer than the header
-                # under None; it belongs to no column, so the row is malformed.
-                raise ValueError(f"CSV line {rows.line_num} has more fields than the header")
+        for row in csv_rows(text):
             records.append(_normalize_record({
                 key: csv_unescape_formula(value or "") if csv_safe else value or ""
                 for key, value in row.items()
@@ -551,7 +550,7 @@ def _comparable_number(value: Any) -> str:
     # float, so compare numerically rather than by spelling.
     try:
         return f"{float(value):g}"
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: a huge JSON integer
         return _comparable_value(value)
 
 
@@ -654,7 +653,7 @@ def _json_value(field: str, value: Any) -> Any:
     if field in NUMERIC_COMPARE_FIELDS:
         try:
             number = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         # json.dumps would emit a bare NaN/Infinity, which is not valid JSON.
         return number if math.isfinite(number) else None

@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from .console import printable
@@ -214,8 +214,8 @@ def format_records_as_markdown(
                 f"- URL: {record.url}",
                 # Empty stays empty: a placeholder word would be ambiguous with
                 # a real value of the same spelling when the catalog is diffed.
-                f"- Domain: {record.domain}".rstrip(),
-                f"- Type: {record.prompt_type}".rstrip(),
+                f"- Domain: {_single_line(record.domain)}".rstrip(),
+                f"- Type: {_single_line(record.prompt_type)}".rstrip(),
                 f"- Price: {record.price:g}",
                 f"- Created: {record.created_iso or 'unknown'}",
                 f"- Views: {record.views}",
@@ -275,9 +275,33 @@ def _cell_text(value: object) -> str:
     return str(value)
 
 
+# A description can be longer than the csv module's default 128 KiB field limit, and
+# every CSV the exporter writes must read back. The limit is process-wide; 2**31 - 1
+# because it is a C long, which is 32 bits on Windows.
+csv.field_size_limit(max(csv.field_size_limit(), 2**31 - 1))
+
+
+def csv_rows(text: str) -> Iterator[dict[str, str]]:
+    """The rows of a CSV catalog, without a leading BOM (Excel adds one).
+
+    A malformed file raises ValueError, as every other catalog reader does.
+    """
+    # Without the BOM stripped, the first column name would read as "\ufefftitle".
+    reader = csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM)))
+    try:
+        for row in reader:
+            if None in row:
+                # DictReader files the surplus of a row longer than the header
+                # under None; it belongs to no column, so the row is malformed.
+                raise ValueError(f"CSV line {reader.line_num} has more fields than the header")
+            yield row
+    except csv.Error as exc:
+        raise ValueError(f"CSV line {reader.line_num}: {exc}") from None
+
+
 def _single_line(value: str) -> str:
-    # TXT and Markdown keep the title on one line; an embedded line break would
-    # split the record header and break both validation and diff parsing.
+    # TXT and Markdown keep the title and the metadata fields on one line; an embedded
+    # line break would split the record and break both validation and diff parsing.
     return " ".join(value.split())
 
 
@@ -913,7 +937,7 @@ def count_records_in_text(text: str, export_format: str) -> int:
     if export_format == "json":
         return len(json.loads(text))
     if export_format == "csv":
-        return sum(1 for _ in csv.DictReader(io.StringIO(text.removeprefix(UTF8_BOM))))
+        return sum(1 for _ in csv_rows(text))
     if export_format == "html":
         # Descriptions are HTML-escaped, so this marker only ever comes from
         # the writer itself. The rendered list and the embedded data must agree.

@@ -807,6 +807,24 @@ class AuditFindingTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("unreadable time: 'garbage'", stderr)
 
+    def test_a_snapshot_time_without_an_offset_is_an_error_not_a_traceback(self):
+        # It was read, then compared with an aware time: TypeError.
+        with TemporaryDirectory() as directory:
+            db = Path(directory) / "h.sqlite"
+            store(db, "acb", [(0, [rec("a")]), (1, [rec("a", sales=2)])])
+            with closing(sqlite3.connect(db)) as raw:
+                raw.execute("UPDATE snapshots SET taken_at = '2026-01-05T00:00:00' "
+                            "WHERE id = (SELECT MAX(id) FROM snapshots)")
+                raw.commit()
+            code, _, stderr = run(["report", "--db", str(db), "--profile", "acb"])
+        self.assertEqual(code, 1)
+        self.assertIn("time without a UTC offset", stderr)
+
+    def test_a_non_finite_number_is_written_not_a_crash(self):
+        self.assertEqual(history._number(float("inf")), "inf")
+        self.assertEqual(history._number(float("nan")), "nan")
+        self.assertEqual(history._delta(1.0, float("inf")), "+inf")
+
 
 class CommandTests(unittest.TestCase):
     def fetch(self, *records, profile="acb"):

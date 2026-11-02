@@ -171,7 +171,17 @@ def _config(data: Data) -> None:
         config.load_config(path)
 
 
-TARGETS = (_catalog, _record, _text, _inputs, _diff, _config)
+def _response(data: Data) -> None:
+    try:
+        rows = json.loads(data.text())
+    except (ValueError, RecursionError):
+        return
+    with contextlib.suppress(client.PromptBaseError):
+        for doc in client.documents_from_response(rows):
+            assert isinstance(doc, dict) and "_doc_name" in doc, repr(doc)
+
+
+TARGETS = (_catalog, _record, _text, _inputs, _diff, _config, _response)
 
 
 def test_one_input(raw: bytes) -> None:
@@ -212,6 +222,15 @@ def seeds() -> list[bytes]:
         bytes([0, 2, 0]) + b"title,slug,description\nA,dup,one\nA,dup,two\n",  # repeated slug
         bytes([5, 0]) + b'{"profiles": ["@acb"], "format": "json"}',
         bytes([5, 1]) + b'profiles = ["@acb"]\nformat = "csv"\n',
+        bytes([6]) + json.dumps([{"document": {
+            "name": "projects/promptbase/databases/(default)/documents/Items/x",
+            "fields": {
+                "slug": {"stringValue": "logo-maker"},
+                "created": {"integerValue": "1700000000000"},
+                "tags": {"arrayValue": {"values": [{"stringValue": "logo"}]}},
+                "meta": {"mapValue": {"fields": {"rating": {"doubleValue": 4.5}}}},
+            },
+        }}, {"readTime": "2026-01-01T00:00:00Z"}]).encode(),
     ]
     return result
 

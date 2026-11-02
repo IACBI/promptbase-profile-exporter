@@ -106,8 +106,9 @@ using it:
   `Referrer-Policy: no-referrer`, error responses from the HTTP server itself
   (an unsupported method, a malformed request) included. Paths on a page are
   shown relative to the working directory, never where the server lives. Oversized or malformed form submissions are
-  rejected, and a connection that stalls while sending its request is closed
-  after 60 seconds.
+  rejected, and a connection that sends nothing for 60 seconds while sending its
+  request is closed. The limit is per read, not per request: a client that keeps
+  trickling bytes holds its connection, which the cap below bounds.
 - **Bounded connections.** The server serves at most 32 connections at once. A
   connection that arrives while all 32 are busy is closed without a response, so
   retry shortly. A slow client therefore cannot start an unlimited number of

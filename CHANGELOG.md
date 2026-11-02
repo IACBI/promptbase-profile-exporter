@@ -6,7 +6,27 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Docs: the Markdown formats keep descriptions verbatim, raw HTML included; `docs/cli.md` and `SECURITY.md` now say so and what to do in renderers that allow it.
+- Docs: the Markdown formats keep titles and descriptions verbatim, raw HTML included; `docs/cli.md` and `SECURITY.md` now say so and what to do in renderers that allow it.
+- A 429 or 503 response's `Retry-After` (in seconds, up to 30) now sets the wait before the
+  retry when it is longer than the built-in backoff.
+- Docs: `docs/web-ui.md` says the web UI's 60-second request timeout applies to each read,
+  not to the whole request.
+
+### Fixed
+
+- A PromptBase response whose document has the wrong shape (for example a non-numeric
+  `integerValue`, or a field map that is not an object) is reported as an error instead of
+  crashing the CLI and `pb-history` with a traceback, or the web UI with an unexpected error.
+- A CSV export with a description over 131,072 characters is checked and read back instead
+  of failing with a `csv` traceback; a CSV the `csv` module cannot parse is now a clean error
+  in `--compare`, `--update-file`, `pb-diff`, and `pb-convert`.
+- A catalog with a number too large for a float (a JSON price of 400 digits), or JSON nested
+  too deeply to parse, is reported as an error by `pb-diff`, `pb-convert`, and `--compare`
+  instead of crashing.
+- A line break in a listing's domain or type no longer splits its Markdown record: the
+  value is written on one line, as the title already was, so the catalog reads back intact.
+- `pb-history` reports a hand-edited snapshot time without a UTC offset as an error, and
+  writes a non-finite stored number as `inf`/`nan`, instead of crashing.
 
 ## 0.15.1 - 2026-10-15
 
