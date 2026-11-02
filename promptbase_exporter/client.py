@@ -306,7 +306,11 @@ def _retry_after_seconds(error: urllib.error.HTTPError) -> float:
     value = value.strip()
     if not value.isascii() or not value.isdigit():
         return 0.0
-    return float(min(int(value), MAX_RETRY_AFTER_SECONDS))
+    # Any value this long is over the cap; int() of 4,300+ digits raises ValueError.
+    digits = value.lstrip("0") or "0"
+    if len(digits) > len(str(MAX_RETRY_AFTER_SECONDS)):
+        return float(MAX_RETRY_AFTER_SECONDS)
+    return float(min(int(digits), MAX_RETRY_AFTER_SECONDS))
 
 
 def _read_json(response: Any) -> Any:

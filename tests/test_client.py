@@ -671,6 +671,15 @@ class RetryTests(unittest.TestCase):
             MAX_RETRY_AFTER_SECONDS,
         )
 
+    def test_a_retry_after_too_long_for_int_is_capped_not_a_crash(self):
+        # int() refuses more than 4,300 digits by default, before any cap applies.
+        for value in ("9" * 5000, "0" * 5000 + "5"):
+            with self.subTest(len(value)):
+                expected = 5 if value.endswith("05") else MAX_RETRY_AFTER_SECONDS
+                self.assertEqual(
+                    self._sleep_before_retry(self._retry_after_error(429, value)), expected
+                )
+
     def test_retry_after_never_shortens_the_backoff(self):
         self.assertEqual(self._sleep_before_retry(self._retry_after_error(429, "0")), 0.8)
 
